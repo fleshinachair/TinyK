@@ -336,6 +336,12 @@ void load_preset(int index) {
         g_synth.params[PARAM_FILTER_TYPE] = 0.0f; /* Lowpass */
     }
 
+    /* Copy loaded preset parameters into both timbre states */
+    memcpy(g_synth.timbre_params[0], g_synth.params, sizeof(g_synth.params));
+    memcpy(g_synth.timbre_params[1], g_synth.params, sizeof(g_synth.params));
+    g_synth.timbre_edit = 0;
+    g_synth.timbre_balance = 0.5f;
+
     /* Smooth transition without audio pops: reset filter states of idle voices,
      * sanitize active voices without hard-zeroing in the middle of active oscillation */
     for (int v = 0; v < NUM_VOICES; v++) {
@@ -359,10 +365,13 @@ void synth_load_preset(synth_engine_t *synth, int preset_idx) {
     load_preset(preset_idx);
     if (synth && synth != &g_synth) {
         memcpy(synth->params, g_synth.params, sizeof(synth->params));
+        memcpy(synth->timbre_params, g_synth.timbre_params, sizeof(synth->timbre_params));
         synth->current_preset = g_synth.current_preset;
         synth->bank_side = g_synth.bank_side;
         synth->genre_category = g_synth.genre_category;
         synth->program_num = g_synth.program_num;
+        synth->timbre_edit = g_synth.timbre_edit;
+        synth->timbre_balance = g_synth.timbre_balance;
     }
 }
 
@@ -388,6 +397,8 @@ void synth_init(synth_engine_t *synth) {
     synth->genre_category = 0;
     synth->program_num = 1;
     synth->voice_mode = 0;
+    synth->timbre_edit = 0;
+    synth->timbre_balance = 0.5f;
 
     for (int v = 0; v < NUM_VOICES; v++) {
         synth->voices[v].timbre_index = 0;
@@ -406,12 +417,18 @@ void synth_init(synth_engine_t *synth) {
     synth->params[PARAM_DECAY2] = 0.5f;
     synth->params[PARAM_FILTER_TYPE] = 0.0f;
 
+    memcpy(synth->timbre_params[0], synth->params, sizeof(synth->params));
+    memcpy(synth->timbre_params[1], synth->params, sizeof(synth->params));
+
     if (synth != &g_synth) {
         memcpy(g_synth.params, synth->params, sizeof(g_synth.params));
+        memcpy(g_synth.timbre_params, synth->timbre_params, sizeof(g_synth.timbre_params));
         g_synth.bank_side = 0;
         g_synth.genre_category = 0;
         g_synth.program_num = 1;
         g_synth.voice_mode = 0;
+        g_synth.timbre_edit = 0;
+        g_synth.timbre_balance = 0.5f;
     }
 
     /* Initialize LFOs */
@@ -420,9 +437,27 @@ void synth_init(synth_engine_t *synth) {
 }
 
 void synth_set_param(synth_engine_t *synth, const char *key, float val) {
+    if (!synth) synth = &g_synth;
+
     if (strcmp(key, "voice_mode") == 0) {
         synth->voice_mode = (val >= 0.5f) ? 1 : 0;
         synth_all_notes_off(synth);
+        return;
+    }
+
+    if (strcmp(key, "timbre_edit") == 0) {
+        int t = (val >= 0.5f) ? 1 : 0;
+        synth->timbre_edit = t;
+        for (int i = 0; i < PARAM_LFO1_RATE; i++) {
+            synth->params[i] = synth->timbre_params[t][i];
+        }
+        return;
+    }
+
+    if (strcmp(key, "timbre_balance") == 0) {
+        if (val < 0.0f) val = 0.0f;
+        if (val > 1.0f) val = 1.0f;
+        synth->timbre_balance = val;
         return;
     }
 
@@ -474,14 +509,35 @@ void synth_set_param(synth_engine_t *synth, const char *key, float val) {
     for (int i = 0; i < NUM_PARAMS; i++) {
         if (strcmp(PARAM_METAS[i].id, key) == 0) {
             synth->params[i] = val;
+            if (i < PARAM_LFO1_RATE) {
+                if (synth->voice_mode == 1) {
+                    /* Layer mode: edit the selected timbre */
+                    synth->timbre_params[synth->timbre_edit][i] = val;
+                } else {
+                    /* Single mode: keep both timbres in sync */
+                    synth->timbre_params[0][i] = val;
+                    synth->timbre_params[1][i] = val;
+                }
+            } else {
+                /* Global FX/Master params: keep both timbres in sync */
+                synth->timbre_params[0][i] = val;
+                synth->timbre_params[1][i] = val;
+            }
             return;
         }
     }
 }
 
 float synth_get_param(const synth_engine_t *synth, const char *key) {
+    if (!synth) synth = &g_synth;
     if (strcmp(key, "voice_mode") == 0) {
         return (float)synth->voice_mode;
+    }
+    if (strcmp(key, "timbre_edit") == 0) {
+        return (float)synth->timbre_edit;
+    }
+    if (strcmp(key, "timbre_balance") == 0) {
+        return synth->timbre_balance;
     }
     if (strcmp(key, "bank_side") == 0) {
         return (float)synth->bank_side;
@@ -497,6 +553,9 @@ float synth_get_param(const synth_engine_t *synth, const char *key) {
     }
     for (int i = 0; i < NUM_PARAMS; i++) {
         if (strcmp(PARAM_METAS[i].id, key) == 0) {
+            if (synth->voice_mode == 1 && i < PARAM_LFO1_RATE) {
+                return synth->timbre_params[synth->timbre_edit][i];
+            }
             return synth->params[i];
         }
     }
@@ -519,24 +578,30 @@ void synth_note_on(synth_engine_t *synth, uint8_t note, uint8_t velocity) {
     float fs = (float)MOVE_SAMPLE_RATE;
     synth->voice_counter++;
 
-    float portamento = synth->params[PARAM_PORTAMENTO];
     float target_pitch = (float)note + (float)(synth->octave_transpose * 12);
     float vel01 = (float)velocity / 127.0f;
     if (vel01 <= 0.01f) vel01 = 0.8f;
 
-    /* Trigger both Filter EG and Amp EG using exponential analog curves */
-    float atk1_p = synth->params[PARAM_ATTACK1];
-    float atk2_p = synth->params[PARAM_ATTACK2];
-    if (atk1_p < 0.0f) atk1_p = 0.01f;
-    if (atk2_p < 0.0f) atk2_p = 0.01f;
+    /* Compute exponential attack coefficients per timbre */
+    float t1_atk1_p = synth->timbre_params[0][PARAM_ATTACK1];
+    float t1_atk2_p = synth->timbre_params[0][PARAM_ATTACK2];
+    if (t1_atk1_p < 0.001f) t1_atk1_p = 0.01f;
+    if (t1_atk2_p < 0.001f) t1_atk2_p = 0.01f;
+    float t1_atk1_coef = attack_time_to_coeff(t1_atk1_p, 0.001f, 8.0f, fs);
+    float t1_atk2_coef = attack_time_to_coeff(t1_atk2_p, 0.001f, 8.0f, fs);
 
-    float atk1_coef = attack_time_to_coeff(atk1_p, 0.001f, 8.0f, fs);
-    float atk2_coef = attack_time_to_coeff(atk2_p, 0.001f, 8.0f, fs);
+    float t2_atk1_p = synth->timbre_params[1][PARAM_ATTACK1];
+    float t2_atk2_p = synth->timbre_params[1][PARAM_ATTACK2];
+    if (t2_atk1_p < 0.001f) t2_atk1_p = 0.01f;
+    if (t2_atk2_p < 0.001f) t2_atk2_p = 0.01f;
+    float t2_atk1_coef = attack_time_to_coeff(t2_atk1_p, 0.001f, 8.0f, fs);
+    float t2_atk2_coef = attack_time_to_coeff(t2_atk2_p, 0.001f, 8.0f, fs);
 
     if (synth->voice_mode == 0) {
         /* =========================================================
          * SINGLE MODE (4-Voice Polyphonic Engine)
          * ========================================================= */
+        float portamento = synth->timbre_params[0][PARAM_PORTAMENTO];
         int voice_idx = -1;
 
         /* 1. Check if same note is already sounding on a voice: retrigger */
@@ -617,8 +682,8 @@ void synth_note_on(synth_engine_t *synth, uint8_t note, uint8_t velocity) {
             v->filter_env.value = 0.0f;
         }
 
-        adsr_gate_on(&v->filter_env, atk1_coef);
-        adsr_gate_on(&v->amp_env, atk2_coef);
+        adsr_gate_on(&v->filter_env, t1_atk1_coef);
+        adsr_gate_on(&v->amp_env, t1_atk2_coef);
 
     } else {
         /* =========================================================
@@ -626,6 +691,8 @@ void synth_note_on(synth_engine_t *synth, uint8_t note, uint8_t velocity) {
          * Slot 0: Voices 0 (Timbre 1) & 1 (Timbre 2)
          * Slot 1: Voices 2 (Timbre 1) & 3 (Timbre 2)
          * ========================================================= */
+        float portamento1 = synth->timbre_params[0][PARAM_PORTAMENTO];
+        float portamento2 = synth->timbre_params[1][PARAM_PORTAMENTO];
         int slot = -1;
 
         /* 1. Retrigger if note is already sounding in Slot 0 or 1 */
@@ -691,7 +758,7 @@ void synth_note_on(synth_engine_t *synth, uint8_t note, uint8_t velocity) {
         v1->timbre_index = 0;
         v1->layer_partner = i2;
 
-        if (!was_active1 || portamento < 0.005f) {
+        if (!was_active1 || portamento1 < 0.005f) {
             v1->current_pitch = target_pitch;
         }
         v1->target_pitch = target_pitch;
@@ -718,7 +785,7 @@ void synth_note_on(synth_engine_t *synth, uint8_t note, uint8_t velocity) {
         v2->timbre_index = 1;
         v2->layer_partner = i1;
 
-        if (!was_active2 || portamento < 0.005f) {
+        if (!was_active2 || portamento2 < 0.005f) {
             v2->current_pitch = target_pitch;
         }
         v2->target_pitch = target_pitch;
@@ -737,11 +804,11 @@ void synth_note_on(synth_engine_t *synth, uint8_t note, uint8_t velocity) {
             v2->filter_env.value = 0.0f;
         }
 
-        /* Trigger envelopes on both linked timbres simultaneously */
-        adsr_gate_on(&v1->filter_env, atk1_coef);
-        adsr_gate_on(&v1->amp_env, atk2_coef);
-        adsr_gate_on(&v2->filter_env, atk1_coef);
-        adsr_gate_on(&v2->amp_env, atk2_coef);
+        /* Trigger envelopes on both linked timbres with their respective timbre settings */
+        adsr_gate_on(&v1->filter_env, t1_atk1_coef);
+        adsr_gate_on(&v1->amp_env, t1_atk2_coef);
+        adsr_gate_on(&v2->filter_env, t2_atk1_coef);
+        adsr_gate_on(&v2->amp_env, t2_atk2_coef);
     }
 }
 
@@ -785,31 +852,6 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
     const float fs = (float)MOVE_SAMPLE_RATE;
 
     /* Extract global parameters */
-    float wave1_p       = synth->params[PARAM_WAVE1];
-    float pw_p          = synth->params[PARAM_PULSE_WIDTH];
-    float wave2_p       = synth->params[PARAM_WAVE2];
-    float detune_p      = synth->params[PARAM_DETUNE];
-    float sync_ring_p   = synth->params[PARAM_SYNC_RING];
-    float osc_mix_p     = synth->params[PARAM_OSC_MIX];
-    float sub_level_p   = synth->params[PARAM_SUB_LEVEL];
-    float portamento_p  = synth->params[PARAM_PORTAMENTO];
-
-    float cutoff_p      = synth->params[PARAM_CUTOFF];
-    float resonance_p   = synth->params[PARAM_RESONANCE];
-    float filter_type_p = synth->params[PARAM_FILTER_TYPE];
-    float keytrack_p    = synth->params[PARAM_KEYTRACK];
-    float env_int_p     = synth->params[PARAM_ENV_INT];
-    float drive_p       = synth->params[PARAM_DRIVE];
-    float mod_int_p     = synth->params[PARAM_MOD_INT];
-    float vel_sens_p    = synth->params[PARAM_VEL_SENS];
-
-    float decay1_p      = synth->params[PARAM_DECAY1];
-    float sustain1_p    = synth->params[PARAM_SUSTAIN1];
-    float release1_p    = synth->params[PARAM_RELEASE1];
-    float decay2_p      = synth->params[PARAM_DECAY2];
-    float sustain2_p    = synth->params[PARAM_SUSTAIN2];
-    float release2_p    = synth->params[PARAM_RELEASE2];
-
     float lfo1_rate_p   = synth->params[PARAM_LFO1_RATE];
     float lfo2_rate_p   = synth->params[PARAM_LFO2_RATE];
     float chorus_mix_p  = synth->params[PARAM_CHORUS_MIX];
@@ -822,40 +864,112 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
     /* Sanity fallback checks to guarantee audible defaults */
     if (master_vol_p <= 0.01f) master_vol_p = 0.8f;
     if (pan_p <= 0.001f && pan_p >= -0.001f && synth->params[PARAM_PAN] <= 0.001f) pan_p = 0.5f;
-    if (cutoff_p < 0.15f && synth->params[PARAM_CUTOFF] < 0.15f) cutoff_p = 0.75f;
-    if (sustain2_p < 0.05f && synth->params[PARAM_SUSTAIN2] < 0.05f) sustain2_p = 0.8f;
-    if (decay2_p < 0.05f && synth->params[PARAM_DECAY2] < 0.05f) decay2_p = 0.5f;
 
-    /* Rates & coefficients */
-    float dcy1_coef = time_to_coeff(decay1_p, 0.001f, 10.0f, fs);
-    float rel1_coef = time_to_coeff(release1_p, 0.001f, 10.0f, fs);
-    float dcy2_coef = time_to_coeff(decay2_p, 0.001f, 10.0f, fs);
-    float rel2_coef = time_to_coeff(release2_p, 0.001f, 10.0f, fs);
+    /* Equal-power crossfade between Timbre 1 and Timbre 2 in Layer mode */
+    float bal = synth->timbre_balance;
+    if (bal < 0.0f) bal = 0.0f;
+    if (bal > 1.0f) bal = 1.0f;
+    float t1_crossfade = cosf(bal * (float)(M_PI * 0.5));
+    float t2_crossfade = sinf(bal * (float)(M_PI * 0.5));
 
-    /* Portamento slew coefficient */
-    float glide_coeff = 1.0f;
-    if (portamento_p > 0.005f) {
-        float glide_time = 0.005f * powf(400.0f, portamento_p); /* 5ms to 2s */
-        glide_coeff = 1.0f - expf(-1.0f / (glide_time * fs));
+    /* Precompute per-timbre render configurations (Zero heap allocation) */
+    typedef struct {
+        int osc1_wave;
+        float pw;
+        int osc2_wave;
+        float detune_semi;
+        int sync_ring_mode;
+        float osc_mix;
+        float sub_level;
+        float glide_coeff;
+
+        float base_fc;
+        float resonance;
+        filter_type_t filter_type;
+        float keytrack;
+        float env_int;
+        float drive;
+        float mod_int;
+        float vel_sens;
+
+        float dcy1_coef;
+        float sustain1;
+        float rel1_coef;
+        float dcy2_coef;
+        float sustain2;
+        float rel2_coef;
+    } timbre_render_cfg_t;
+
+    timbre_render_cfg_t t_cfg[2];
+
+    for (int t = 0; t < 2; t++) {
+        const float *tp = (synth->voice_mode == 1) ? synth->timbre_params[t] : synth->params;
+
+        float wave1_p       = tp[PARAM_WAVE1];
+        float pw_p          = tp[PARAM_PULSE_WIDTH];
+        float wave2_p       = tp[PARAM_WAVE2];
+        float detune_p      = tp[PARAM_DETUNE];
+        float sync_ring_p   = tp[PARAM_SYNC_RING];
+        float osc_mix_p     = tp[PARAM_OSC_MIX];
+        float sub_level_p   = tp[PARAM_SUB_LEVEL];
+        float portamento_p  = tp[PARAM_PORTAMENTO];
+
+        float cutoff_p      = tp[PARAM_CUTOFF];
+        float resonance_p   = tp[PARAM_RESONANCE];
+        float filter_type_p = tp[PARAM_FILTER_TYPE];
+        float keytrack_p    = tp[PARAM_KEYTRACK];
+        float env_int_p     = tp[PARAM_ENV_INT];
+        float drive_p       = tp[PARAM_DRIVE];
+        float mod_int_p     = tp[PARAM_MOD_INT];
+        float vel_sens_p    = tp[PARAM_VEL_SENS];
+
+        float decay1_p      = tp[PARAM_DECAY1];
+        float sustain1_p    = tp[PARAM_SUSTAIN1];
+        float release1_p    = tp[PARAM_RELEASE1];
+        float decay2_p      = tp[PARAM_DECAY2];
+        float sustain2_p    = tp[PARAM_SUSTAIN2];
+        float release2_p    = tp[PARAM_RELEASE2];
+
+        if (cutoff_p < 0.15f && tp[PARAM_CUTOFF] < 0.15f) cutoff_p = 0.75f;
+        if (sustain2_p < 0.05f && tp[PARAM_SUSTAIN2] < 0.05f) sustain2_p = 0.8f;
+        if (decay2_p < 0.05f && tp[PARAM_DECAY2] < 0.05f) decay2_p = 0.5f;
+
+        t_cfg[t].osc1_wave = (int)(wave1_p * 3.99f);
+        t_cfg[t].pw = pw_p;
+        t_cfg[t].osc2_wave = (int)(wave2_p * 2.99f);
+        t_cfg[t].detune_semi = (detune_p - 0.5f) * 48.0f;
+        t_cfg[t].sync_ring_mode = (int)(sync_ring_p * 3.99f);
+        t_cfg[t].osc_mix = osc_mix_p;
+        t_cfg[t].sub_level = sub_level_p;
+
+        t_cfg[t].glide_coeff = 1.0f;
+        if (portamento_p > 0.005f) {
+            float glide_time = 0.005f * powf(400.0f, portamento_p);
+            t_cfg[t].glide_coeff = 1.0f - expf(-1.0f / (glide_time * fs));
+        }
+
+        t_cfg[t].base_fc = 20.0f * powf(900.0f, cutoff_p);
+        t_cfg[t].resonance = resonance_p;
+        t_cfg[t].filter_type = (filter_type_t)(int)(filter_type_p * 3.99f);
+        t_cfg[t].keytrack = keytrack_p;
+        t_cfg[t].env_int = env_int_p;
+        t_cfg[t].drive = drive_p;
+        t_cfg[t].mod_int = mod_int_p;
+        t_cfg[t].vel_sens = vel_sens_p;
+
+        t_cfg[t].dcy1_coef = time_to_coeff(decay1_p, 0.001f, 10.0f, fs);
+        t_cfg[t].sustain1 = sustain1_p;
+        t_cfg[t].rel1_coef = time_to_coeff(release1_p, 0.001f, 10.0f, fs);
+        t_cfg[t].dcy2_coef = time_to_coeff(decay2_p, 0.001f, 10.0f, fs);
+        t_cfg[t].sustain2 = sustain2_p;
+        t_cfg[t].rel2_coef = time_to_coeff(release2_p, 0.001f, 10.0f, fs);
     }
-
-    /* Waveform selections */
-    int osc1_wave = (int)(wave1_p * 3.99f);
-    int osc2_wave = (int)(wave2_p * 2.99f);
-    int sync_ring_mode = (int)(sync_ring_p * 3.99f);
-    filter_type_t filter_type = (filter_type_t)(int)(filter_type_p * 3.99f);
-
-    /* Detune: -24 to +24 semitones */
-    float detune_semi = (detune_p - 0.5f) * 48.0f;
 
     /* LFO Frequencies: 0.05 Hz to 30 Hz */
     float lfo1_freq = 0.05f * powf(600.0f, lfo1_rate_p);
     float lfo2_freq = 0.05f * powf(600.0f, lfo2_rate_p);
     float lfo1_dt = lfo1_freq / fs;
     float lfo2_dt = lfo2_freq / fs;
-
-    /* Base Cutoff Frequency: 20 Hz to 18000 Hz */
-    float base_fc = 20.0f * powf(900.0f, cutoff_p);
 
     /* Delay buffer config */
     float target_delay_samples = 100.0f + delay_time_p * (float)(DELAY_BUFFER_SIZE - 200);
@@ -895,19 +1009,22 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
             voice_t *v = &synth->voices[v_idx];
             if (!v->active) continue;
 
+            int t_idx = (synth->voice_mode == 1) ? v->timbre_index : 0;
+            const timbre_render_cfg_t *cfg = &t_cfg[t_idx];
+
             /* Portamento Pitch Glide */
-            v->current_pitch += (v->target_pitch - v->current_pitch) * glide_coeff;
+            v->current_pitch += (v->target_pitch - v->current_pitch) * cfg->glide_coeff;
 
             /* LFO1 pitch mod (vibrato) + Pitch Bend + Timbre 2 Detune in Layer Mode */
-            float pitch_mod = lfo1_val * (mod_int_p * 0.5f) + synth->pitch_bend_semi;
-            float timbre_detune = (synth->voice_mode == 1 && v->timbre_index == 1) ? 0.08f : 0.0f;
+            float pitch_mod = lfo1_val * (cfg->mod_int * 0.5f) + synth->pitch_bend_semi;
+            float timbre_detune = (synth->voice_mode == 1 && v->timbre_index == 1) ? 0.05f : 0.0f;
 
             float final_note1 = v->current_pitch + pitch_mod + timbre_detune;
             float freq1 = note_to_freq(final_note1);
             float dt1 = freq1 / fs;
             if (dt1 > 0.45f) dt1 = 0.45f;
 
-            float final_note2 = v->current_pitch + detune_semi + pitch_mod + timbre_detune;
+            float final_note2 = v->current_pitch + cfg->detune_semi + pitch_mod + timbre_detune;
             float freq2 = note_to_freq(final_note2);
             float dt2 = freq2 / fs;
             if (dt2 > 0.45f) dt2 = 0.45f;
@@ -923,7 +1040,7 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
             }
 
             v->osc2_phase += dt2;
-            if ((sync_ring_mode == SYNC_RING_SYNC || sync_ring_mode == SYNC_RING_BOTH) && sync_triggered) {
+            if ((cfg->sync_ring_mode == SYNC_RING_SYNC || cfg->sync_ring_mode == SYNC_RING_BOTH) && sync_triggered) {
                 /* Reset Osc 2 phase with fractional alignment */
                 v->osc2_phase = v->osc1_phase * (dt2 / dt1);
             }
@@ -938,13 +1055,13 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
 
             /* --- Oscillator 1 Signal Generation --- */
             float osc1_out = 0.0f;
-            switch (osc1_wave) {
+            switch (cfg->osc1_wave) {
                 case OSC1_WAVE_SAW:
                     osc1_out = (2.0f * v->osc1_phase - 1.0f) - poly_blep(v->osc1_phase, dt1);
                     break;
                 case OSC1_WAVE_SQUARE: {
                     /* Pulse width modulated slightly by LFO1 */
-                    float pw = pw_p + lfo1_val * 0.15f;
+                    float pw = cfg->pw + lfo1_val * 0.15f;
                     if (pw < 0.05f) pw = 0.05f;
                     if (pw > 0.95f) pw = 0.95f;
                     float raw = (v->osc1_phase < pw) ? 1.0f : -1.0f;
@@ -961,7 +1078,7 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
 
             /* --- Oscillator 2 Signal Generation --- */
             float osc2_out = 0.0f;
-            switch (osc2_wave) {
+            switch (cfg->osc2_wave) {
                 case OSC2_WAVE_SAW:
                     osc2_out = (2.0f * v->osc2_phase - 1.0f) - poly_blep(v->osc2_phase, dt2);
                     break;
@@ -977,7 +1094,7 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
 
             /* Ring Modulation */
             float osc2_final = osc2_out;
-            if (sync_ring_mode == SYNC_RING_RING || sync_ring_mode == SYNC_RING_BOTH) {
+            if (cfg->sync_ring_mode == SYNC_RING_RING || cfg->sync_ring_mode == SYNC_RING_BOTH) {
                 osc2_final = osc1_out * osc2_out * 1.5f;
             }
 
@@ -985,11 +1102,11 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
             float sub_out = (v->sub_phase < 0.5f) ? 1.0f : -1.0f;
 
             /* Mixer */
-            float osc_sum = (1.0f - osc_mix_p) * osc1_out + osc_mix_p * osc2_final + sub_level_p * sub_out;
+            float osc_sum = (1.0f - cfg->osc_mix) * osc1_out + cfg->osc_mix * osc2_final + cfg->sub_level * sub_out;
 
             /* --- Envelopes (Exponential Curves) --- */
-            float f_env = adsr_process(&v->filter_env, dcy1_coef, sustain1_p, rel1_coef);
-            float a_env = adsr_process(&v->amp_env, dcy2_coef, sustain2_p, rel2_coef);
+            float f_env = adsr_process(&v->filter_env, cfg->dcy1_coef, cfg->sustain1, cfg->rel1_coef);
+            float a_env = adsr_process(&v->amp_env, cfg->dcy2_coef, cfg->sustain2, cfg->rel2_coef);
 
             /* Clean voice deactivation when envelope finishes or drops to zero while released */
             if (v->amp_env.stage == ENV_IDLE || (!v->gate && a_env <= 0.0005f)) {
@@ -1008,35 +1125,35 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
 
             /* Sanity: if gate is held down, ensure amp envelope does not die to silence */
             if (v->gate && a_env < 0.001f && v->amp_env.stage != ENV_ATTACK) {
-                a_env = (sustain2_p > 0.05f) ? sustain2_p : 0.8f;
+                a_env = (cfg->sustain2 > 0.05f) ? cfg->sustain2 : 0.8f;
             }
 
             /* --- Filter Processing --- */
             /* Key tracking relative to Middle C (note 60) */
-            float keytrack_mod = (v->note - 60.0f) * (keytrack_p * (1.0f / 12.0f));
+            float keytrack_mod = (v->note - 60.0f) * (cfg->keytrack * (1.0f / 12.0f));
 
             /* Filter envelope intensity with velocity sensitivity */
-            float effective_env_int = (env_int_p * 2.0f - 1.0f) * (1.0f - vel_sens_p + vel_sens_p * v->velocity);
+            float effective_env_int = (cfg->env_int * 2.0f - 1.0f) * (1.0f - cfg->vel_sens + cfg->vel_sens * v->velocity);
             float env_mod = effective_env_int * f_env * 4.0f; /* +/- 4 octaves */
 
             /* LFO 2 modulation */
-            float lfo2_mod = mod_int_p * lfo2_val * 2.0f;
+            float lfo2_mod = cfg->mod_int * lfo2_val * 2.0f;
 
             /* Timbre 2 filter cutoff offset in Layer Mode */
             float timbre_filter_mod = (synth->voice_mode == 1 && v->timbre_index == 1) ? 0.25f : 0.0f;
 
             float octaves = keytrack_mod + env_mod + lfo2_mod + timbre_filter_mod;
-            float fc = base_fc * powf(2.0f, octaves);
+            float fc = cfg->base_fc * powf(2.0f, octaves);
 
             /* SVF Multimode Filter with feedback tanh saturation & bass preservation */
             float filtered = 0.0f;
-            if (filter_type == FILTER_LP_24) {
+            if (cfg->filter_type == FILTER_LP_24) {
                 /* 4-pole: cascade of two 2-pole SVF stages */
-                float stage1 = svf_process_2pole(&v->filter_svf[0], osc_sum, fc, resonance_p * 0.7f, drive_p, FILTER_LP_12, fs);
-                filtered = svf_process_2pole(&v->filter_svf[1], stage1, fc, resonance_p * 0.7f, drive_p, FILTER_LP_12, fs);
+                float stage1 = svf_process_2pole(&v->filter_svf[0], osc_sum, fc, cfg->resonance * 0.7f, cfg->drive, FILTER_LP_12, fs);
+                filtered = svf_process_2pole(&v->filter_svf[1], stage1, fc, cfg->resonance * 0.7f, cfg->drive, FILTER_LP_12, fs);
             } else {
                 /* 2-pole multimode */
-                filtered = svf_process_2pole(&v->filter_svf[0], osc_sum, fc, resonance_p, drive_p, filter_type, fs);
+                filtered = svf_process_2pole(&v->filter_svf[0], osc_sum, fc, cfg->resonance, cfg->drive, cfg->filter_type, fs);
             }
 
             /* Sanity tone: if filter output is silent or NaN, fallback to oscillator signal */
@@ -1056,18 +1173,18 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
                 voice_audio = osc_sum * 0.4f;
             }
 
-            /* Stereo pan spread & gain scaling in Layer Mode */
+            /* Stereo pan spread & gain scaling in Layer Mode with Timbre Balance crossfade */
             float v_gain_l = 1.0f;
             float v_gain_r = 1.0f;
             if (synth->voice_mode == 1) {
                 if (v->timbre_index == 0) {
-                    /* Timbre 1: slight left tilt */
-                    v_gain_l = 1.15f * 0.72f;
-                    v_gain_r = 0.85f * 0.72f;
+                    /* Timbre 1: slight left tilt, scaled by t1_crossfade */
+                    v_gain_l = 1.15f * t1_crossfade;
+                    v_gain_r = 0.85f * t1_crossfade;
                 } else {
-                    /* Timbre 2: slight right tilt */
-                    v_gain_l = 0.85f * 0.72f;
-                    v_gain_r = 1.15f * 0.72f;
+                    /* Timbre 2: slight right tilt, scaled by t2_crossfade */
+                    v_gain_l = 0.85f * t2_crossfade;
+                    v_gain_r = 1.15f * t2_crossfade;
                 }
             }
 
@@ -1427,6 +1544,29 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         return;
     }
 
+    if (strcmp(key, "timbre_edit") == 0) {
+        int t = 0;
+        if (strstr(val, "2") || strcmp(val, "1") == 0 || strcmp(val, "1.0") == 0) {
+            t = 1;
+        } else {
+            float f = (float)atof(val);
+            t = (f >= 0.5f) ? 1 : 0;
+        }
+        synth->timbre_edit = t;
+        for (int i = 0; i < PARAM_LFO1_RATE; i++) {
+            synth->params[i] = synth->timbre_params[t][i];
+        }
+        return;
+    }
+
+    if (strcmp(key, "timbre_balance") == 0) {
+        float f = (float)atof(val);
+        if (f < 0.0f) f = 0.0f;
+        if (f > 1.0f) f = 1.0f;
+        synth->timbre_balance = f;
+        return;
+    }
+
     float float_val = (float)atof(val);
     synth_set_param(synth, key, float_val);
 }
@@ -1438,6 +1578,8 @@ static const char MK_UI_HIERARCHY[] =
     "{\"key\":\"genre_category\",\"label\":\"Genre\",\"type\":\"enum\"},"
     "{\"key\":\"program_num\",\"label\":\"Program\",\"type\":\"int\",\"min\":1,\"max\":16,\"default\":1},"
     "{\"key\":\"voice_mode\",\"label\":\"Voice Mode\",\"type\":\"enum\"},"
+    "{\"key\":\"timbre_edit\",\"label\":\"Timbre Edit\",\"type\":\"enum\"},"
+    "{\"key\":\"timbre_balance\",\"label\":\"Timbre Bal\",\"type\":\"float\"},"
     "{\"key\":\"wave1\",\"label\":\"Wave 1\"},"
     "{\"key\":\"pulse_width\",\"label\":\"Pulse Width\"},"
     "{\"key\":\"wave2\",\"label\":\"Wave 2\"},"
@@ -1465,7 +1607,7 @@ static const char MK_UI_HIERARCHY[] =
     "{\"key\":\"delay_feedback\",\"label\":\"Delay Fdbk\"},"
     "{\"key\":\"delay_mix\",\"label\":\"Delay Mix\"}"
     "],"
-    "\"knobs\":[\"genre_category\",\"program_num\",\"voice_mode\",\"wave1\",\"pulse_width\",\"wave2\",\"detune\",\"sync_ring\",\"osc_mix\",\"sub_level\",\"portamento\",\"cutoff\",\"resonance\",\"filter_type\",\"keytrack\",\"env_int\",\"drive\",\"attack1\",\"decay1\",\"sustain1\",\"release1\",\"attack2\",\"decay2\",\"sustain2\",\"release2\",\"chorus_mix\",\"delay_time\",\"delay_feedback\",\"delay_mix\"]"
+    "\"knobs\":[\"genre_category\",\"program_num\",\"voice_mode\",\"timbre_edit\",\"timbre_balance\",\"wave1\",\"pulse_width\",\"wave2\",\"detune\",\"sync_ring\",\"osc_mix\",\"sub_level\",\"portamento\",\"cutoff\",\"resonance\",\"filter_type\",\"keytrack\",\"env_int\",\"drive\",\"attack1\",\"decay1\",\"sustain1\",\"release1\",\"attack2\",\"decay2\",\"sustain2\",\"release2\",\"chorus_mix\",\"delay_time\",\"delay_feedback\",\"delay_mix\"]"
     "}}}";
 
 static int v2_get_param(void *instance, const char *key, char *buf, int buf_len) {
@@ -1498,6 +1640,14 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
 
     if (strcmp(key, "voice_mode") == 0) {
         return snprintf(buf, buf_len, "%d", synth->voice_mode);
+    }
+
+    if (strcmp(key, "timbre_edit") == 0) {
+        return snprintf(buf, buf_len, "%d", synth->timbre_edit);
+    }
+
+    if (strcmp(key, "timbre_balance") == 0) {
+        return snprintf(buf, buf_len, "%.4f", synth->timbre_balance);
     }
 
     if (strcmp(key, "preset") == 0) {
@@ -1557,7 +1707,11 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     /* Check parameter values */
     for (int i = 0; i < NUM_PARAMS; i++) {
         if (strcmp(PARAM_METAS[i].id, key) == 0) {
-            return snprintf(buf, buf_len, "%.4f", synth->params[i]);
+            float val = synth->params[i];
+            if (synth->voice_mode == 1 && i < PARAM_LFO1_RATE) {
+                val = synth->timbre_params[synth->timbre_edit][i];
+            }
+            return snprintf(buf, buf_len, "%.4f", val);
         }
     }
 
