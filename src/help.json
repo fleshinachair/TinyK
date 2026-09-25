@@ -1,0 +1,69 @@
+{
+  "title": "microKORG VA",
+  "children": [
+    {
+      "title": "Overview",
+      "lines": [
+        "schwung-mk-va",
+        "4-voice virtual",
+        "analog synthesizer",
+        "inspired by 2000s",
+        "dual-oscillator VA",
+        "engines (microKORG).",
+        "",
+        "Features:",
+        "Dual PolyBLEP oscs,",
+        "multimode filter,",
+        "dual ADSRs + LFOs,",
+        "chorus & delay FX."
+      ]
+    },
+    {
+      "title": "Pages",
+      "children": [
+        {
+          "title": "Page 1: OSC",
+          "lines": [
+            "Osc 1 Wave & PW,",
+            "Osc 2 Wave & Detune,",
+            "Sync/Ring modulation,",
+            "Osc Mix & Sub Osc,",
+            "Portamento glide."
+          ]
+        },
+        {
+          "title": "Page 2: FILTER",
+          "lines": [
+            "Cutoff & Resonance,",
+            "Multimode Type",
+            "(24LP, 12LP, BP, HP),",
+            "Key tracking, Drive,",
+            "Env & LFO modulation,",
+            "Velocity sensitivity."
+          ]
+        },
+        {
+          "title": "Page 3: ENVs",
+          "lines": [
+            "Attack1, Decay1,",
+            "Sustain1, Release1",
+            "(Filter Envelope)",
+            "Attack2, Decay2,",
+            "Sustain2, Release2",
+            "(Amp Envelope)"
+          ]
+        },
+        {
+          "title": "Page 4: FX/MOD",
+          "lines": [
+            "LFO 1 & 2 Rates,",
+            "Stereo Chorus mix,",
+            "Delay Time, Fdbk,",
+            "Delay mix,",
+            "Master Volume & Pan."
+          ]
+        }
+      ]
+    }
+  ]
+}
