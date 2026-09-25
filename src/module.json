@@ -1,0 +1,361 @@
+{
+  "id": "TinyK",
+  "name": "TinyK",
+  "abbrev": "TINYK",
+  "version": "0.1",
+  "description": "4-voice polyphonic virtual analog synth inspired by 2000s dual-oscillator VA engine",
+  "author": "Mathew Taylor",
+  "license": "MIT",
+  "dsp": "dsp.so",
+  "ui": "ui.js",
+  "api_version": 2,
+  "capabilities": {
+    "audio_out": true,
+    "audio_in": false,
+    "midi_in": true,
+    "midi_out": false,
+    "chainable": true,
+    "component_type": "sound_generator",
+    "ui_hierarchy": {
+      "levels": {
+        "root": {
+          "label": "TinyK",
+          "params": [
+            {
+              "key": "genre_category",
+              "label": "Genre",
+              "type": "enum",
+              "options": [
+                "1. Trance",
+                "2. Techno/House",
+                "3. Electronica",
+                "4. DnB/Breaks",
+                "5. Hiphop/Vintage",
+                "6. Retro",
+                "7. SE/Hit",
+                "8. Vocoder"
+              ],
+              "default": 0
+            },
+            {
+              "key": "program_num",
+              "label": "Program",
+              "type": "int",
+              "min": 1,
+              "max": 16,
+              "default": 1,
+              "step": 1
+            },
+            {
+              "key": "voice_mode",
+              "label": "Voice Mode",
+              "type": "enum",
+              "options": [
+                "Single (4-Voice)",
+                "Layer (2-Voice)"
+              ],
+              "default": 0
+            },
+            {
+              "key": "timbre_edit",
+              "label": "Timbre Edit",
+              "type": "enum",
+              "options": [
+                "Timbre 1",
+                "Timbre 2"
+              ],
+              "default": 0
+            },
+            {
+              "key": "timbre_balance",
+              "label": "Timbre Bal",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.5,
+              "step": 0.01
+            },
+            {
+              "key": "wave1",
+              "label": "Wave 1",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.0,
+              "step": 0.01
+            },
+            {
+              "key": "pulse_width",
+              "label": "Pulse Width",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.5,
+              "step": 0.01
+            },
+            {
+              "key": "wave2",
+              "label": "Wave 2",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.0,
+              "step": 0.01
+            },
+            {
+              "key": "detune",
+              "label": "Detune",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.5,
+              "step": 0.01
+            },
+            {
+              "key": "sync_ring",
+              "label": "Sync / Ring",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.0,
+              "step": 0.01
+            },
+            {
+              "key": "osc_mix",
+              "label": "Osc Mix",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.5,
+              "step": 0.01
+            },
+            {
+              "key": "sub_level",
+              "label": "Sub Level",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.0,
+              "step": 0.01
+            },
+            {
+              "key": "portamento",
+              "label": "Portamento",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.0,
+              "step": 0.01
+            },
+            {
+              "key": "cutoff",
+              "label": "Cutoff",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.7,
+              "step": 0.01
+            },
+            {
+              "key": "resonance",
+              "label": "Resonance",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.2,
+              "step": 0.01
+            },
+            {
+              "key": "filter_type",
+              "label": "Filter Type",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.0,
+              "step": 0.01
+            },
+            {
+              "key": "keytrack",
+              "label": "Key Track",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.5,
+              "step": 0.01
+            },
+            {
+              "key": "env_int",
+              "label": "Env Intensity",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.5,
+              "step": 0.01
+            },
+            {
+              "key": "drive",
+              "label": "Drive",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.2,
+              "step": 0.01
+            },
+            {
+              "key": "attack1",
+              "label": "Filter Atk",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.01,
+              "step": 0.01
+            },
+            {
+              "key": "decay1",
+              "label": "Filter Dcy",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.4,
+              "step": 0.01
+            },
+            {
+              "key": "sustain1",
+              "label": "Filter Sus",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.5,
+              "step": 0.01
+            },
+            {
+              "key": "release1",
+              "label": "Filter Rel",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.2,
+              "step": 0.01
+            },
+            {
+              "key": "attack2",
+              "label": "Amp Atk",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.01,
+              "step": 0.01
+            },
+            {
+              "key": "decay2",
+              "label": "Amp Dcy",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.5,
+              "step": 0.01
+            },
+            {
+              "key": "sustain2",
+              "label": "Amp Sus",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.8,
+              "step": 0.01
+            },
+            {
+              "key": "release2",
+              "label": "Amp Rel",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.2,
+              "step": 0.01
+            },
+            {
+              "key": "chorus_mix",
+              "label": "Chorus Mix",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.0,
+              "step": 0.01
+            },
+            {
+              "key": "delay_time",
+              "label": "Delay Time",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.3,
+              "step": 0.01
+            },
+            {
+              "key": "delay_feedback",
+              "label": "Delay Fdbk",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.3,
+              "step": 0.01
+            },
+            {
+              "key": "delay_mix",
+              "label": "Delay Mix",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.0,
+              "step": 0.01
+            }
+          ],
+          "knobs": [
+            "genre_category",
+            "program_num",
+            "voice_mode",
+            "timbre_edit",
+            "timbre_balance",
+            "wave1",
+            "pulse_width",
+            "wave2",
+            "detune",
+            "sync_ring",
+            "osc_mix",
+            "sub_level",
+            "portamento",
+            "cutoff",
+            "resonance",
+            "filter_type",
+            "keytrack",
+            "env_int",
+            "drive",
+            "attack1",
+            "decay1",
+            "sustain1",
+            "release1",
+            "attack2",
+            "decay2",
+            "sustain2",
+            "release2",
+            "chorus_mix",
+            "delay_time",
+            "delay_feedback",
+            "delay_mix"
+          ]
+        }
+      }
+    }
+  },
+  "defaults": {
+    "genre_category": 0,
+    "program_num": 1,
+    "voice_mode": 0,
+    "timbre_edit": 0,
+    "timbre_balance": 0.5,
+    "cutoff": 0.7,
+    "resonance": 0.2,
+    "wave1": 0.0,
+    "wave2": 0.0
+  }
+}

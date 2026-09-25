@@ -1,0 +1,13 @@
+build/
+build-*/
+dist/
+*.o
+*.a
+.DS_Store
+
+# transient build/tool output
+*.log
+__pycache__/
+.serena/
+.toolchain/
+tools/FactoryBackUpDoResetAfter.syx
