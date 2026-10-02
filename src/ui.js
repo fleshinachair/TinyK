@@ -19,7 +19,7 @@ export const PAGES = [
             { key: "voice_mode",     label: "Mode",    short: "Mode", values: ["Single", "Layer"] },
             { key: "timbre_edit",    label: "Edit",    short: "Edit", values: ["Timb 1", "Timb 2"] },
             { key: "timbre_balance", label: "Balance", short: "Bal",  format: (v) => `${Math.round((1 - v) * 100)}:${Math.round(v * 100)}` },
-            { key: "cutoff",         label: "Cutoff",  short: "Cut",  format: (v) => `${Math.round(20 * Math.pow(900, v))}Hz` },
+            { key: "cutoff",         label: "Cutoff",  short: "Cut",  format: (v) => `${Math.round(15 * Math.pow(2, v * 10.3))}Hz` },
             { key: "resonance",      label: "Res",     short: "Res",  format: (v) => `${Math.round(v * 100)}%` },
             { key: "drive",          label: "Drive",   short: "Drive",format: (v) => `${Math.round(v * 100)}%` }
         ]
@@ -28,8 +28,8 @@ export const PAGES = [
         id: "osc",
         name: "1: OSC",
         params: [
-            { key: "wave1",       label: "Wave1", short: "Wave1", values: ["Saw", "Sqr", "Tri", "Sin"] },
-            { key: "pulse_width", label: "Width", short: "Width", format: (v) => `${Math.round(v * 100)}%` },
+            { key: "wave1",       label: "Wave1", short: "Wave1", values: ["Saw", "Sqr", "Tri", "Sin", "Vox", "DWGS", "Noise"] },
+            { key: "pulse_width", label: "Width", short: "Width", format: (v) => `${Math.round(50 + 45 * v)}%` },
             { key: "wave2",       label: "Wave2", short: "Wave2", values: ["Saw", "Sqr", "Tri"] },
             { key: "detune",      label: "Detun", short: "Detun", format: (v) => `${Math.round((v - 0.5) * 48)}st` },
             { key: "sync_ring",   label: "SyncR", short: "SyncR", values: ["Off", "Sync", "Ring", "Both"] },
@@ -42,10 +42,10 @@ export const PAGES = [
         id: "filter",
         name: "2: FILTER",
         params: [
-            { key: "cutoff",      label: "Cut",   short: "Cut",   format: (v) => `${Math.round(20 * Math.pow(900, v))}Hz` },
+            { key: "cutoff",      label: "Cut",   short: "Cut",   format: (v) => `${Math.round(15 * Math.pow(2, v * 10.3))}Hz` },
             { key: "resonance",   label: "Res",   short: "Res",   format: (v) => `${Math.round(v * 100)}%` },
             { key: "filter_type", label: "Type",  short: "Type",  values: ["24LP", "12LP", "12BP", "12HP"] },
-            { key: "keytrack",    label: "KeyTr", short: "KeyTr", format: (v) => `${Math.round(v * 100)}%` },
+            { key: "keytrack",    label: "KeyTr", short: "KeyTr", format: (v) => `${Math.round((v - 0.5) * 200)}%` },
             { key: "env_int",     label: "EnvIn", short: "EnvIn", format: (v) => `${Math.round((v - 0.5) * 200)}%` },
             { key: "drive",       label: "Drive", short: "Drive", format: (v) => `${Math.round(v * 100)}%` },
             { key: "mod_int",     label: "ModIn", short: "ModIn", format: (v) => `${Math.round(v * 100)}%` },
@@ -100,7 +100,7 @@ export class MicroKorgUI {
         }
         this.state.params["genre_category"] = 0;
         this.state.params["program_num"] = 1;
-        this.state.params["voice_mode"] = 0;
+        this.state.params["voice_mode"] = 0.0;
         this.state.params["timbre_edit"] = 0;
         this.state.params["timbre_balance"] = 0.5;
     }
@@ -117,7 +117,10 @@ export class MicroKorgUI {
     setParam(key, value) {
         this.state.params[key] = value;
         if (this.host && typeof this.host.setParam === "function") {
-            this.host.setParam(key, value.toString());
+            const strVal = (key === "voice_mode")
+                ? (value >= 0.5 ? "1.0" : "0.0")
+                : value.toString();
+            this.host.setParam(key, strVal);
         }
         const name = this.getPresetName();
         if (name) this.state.presetName = name;
@@ -154,9 +157,10 @@ export class MicroKorgUI {
             return;
         }
         if (paramDef.key === "voice_mode") {
-            const cur = parseInt(this.getParam("voice_mode")) || 0;
+            const rawVal = this.getParam("voice_mode");
+            const cur = (parseFloat(rawVal) >= 0.5 || rawVal === "Layer" || rawVal === "1") ? 1 : 0;
             const next = Math.max(0, Math.min(1, cur + (delta > 0 ? 1 : -1)));
-            this.setParam("voice_mode", next);
+            this.setParam("voice_mode", next === 1 ? 1.0 : 0.0);
             return;
         }
         if (paramDef.key === "timbre_edit") {
@@ -226,7 +230,31 @@ export class MicroKorgUI {
     // Format parameter display value
     formatValue(paramDef, val) {
         if (paramDef.values) {
-            const idx = Math.min(paramDef.values.length - 1, Math.floor(val * paramDef.values.length));
+            if (paramDef.key === "program_num") {
+                const pNum = Math.max(1, Math.min(16, Math.round(parseFloat(val)) || 1));
+                return paramDef.values[pNum - 1];
+            }
+            const num = parseFloat(val);
+            let idx = 0;
+            if (!isNaN(num)) {
+                if (paramDef.key === "genre_category") {
+                    idx = Math.max(0, Math.min(paramDef.values.length - 1, Math.round(num)));
+                } else if (paramDef.key === "voice_mode" || paramDef.key === "timbre_edit") {
+                    idx = (num >= 0.5) ? 1 : 0;
+                } else if (num >= 1.0) {
+                    // Safe clamp so it doesn't display out of bounds
+                    idx = paramDef.values.length - 1;
+                } else if (num <= 0.0) {
+                    idx = 0;
+                } else {
+                    // Matches the engine: index = round(value * (count - 1))
+                    idx = Math.min(paramDef.values.length - 1, Math.max(0, Math.round(num * (paramDef.values.length - 1))));
+                }
+            } else if (typeof val === "string") {
+                const found = paramDef.values.indexOf(val);
+                if (found >= 0) idx = found;
+            }
+            idx = Math.max(0, Math.min(paramDef.values.length - 1, idx));
             return paramDef.values[idx];
         }
         if (typeof paramDef.format === "function") {
