@@ -3,6 +3,7 @@ build-*/
 dist/
 *.o
 *.a
+*.tar.gz
 .DS_Store
 
 # transient build/tool output

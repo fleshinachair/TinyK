@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build schwung-mk-va module for Ableton Move (ARM64)
+# Build TinyK module for Ableton Move (ARM64)
 #
 # Compiles the 4-voice VA synth DSP engine and packages the module.
 # Supports Docker cross-compilation or local cross-compilation toolchain.
@@ -7,11 +7,11 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-IMAGE_NAME="tinykorg-builder"
+IMAGE_NAME="tinyk-builder"
 
 # Check if Docker is available and we're not already inside a container/cross environment
 if command -v docker &>/dev/null && [ -z "$CROSS_PREFIX" ] && [ ! -f "/.dockerenv" ]; then
-    echo "=== tinyKorg Module Build (via Docker) ==="
+    echo "=== TinyK Module Build (via Docker) ==="
     echo ""
 
     if ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
@@ -36,7 +36,7 @@ fi
 # === Actual compilation (in Docker or using local cross-compiler) ===
 cd "$REPO_ROOT"
 
-echo "=== Building tinyKorg Module (ARM64 Cortex-A72) ==="
+echo "=== Building TinyK Module (ARM64 Cortex-A72) ==="
 mkdir -p build
 
 BUILD_SUCCESS=0
@@ -94,33 +94,32 @@ fi
 
 # === Packaging ===
 echo "Packaging module..."
-DIST_DIR="dist/TinyK"
+MODULE_NAME="TinyK"
+DIST_DIR="dist/$MODULE_NAME"
 mkdir -p "$DIST_DIR"
 
 cp src/module.json "$DIST_DIR/module.json"
 cp src/ui.js "$DIST_DIR/ui.js"
 cp src/presets.json "$DIST_DIR/presets.json"
 cp src/help.json "$DIST_DIR/help.json"
+if [ -f src/dsp/presets.h ]; then
+    cp src/dsp/presets.h "$DIST_DIR/presets.h"
+elif [ -f src/presets.h ]; then
+    cp src/presets.h "$DIST_DIR/presets.h"
+fi
 cp build/dsp.so "$DIST_DIR/dsp.so"
 chmod +x "$DIST_DIR/dsp.so"
 
-# Also create aliases for legacy variants
-mkdir -p dist/tinykorg dist/schwung-mk-va dist/mk-va
-cp -r "$DIST_DIR/"* dist/tinykorg/
-cp -r "$DIST_DIR/"* dist/schwung-mk-va/
-cp -r "$DIST_DIR/"* dist/mk-va/
-
-# Create release tarballs
+# Create release tarball (packaging ONLY TinyK.tar.gz)
 cd dist
-tar -czvf TinyK.tar.gz TinyK/
-tar -czvf tinykorg.tar.gz tinykorg/
-tar -czvf schwung-mk-va.tar.gz schwung-mk-va/
+tar -czvf "$MODULE_NAME.tar.gz" "$MODULE_NAME/"
 cd ..
+cp "dist/$MODULE_NAME.tar.gz" "./$MODULE_NAME.tar.gz"
 
 echo ""
 echo "=== Build Complete ==="
 echo "Output Directory: $DIST_DIR"
-echo "Tarball: dist/TinyK.tar.gz"
+echo "Tarball: dist/$MODULE_NAME.tar.gz (and ./$MODULE_NAME.tar.gz)"
 if command -v file &>/dev/null; then
     echo "Binary inspection:"
     file build/dsp.so

@@ -12,12 +12,13 @@ extern "C" {
 #define MOVE_SAMPLE_RATE          44100
 #define MOVE_FRAMES_PER_BLOCK     128
 #define NUM_VOICES                4
-#define NUM_PARAMS                32
+#define NUM_PARAMS                35
 #define NUM_PRESETS               128
 
 /* Max buffer sizes for static allocation */
 #define DELAY_BUFFER_SIZE         44100  /* 1.0 second @ 44.1 kHz */
 #define CHORUS_BUFFER_SIZE        2048   /* ~46 ms @ 44.1 kHz */
+#define WAVETABLE_SIZE            1024   /* Single-cycle table for Vox / DWGS oscillators */
 
 /* Parameter Indices */
 typedef enum {
@@ -61,15 +62,23 @@ typedef enum {
     PARAM_MASTER_VOL,
     PARAM_PAN,
 
+    /* Global / Voice Mode & Timbre controls */
+    PARAM_VOICE_MODE,
+    PARAM_TIMBRE_EDIT,
+    PARAM_TIMBRE_BALANCE,
+
     PARAM_COUNT
 } param_id_t;
 
-/* Oscillator 1 Waveforms */
+/* Oscillator 1 Waveforms (normalized wave1 param = index / (OSC1_WAVE_COUNT - 1)) */
 typedef enum {
     OSC1_WAVE_SAW = 0,
     OSC1_WAVE_SQUARE,
     OSC1_WAVE_TRIANGLE,
     OSC1_WAVE_SINE,
+    OSC1_WAVE_VOX,    /* Formant-style wavetable */
+    OSC1_WAVE_DWGS,   /* Digital waveform wavetable, selected by timbre_extra.dwgs */
+    OSC1_WAVE_NOISE,
     OSC1_WAVE_COUNT
 } osc1_wave_t;
 
@@ -149,6 +158,7 @@ typedef struct {
     /* Dual-Timbre Layer Properties */
     int timbre_index;       /* 0 = Timbre 1, 1 = Timbre 2 */
     int layer_partner;      /* Index of linked voice or -1 */
+    int is_timbre_2;        /* 0 for Voice A (Timbre 1), 1 for Voice B (Timbre 2) */
 
     /* Envelopes */
     adsr_t filter_env;
@@ -157,6 +167,13 @@ typedef struct {
     /* Filter 2-pole SVF states (2 stages for up to 4-pole / 24dB) */
     svf_t filter_svf[2];
 } voice_t;
+
+/* Per-timbre settings that come from the patch but have no PARAM_* slot */
+typedef struct {
+    float transpose_semi;   /* Timbre transpose + tune, in semitones */
+    float noise_level;      /* 0..1 white noise in the mixer */
+    float dwgs;             /* 0..1 -> DWGS waveform 0..63 */
+} timbre_extra_t;
 
 /* Preset Definition */
 typedef struct {
@@ -203,6 +220,11 @@ typedef struct {
     int timbre_edit;          /* 0 = Timbre 1, 1 = Timbre 2 */
     float timbre_balance;     /* 0.0f (100% Timbre 1) to 1.0f (100% Timbre 2), default 0.5f */
     float timbre_params[2][NUM_PARAMS]; /* Independent timbre parameter states */
+    timbre_extra_t timbre_extra[2];
+
+    /* Cached Vox/DWGS wavetables, rebuilt when the selection changes */
+    float wavetable[2][WAVETABLE_SIZE];
+    int wavetable_key[2];
 
     /* Octave Transpose & Pitch Bend */
     int octave_transpose;

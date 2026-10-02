@@ -1,4 +1,4 @@
-# Makefile for schwung-mk-va (Ableton Move Synth Module)
+# Makefile for TinyK (Ableton Move Synth Module)
 
 .PHONY: all build clean install
 
@@ -11,4 +11,4 @@ install:
 	./scripts/install.sh
 
 clean:
-	rm -rf build dist
+	rm -rf build dist TinyK.tar.gz
