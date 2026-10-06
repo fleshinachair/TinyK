@@ -110,17 +110,15 @@ fi
 cp build/dsp.so "$DIST_DIR/dsp.so"
 chmod +x "$DIST_DIR/dsp.so"
 
-# Optional .syx banks: the module scans <module>/banks/ at start-up (the built-in bank needs nothing).
-# Local banks/*.syx are packaged with this build; they are never committed (.gitignore).
+cp release.json "$DIST_DIR/release.json"
+
+# The module scans <module>/banks/ for .syx banks at start-up. The package ships the folder EMPTY, so a
+# release never redistributes third-party patch banks; scripts/install.sh copies your local banks/*.syx
+# to the Move separately.
 rm -rf "$DIST_DIR/banks"
 mkdir -p "$DIST_DIR/banks"
-BANK_COUNT=0
-for f in banks/*.syx banks/*.SYX; do
-    [ -f "$f" ] || continue
-    cp "$f" "$DIST_DIR/banks/"
-    BANK_COUNT=$((BANK_COUNT + 1))
-done
-echo "Packaged $BANK_COUNT .syx file(s) into $DIST_DIR/banks/"
+printf 'Drop microKORG bank dumps (.syx, 128 programs) here; they appear on the Bank page after reloading TinyK.
+' > "$DIST_DIR/banks/README.txt"
 
 # Create release tarball (packaging ONLY TinyK.tar.gz)
 cd dist

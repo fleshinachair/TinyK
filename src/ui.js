@@ -9,19 +9,34 @@
  *   Page 4: FX/MOD (LFO1 Rate, LFO2 Rate, Chorus Mix, Delay Time, Delay Feedback, Delay Mix, Master Vol, Pan)
  */
 
+// Cutoff knob -> Hz, the engine's measured mapping (cutoff_base_hz * 2^(knob * cutoff_octaves))
+const cutoffHz = (v) => {
+    const hz = 37.46 * Math.pow(2, v * 10.61);
+    return hz >= 1000 ? `${(hz / 1000).toFixed(1)}k` : `${Math.round(hz)}Hz`;
+};
+
 export const PAGES = [
     {
         id: "preset",
         name: "0: PRESET",
         params: [
-            { key: "genre_category", label: "Genre",   short: "Genr", values: ["Trance", "Techno", "Electr", "DnB", "Hiphop", "Retro", "SE/Hit", "Vocod"] },
-            { key: "program_num",    label: "Program", short: "Prog", values: ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"] },
+            // Category = matrix row (genre); Program = the row's 16 patches, A1..A8 then B1..B8
+            { key: "category",       label: "Category", short: "Cat",  values: ["Trance", "Techno", "Electr", "DnB", "Hiphop", "Retro", "SE/Hit", "Vocod"] },
+            { key: "patch",          label: "Program",  short: "Prog", values: ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"] },
             { key: "voice_mode",     label: "Mode",    short: "Mode", values: ["Single", "Layer"] },
             { key: "timbre_edit",    label: "Edit",    short: "Edit", values: ["Timb 1", "Timb 2"] },
             { key: "timbre_balance", label: "Balance", short: "Bal",  format: (v) => `${Math.round((1 - v) * 100)}:${Math.round(v * 100)}` },
-            { key: "cutoff",         label: "Cutoff",  short: "Cut",  format: (v) => `${Math.round(15 * Math.pow(2, v * 10.3))}Hz` },
+            { key: "cutoff",         label: "Cutoff",  short: "Cut",  format: cutoffHz },
             { key: "resonance",      label: "Res",     short: "Res",  format: (v) => `${Math.round(v * 100)}%` },
-            { key: "drive",          label: "Drive",   short: "Drive",format: (v) => `${Math.round(v * 100)}%` }
+            { key: "env_int",        label: "EnvIn",   short: "EnvIn",format: (v) => `${Math.round((v - 0.5) * 200)}%` }
+        ]
+    },
+    {
+        id: "bank",
+        name: "BANK",
+        params: [
+            // 0 = built-in, 1..N = .syx dumps in the module's banks/ folder; shows the file name
+            { key: "bank_file",      label: "Bank",    short: "Bank", bank: true }
         ]
     },
     {
@@ -42,7 +57,7 @@ export const PAGES = [
         id: "filter",
         name: "2: FILTER",
         params: [
-            { key: "cutoff",      label: "Cut",   short: "Cut",   format: (v) => `${Math.round(15 * Math.pow(2, v * 10.3))}Hz` },
+            { key: "cutoff",      label: "Cut",   short: "Cut",   format: cutoffHz },
             { key: "resonance",   label: "Res",   short: "Res",   format: (v) => `${Math.round(v * 100)}%` },
             { key: "filter_type", label: "Type",  short: "Type",  values: ["24LP", "12LP", "12BP", "12HP"] },
             { key: "keytrack",    label: "KeyTr", short: "KeyTr", format: (v) => `${Math.round((v - 0.5) * 200)}%` },
@@ -98,8 +113,9 @@ export class MicroKorgUI {
                 this.state.params[param.key] = 0.5;
             }
         }
-        this.state.params["genre_category"] = 0;
-        this.state.params["program_num"] = 1;
+        this.state.params["bank_file"] = 0;
+        this.state.params["category"] = 0;
+        this.state.params["patch"] = 0;
         this.state.params["voice_mode"] = 0.0;
         this.state.params["timbre_edit"] = 0;
         this.state.params["timbre_balance"] = 0.5;
@@ -144,16 +160,16 @@ export class MicroKorgUI {
         const paramDef = page.params[index];
         if (!paramDef) return;
 
-        if (paramDef.key === "genre_category") {
-            const cur = parseInt(this.getParam("genre_category")) || 0;
-            const next = Math.max(0, Math.min(7, cur + (delta > 0 ? 1 : -1)));
-            this.setParam("genre_category", next);
+        if (paramDef.key === "bank_file") {
+            const count = parseInt(this.host && this.host.getParam ? this.host.getParam("bank_file_count") : 1) || 1;
+            const cur = parseInt(this.getParam("bank_file")) || 0;
+            this.setParam("bank_file", Math.max(0, Math.min(count - 1, cur + (delta > 0 ? 1 : -1))));
             return;
         }
-        if (paramDef.key === "program_num") {
-            const cur = parseInt(this.getParam("program_num")) || 1;
-            const next = Math.max(1, Math.min(16, cur + (delta > 0 ? 1 : -1)));
-            this.setParam("program_num", next);
+        if (paramDef.key === "category" || paramDef.key === "patch") {
+            const last = paramDef.values.length - 1;
+            const cur = parseInt(this.getParam(paramDef.key)) || 0;
+            this.setParam(paramDef.key, Math.max(0, Math.min(last, cur + (delta > 0 ? 1 : -1))));
             return;
         }
         if (paramDef.key === "voice_mode") {
@@ -229,16 +245,16 @@ export class MicroKorgUI {
 
     // Format parameter display value
     formatValue(paramDef, val) {
+        if (paramDef.bank) {
+            const name = this.host && this.host.getParam ? this.host.getParam("bank_file_name") : null;
+            return name ? String(name) : "Built-in";
+        }
         if (paramDef.values) {
-            if (paramDef.key === "program_num") {
-                const pNum = Math.max(1, Math.min(16, Math.round(parseFloat(val)) || 1));
-                return paramDef.values[pNum - 1];
-            }
             const num = parseFloat(val);
             let idx = 0;
             if (!isNaN(num)) {
-                if (paramDef.key === "genre_category") {
-                    idx = Math.max(0, Math.min(paramDef.values.length - 1, Math.round(num)));
+                if (paramDef.key === "category" || paramDef.key === "patch") {
+                    idx = Math.round(num);
                 } else if (paramDef.key === "voice_mode" || paramDef.key === "timbre_edit") {
                     idx = (num >= 0.5) ? 1 : 0;
                 } else if (num >= 1.0) {
@@ -314,9 +330,15 @@ export class MicroKorgUI {
                 display.print(x + 2, y + 10, valStr);
             }
 
-            // Mini bar indicator
+            // Mini bar indicator (selector controls are drawn as their position in the range)
             if (typeof display.fill_rect === "function") {
-                const barWidth = Math.max(1, Math.round(val * (colWidth - 4)));
+                let frac = val;
+                if (paramDef.key === "category" || paramDef.key === "patch") frac = val / (paramDef.values.length - 1);
+                else if (paramDef.bank) {
+                    const count = parseInt(this.host && this.host.getParam ? this.host.getParam("bank_file_count") : 1) || 1;
+                    frac = count > 1 ? val / (count - 1) : 0;
+                }
+                const barWidth = Math.max(1, Math.round(Math.max(0, Math.min(1, frac)) * (colWidth - 4)));
                 display.fill_rect(x + 2, y + 20, barWidth, 2);
             }
         }

@@ -18,7 +18,10 @@ Timbre layout (offset from timbre start):
     12 osc2 (bits 4-5 mod select, bits 0-1 wave), 13 osc2 semitone, 14 osc2 tune,
     15 portamento, 16/17/18 osc1/osc2/noise level, 19 filter type, 20 cutoff,
     21 resonance, 22 EG1 intensity, 24 key track, 27 distortion,
-    30..33 EG1 (filter) ADSR, 34..37 EG2 (amp) ADSR.
+    30..33 EG1 (filter) ADSR, 34..37 EG2 (amp) ADSR,
+    38/41 LFO1/LFO2 (bits 0-1 wave, bits 4-5 key sync), 39/42 LFO1/LFO2 frequency,
+    40/43 LFO1/LFO2 tempo sync (bit 7 on, bits 0-4 note), 44..51 virtual patch 1-4 as
+    (route, intensity) pairs: route bits 0-3 source, bits 4-7 destination, intensity 64 = 0.
 """
 
 import json
@@ -57,7 +60,18 @@ TIMBRE_FIELDS = [
     "portamento", "transpose", "dwgs",
     "cutoff", "resonance", "filter_type", "keytrack", "env_int", "drive",
     "attack1", "decay1", "sustain1", "release1", "attack2", "decay2", "sustain2", "release2",
+    "lfo1_wave", "lfo1_rate", "lfo1_keysync", "lfo1_sync_note",
+    "lfo2_wave", "lfo2_rate", "lfo2_keysync", "lfo2_sync_note",
+    "patch1_src", "patch1_dst", "patch1_int", "patch2_src", "patch2_dst", "patch2_int",
+    "patch3_src", "patch3_dst", "patch3_int", "patch4_src", "patch4_dst", "patch4_int",
 ]
+# LFO / virtual patch encoding (all [0, 1]):
+#   lfoN_wave      wave index / 3     (LFO1: saw, square, triangle, S&H; LFO2: saw, square, sine, S&H)
+#   lfoN_keysync   mode / 2           (off, timbre, voice)
+#   lfoN_sync_note 0 = free running (lfoN_rate), else (note index + 1) / 15 of the tempo-sync note table
+#   patchN_src     source / 7         (EG1, EG2, LFO1, LFO2, velocity, keyboard track, MIDI1, MIDI2)
+#   patchN_dst     destination / 7    (pitch, osc2 pitch, osc1 ctrl1, noise level, cutoff, amp, pan, LFO2 freq)
+#   patchN_int     bipolar, 0.5 = no modulation
 FX_FIELDS = ["chorus_mix", "delay_time", "delay_feedback", "delay_mix"]
 
 # Hardware osc2 mod-select (0 off, 1 ring, 2 sync, 3 ring+sync) -> engine
@@ -77,6 +91,9 @@ VOCODER_CARRIER = {
     "env_int": 0.5, "drive": 0.0,
     "attack1": 0.2, "decay1": 0.5, "sustain1": 1.0, "release1": 0.45,
     "attack2": 0.25, "decay2": 0.5, "sustain2": 1.0, "release2": 0.45,
+    "lfo1_wave": 0.0, "lfo1_rate": 0.5, "lfo1_keysync": 0.0, "lfo1_sync_note": 0.0,
+    "lfo2_wave": 0.0, "lfo2_rate": 0.5, "lfo2_keysync": 0.0, "lfo2_sync_note": 0.0,
+    **{f"patch{n}_{k}": (0.5 if k == "int" else 0.0) for n in range(1, 5) for k in ("src", "dst", "int")},
 }
 
 
@@ -112,9 +129,10 @@ def load_programs(syx_path):
     start, end = data.find(b"\xF0"), data.rfind(b"\xF7")
     if start == -1 or end == -1:
         raise ValueError("Invalid SysEx file: F0 / F7 framing not found.")
-    # F0 42 3g 58 50: Korg, microKORG, ALL DATA DUMP.
-    if data[start + 1] != 0x42 or data[start + 3] != 0x58 or data[start + 4] != 0x50:
-        raise ValueError("Not a microKORG ALL DATA DUMP (expected F0 42 3g 58 50).")
+    # F0 42 3g 58 4C / 50: Korg, microKORG, ALL PROGRAM DATA DUMP (128 programs) or ALL DATA DUMP
+    # (programs + global data). src/dsp/syx_bank.h accepts the same two.
+    if data[start + 1] != 0x42 or data[start + 3] != 0x58 or data[start + 4] not in (0x4C, 0x50):
+        raise ValueError("Not a microKORG bank dump (expected F0 42 3g 58 4C or 50).")
 
     unpacked = unpack_7to8(data[start + 5:end])
     if len(unpacked) < NUM_PROGRAMS * PROGRAM_SIZE:
@@ -152,7 +170,21 @@ def parse_timbre(prog, t):
         osc_mix = 1.0 - 0.5 * osc1_lvl / osc2_lvl
     level = loudest * unit(prog[t + 25])
 
+    lfo = {}
+    for n, base in ((1, t + 38), (2, t + 41)):
+        sync = prog[base + 2]
+        lfo[f"lfo{n}_wave"] = (prog[base] & 0x03) / 3.0
+        lfo[f"lfo{n}_keysync"] = min((prog[base] >> 4) & 0x03, 2) / 2.0
+        lfo[f"lfo{n}_rate"] = unit(prog[base + 1])
+        lfo[f"lfo{n}_sync_note"] = (min(sync & 0x1F, 14) + 1) / 15.0 if sync & 0x80 else 0.0
+    for n in range(4):
+        route, depth = prog[t + 44 + 2 * n], prog[t + 45 + 2 * n]
+        lfo[f"patch{n + 1}_src"] = min(route & 0x0F, 7) / 7.0
+        lfo[f"patch{n + 1}_dst"] = min((route >> 4) & 0x0F, 7) / 7.0
+        lfo[f"patch{n + 1}_int"] = bipolar(depth)
+
     return {
+        **lfo,
         "wave1": wave1 / 6.0,
         "pulse_width": unit(prog[t + 8]),  # engine maps 0..1 -> 50%..95% duty
         "wave2": osc2_wave / 2.0,
@@ -231,6 +263,9 @@ def render_header(presets):
     out.append("    float portamento, transpose, dwgs;\n")
     out.append("    float cutoff, resonance, filter_type, keytrack, env_int, drive;\n")
     out.append("    float attack1, decay1, sustain1, release1, attack2, decay2, sustain2, release2;\n")
+    out.append("    float lfo1_wave, lfo1_rate, lfo1_keysync, lfo1_sync_note, lfo2_wave, lfo2_rate, lfo2_keysync, lfo2_sync_note;\n")
+    out.append("    float patch1_src, patch1_dst, patch1_int, patch2_src, patch2_dst, patch2_int;\n")
+    out.append("    float patch3_src, patch3_dst, patch3_int, patch4_src, patch4_dst, patch4_int;\n")
     out.append("};\n\n")
     out.append("struct Preset {\n")
     out.append("    const char *label;\n")

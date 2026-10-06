@@ -2,7 +2,7 @@
   "id": "TinyK",
   "name": "TinyK",
   "abbrev": "TINYK",
-  "version": "0.1",
+  "version": "1.0.0",
   "description": "4-voice polyphonic virtual analog synth inspired by 2000s dual-oscillator VA engine",
   "author": "Mathew Taylor",
   "license": "MIT",
@@ -19,32 +19,55 @@
     "ui_hierarchy": {
       "levels": {
         "root": {
+          "name": "TinyK",
           "label": "TinyK",
+          "list_param": "preset",
+          "count_param": "preset_count",
+          "name_param": "preset_name",
           "params": [
             {
-              "key": "genre_category",
-              "label": "Genre",
+              "level": "bank",
+              "label": "Bank"
+            },
+            {
+              "key": "category",
+              "label": "Category",
               "type": "enum",
               "options": [
-                "1. Trance",
-                "2. Techno/House",
-                "3. Electronica",
-                "4. DnB/Breaks",
-                "5. Hiphop/Vintage",
-                "6. Retro",
-                "7. SE/Hit",
-                "8. Vocoder"
+                "Trance",
+                "Techno/House",
+                "Electronica",
+                "DnB/Breaks",
+                "Hiphop/Vintage",
+                "Retro",
+                "SE/Hit",
+                "Vocoder"
               ],
               "default": 0
             },
             {
-              "key": "program_num",
+              "key": "patch",
               "label": "Program",
-              "type": "int",
-              "min": 1,
-              "max": 16,
-              "default": 1,
-              "step": 1
+              "type": "enum",
+              "options": [
+                "A1",
+                "A2",
+                "A3",
+                "A4",
+                "A5",
+                "A6",
+                "A7",
+                "A8",
+                "B1",
+                "B2",
+                "B3",
+                "B4",
+                "B5",
+                "B6",
+                "B7",
+                "B8"
+              ],
+              "default": 0
             },
             {
               "key": "voice_mode",
@@ -311,8 +334,8 @@
             }
           ],
           "knobs": [
-            "genre_category",
-            "program_num",
+            "category",
+            "patch",
             "voice_mode",
             "timbre_edit",
             "timbre_balance",
@@ -343,13 +366,43 @@
             "delay_feedback",
             "delay_mix"
           ]
+        },
+        "bank": {
+          "name": "Bank",
+          "label": "Bank",
+          "params": [
+            {
+              "key": "bank_file",
+              "label": "Bank",
+              "type": "enum",
+              "options": [
+                "Built-in"
+              ],
+              "default": 0
+            },
+            {
+              "level": "bank_list",
+              "label": "Browse banks"
+            }
+          ],
+          "knobs": [
+            "bank_file"
+          ]
+        },
+        "bank_list": {
+          "name": "Banks",
+          "label": "Select Bank",
+          "items_param": "bank_list",
+          "select_param": "bank_file",
+          "navigate_to": "root"
         }
       }
     }
   },
   "defaults": {
-    "genre_category": 0,
-    "program_num": 1,
+    "bank_file": 0,
+    "category": 0,
+    "patch": 0,
     "voice_mode": 0,
     "timbre_edit": 0,
     "timbre_balance": 0.5,
