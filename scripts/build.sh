@@ -110,6 +110,18 @@ fi
 cp build/dsp.so "$DIST_DIR/dsp.so"
 chmod +x "$DIST_DIR/dsp.so"
 
+# Optional .syx banks: the module scans <module>/banks/ at start-up (the built-in bank needs nothing).
+# Local banks/*.syx are packaged with this build; they are never committed (.gitignore).
+rm -rf "$DIST_DIR/banks"
+mkdir -p "$DIST_DIR/banks"
+BANK_COUNT=0
+for f in banks/*.syx banks/*.SYX; do
+    [ -f "$f" ] || continue
+    cp "$f" "$DIST_DIR/banks/"
+    BANK_COUNT=$((BANK_COUNT + 1))
+done
+echo "Packaged $BANK_COUNT .syx file(s) into $DIST_DIR/banks/"
+
 # Create release tarball (packaging ONLY TinyK.tar.gz)
 cd dist
 tar -czvf "$MODULE_NAME.tar.gz" "$MODULE_NAME/"
