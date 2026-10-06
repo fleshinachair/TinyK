@@ -22,7 +22,7 @@
  *   -DTINYK_DIAG    also report non-finite values the engine produced ("nonfinite=<n>").
  *   -DTINYK_TUNING  make the engine's global constants adjustable (--set, or the library API).
  *   -DTINYK_LIB     build as a shared library for tools/calibrate_dsp.py instead of an executable
- *                   (exports tinyk_render, tinyk_set_tuning, tinyk_reset_tuning).
+ *                   (exports tinyk_render, tinyk_render_patch, tinyk_render_patch_events, tinyk_set_tuning).
  */
 #include "dsp.h"
 #include "presets.h"
@@ -53,7 +53,7 @@ static const struct { const char *name; float *value; } TUNING_TABLE[] = {
     { "cutoff_octaves",     &tinyk_tuning.cutoff_octaves },
     { "cutoff_floor_hz",    &tinyk_tuning.cutoff_floor_hz },
     { "cutoff_ceil_hz",     &tinyk_tuning.cutoff_ceil_hz },
-    { "env_depth_hz",       &tinyk_tuning.env_depth_hz },
+    { "bpf_k0",             &tinyk_tuning.bpf_k0 },
     { "env_octaves",        &tinyk_tuning.env_octaves },
     { "res_damping_range",  &tinyk_tuning.res_damping_range },
     { "lp24_res_scale",     &tinyk_tuning.lp24_res_scale },
@@ -63,6 +63,12 @@ static const struct { const char *name; float *value; } TUNING_TABLE[] = {
     { "release_scale",      &tinyk_tuning.release_scale },
     { "mixer_trim",         &tinyk_tuning.mixer_trim },
     { "delay_send_scale",   &tinyk_tuning.delay_send_scale },
+    { "patch_cutoff_octaves", &tinyk_tuning.patch_cutoff_octaves },
+    { "patch_pitch_scale",  &tinyk_tuning.patch_pitch_scale },
+    { "lfo_tempo_bpm",      &tinyk_tuning.lfo_tempo_bpm },
+    { "patch_int_curve",    &tinyk_tuning.patch_int_curve },
+    { "tilt_db",            &tinyk_tuning.tilt_db },
+    { "tilt_hz",            &tinyk_tuning.tilt_hz },
 };
 #define TUNING_COUNT ((int)(sizeof TUNING_TABLE / sizeof TUNING_TABLE[0]))
 
@@ -77,11 +83,22 @@ static int set_tuning(const char *name, double v) {
 }
 #endif
 
-/* Plays `num_notes` for gate_s, releases, renders total_frames of audio into out (interleaved L/R). */
-static void render_notes(int preset, const int *notes, int num_notes, double gate_s, int total_frames, int16_t *out) {
+#ifdef TINYK_TUNING
+void tinyk_load_patch(synth_engine_t *synth, const struct Preset *p, int slot);
+#endif
+
+/* Plays `num_notes` for gate_s, releases, renders total_frames of audio into out (interleaved L/R).
+ * With patch != NULL (TINYK_TUNING builds) that patch is played from slot `preset` instead of the bank's. */
+static void render_notes(int preset, const struct Preset *patch, const int *notes, int num_notes, double gate_s,
+                         int total_frames, int16_t *out) {
     int gate = (int)(gate_s * MOVE_SAMPLE_RATE);
     synth_init(&synth);
+#ifdef TINYK_TUNING
+    if (patch) tinyk_load_patch(&synth, patch, preset);
+    else
+#endif
     synth_load_preset(&synth, preset);
+    (void)patch;
     for (int i = 0; i < num_overrides; i++) synth_set_param(&synth, override_name[i], override_value[i]);
     for (int i = 0; i < num_notes; i++) synth_note_on(&synth, (uint8_t)notes[i], 100);
 
@@ -107,16 +124,134 @@ static void render_notes(int preset, const int *notes, int num_notes, double gat
 #define TK_EXPORT __attribute__((visibility("default")))
 #endif
 
-/* Renders one note into out_lr (interleaved float, -1..1, capacity max_frames); returns frames written. */
-TK_EXPORT int tinyk_render(int preset, int note, double gate_s, double total_s, float *out_lr, int max_frames) {
+static int render_float(int preset, const struct Preset *patch, int note, double gate_s, double total_s,
+                        float *out_lr, int max_frames) {
     int frames = (int)(total_s * MOVE_SAMPLE_RATE);
     if (preset < 0 || preset > 127 || frames <= 0 || frames > max_frames) return -1;
     int16_t *tmp = calloc((size_t)frames * 2, sizeof(int16_t));
     if (!tmp) return -1;
-    render_notes(preset, &note, 1, gate_s, frames, tmp);
+    render_notes(preset, patch, &note, 1, gate_s, frames, tmp);
     for (int i = 0; i < frames * 2; i++) out_lr[i] = (float)tmp[i] / 32768.0f;
     free(tmp);
     return frames;
+}
+
+/* Renders one note into out_lr (interleaved float, -1..1, capacity max_frames); returns frames written. */
+TK_EXPORT int tinyk_render(int preset, int note, double gate_s, double total_s, float *out_lr, int max_frames) {
+    return render_float(preset, NULL, note, gate_s, total_s, out_lr, max_frames);
+}
+
+/* As tinyk_render, but plays an external patch: t1/t2 hold the 26 struct TimbreParams floats in
+ * declaration order, fx the 4 FX floats (chorus_mix, delay_time, delay_feedback, delay_mix). */
+TK_EXPORT int tinyk_render_patch(int slot, int voice_mode, const float *t1, const float *t2, const float *fx,
+                                 int note, double gate_s, double total_s, float *out_lr, int max_frames) {
+#ifdef TINYK_TUNING
+    struct Preset p;
+    memset(&p, 0, sizeof p);
+    p.label = "external";
+    p.voice_mode = voice_mode;
+    memcpy(&p.t1, t1, sizeof p.t1);
+    memcpy(&p.t2, t2, sizeof p.t2);
+    p.chorus_mix = fx[0];
+    p.delay_time = fx[1];
+    p.delay_feedback = fx[2];
+    p.delay_mix = fx[3];
+    return render_float(slot, &p, note, gate_s, total_s, out_lr, max_frames);
+#else
+    (void)slot; (void)voice_mode; (void)t1; (void)t2; (void)fx; (void)note; (void)gate_s; (void)total_s;
+    (void)out_lr; (void)max_frames;
+    return -1;
+#endif
+}
+
+TK_EXPORT int tinyk_timbre_floats(void) { return (int)(sizeof(struct TimbreParams) / sizeof(float)); }
+
+#ifdef TINYK_TUNING
+int tinyk_dsp_bank_scan(const char *dir);
+int tinyk_dsp_bank_count(void);
+const char *tinyk_dsp_bank_name(int b);
+int tinyk_dsp_bank_preset(int b, int idx, float *t1, float *t2, float *fx, char *label, int label_len);
+TK_EXPORT int tinyk_bank_scan(const char *dir) { return tinyk_dsp_bank_scan(dir); }
+TK_EXPORT int tinyk_bank_count(void) { return tinyk_dsp_bank_count(); }
+int tinyk_dsp_v2_create(const char *module_dir);
+void tinyk_dsp_v2_set(const char *key, const char *val);
+int tinyk_dsp_v2_get(const char *key, char *buf, int buf_len);
+TK_EXPORT int tinyk_v2_create(const char *module_dir) { return tinyk_dsp_v2_create(module_dir); }
+TK_EXPORT void tinyk_v2_set(const char *key, const char *val) { tinyk_dsp_v2_set(key, val); }
+TK_EXPORT int tinyk_v2_get(const char *key, char *buf, int buf_len) { return tinyk_dsp_v2_get(key, buf, buf_len); }
+TK_EXPORT const char *tinyk_bank_name(int b) { return tinyk_dsp_bank_name(b); }
+TK_EXPORT int tinyk_bank_preset(int b, int idx, float *t1, float *t2, float *fx, char *label, int label_len) {
+    return tinyk_dsp_bank_preset(b, idx, t1, t2, fx, label, label_len);
+}
+/* Bank / program selection through the public parameter API, then the active preset's name */
+TK_EXPORT int tinyk_select(const char *key, const char *val, char *name, int name_len) {
+    synth_set_param(&synth, key, (float)atof(val));
+    return snprintf(name, (size_t)name_len, "%d", synth.current_preset);
+}
+#endif
+
+/* Sets the cutoff knob (0..1) of every timbre that plays, the way a user turning it would. */
+static void set_cutoff_all(float v, int layer) {
+    if (layer) {
+        synth_set_param(&synth, "timbre_edit", 1.0f);
+        synth_set_param(&synth, "cutoff", v);
+        synth_set_param(&synth, "timbre_edit", 0.0f);
+    }
+    synth_set_param(&synth, "cutoff", v);
+}
+
+/* Plays an external patch (as tinyk_render_patch) with timed note events and cutoff automation.
+ *   ev_frame/ev_note/ev_vel: n_events events sorted by frame; velocity 0 = note off.
+ *   cutoff: curve_len knob values (0..1) spread evenly over the render, applied at every block start;
+ *           curve_len 0 leaves the patch's own cutoff.
+ * Writes `frames` interleaved stereo floats (-1..1) to out_lr; returns frames, or -1. */
+TK_EXPORT int tinyk_render_patch_events(int slot, int voice_mode, const float *t1, const float *t2, const float *fx,
+                                        const int *ev_frame, const int *ev_note, const int *ev_vel, int n_events,
+                                        const float *cutoff, int curve_len, int frames, float *out_lr) {
+#ifdef TINYK_TUNING
+    if (frames <= 0 || slot < 0 || slot > 127) return -1;
+    struct Preset p;
+    memset(&p, 0, sizeof p);
+    p.label = "external";
+    p.voice_mode = voice_mode;
+    memcpy(&p.t1, t1, sizeof p.t1);
+    memcpy(&p.t2, t2, sizeof p.t2);
+    p.chorus_mix = fx[0];
+    p.delay_time = fx[1];
+    p.delay_feedback = fx[2];
+    p.delay_mix = fx[3];
+
+    int16_t *tmp = calloc((size_t)frames * 2, sizeof(int16_t));
+    if (!tmp) return -1;
+    synth_init(&synth);
+    tinyk_load_patch(&synth, &p, slot);
+
+    int done = 0, ev = 0;
+    while (done < frames) {
+        while (ev < n_events && ev_frame[ev] <= done) {
+            if (ev_vel[ev] > 0) synth_note_on(&synth, (uint8_t)ev_note[ev], (uint8_t)ev_vel[ev]);
+            else synth_note_off(&synth, (uint8_t)ev_note[ev]);
+            ev++;
+        }
+        if (curve_len > 0) {
+            int i = (int)((long long)done * curve_len / frames);
+            set_cutoff_all(cutoff[i < curve_len ? i : curve_len - 1], voice_mode == 1);
+        }
+        int n = MOVE_FRAMES_PER_BLOCK;
+        if (done + n > frames) n = frames - done;
+        if (ev < n_events && ev_frame[ev] < done + n) n = ev_frame[ev] - done; /* land exactly on the next event */
+        if (n <= 0) n = 1;
+        synth_render(&synth, tmp + done * 2, n);
+        done += n;
+    }
+    for (int i = 0; i < frames * 2; i++) out_lr[i] = (float)tmp[i] / 32768.0f;
+    free(tmp);
+    return frames;
+#else
+    (void)slot; (void)voice_mode; (void)t1; (void)t2; (void)fx; (void)ev_frame; (void)ev_note; (void)ev_vel;
+    (void)n_events; (void)cutoff; (void)curve_len; (void)frames; (void)out_lr;
+    return -1;
+#endif
 }
 
 TK_EXPORT int tinyk_set_tuning(const char *name, double v) {
@@ -244,7 +379,7 @@ int main(int argc, char **argv) {
     int total = (int)((gate_s + tail_s) * MOVE_SAMPLE_RATE);
     int16_t *out = calloc((size_t)total * 2, sizeof(int16_t));
     if (!out) return 1;
-    render_notes(preset, notes, num_notes, gate_s, total, out);
+    render_notes(preset, NULL, notes, num_notes, gate_s, total, out);
 
     int ok = write_wav(pos[1], out, total);
     free(out);

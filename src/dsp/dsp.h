@@ -174,7 +174,22 @@ typedef struct {
     float noise_level;      /* 0..1 white noise in the mixer */
     float level;            /* 0..1 overall timbre level (osc levels x amp level) */
     float dwgs;             /* 0..1 -> DWGS waveform 0..63 */
+
+    /* Per-timbre LFOs (index 0 = LFO1, 1 = LFO2) and the 4-slot virtual patch matrix */
+    int lfo_wave[2];        /* LFO1: saw, square, triangle, S&H; LFO2: saw, square, sine, S&H */
+    int lfo_keysync[2];     /* 0 off, 1 timbre, 2 voice: restart the LFO on note-on */
+    float lfo_rate[2];      /* 0..1 free-running rate knob */
+    int lfo_sync_note[2];   /* -1 = free running, else index into the tempo-sync note table */
+    int patch_src[4];       /* patch_source_t */
+    int patch_dst[4];       /* patch_dest_t */
+    float patch_int[4];     /* -1..+1 (hardware -63..+63); 0 = slot unused */
 } timbre_extra_t;
+
+/* Virtual patch sources and destinations (microKORG order) */
+typedef enum { PATCH_SRC_EG1 = 0, PATCH_SRC_EG2, PATCH_SRC_LFO1, PATCH_SRC_LFO2, PATCH_SRC_VELOCITY,
+               PATCH_SRC_KBD, PATCH_SRC_MIDI1, PATCH_SRC_MIDI2, PATCH_SRC_COUNT } patch_source_t;
+typedef enum { PATCH_DST_PITCH = 0, PATCH_DST_OSC2_PITCH, PATCH_DST_OSC1_CTRL1, PATCH_DST_NOISE,
+               PATCH_DST_CUTOFF, PATCH_DST_AMP, PATCH_DST_PAN, PATCH_DST_LFO2_FREQ, PATCH_DST_COUNT } patch_dest_t;
 
 /* Preset Definition */
 typedef struct {
@@ -208,6 +223,10 @@ typedef struct {
     float dc_x[2];
     float dc_y[2];
 
+    /* Brightness tilt (first-order high shelf) on the voice mix: previous input / output, L/R */
+    float tilt_x1[2];
+    float tilt_y1[2];
+
     float chorus_buf_l[CHORUS_BUFFER_SIZE];
     float chorus_buf_r[CHORUS_BUFFER_SIZE];
     uint32_t chorus_write_pos;
@@ -235,6 +254,11 @@ typedef struct {
     /* Octave Transpose & Pitch Bend */
     int octave_transpose;
     float pitch_bend_semi;
+
+    /* Patch-matrix LFOs, one pair per timbre ([timbre][0 = LFO1, 1 = LFO2]), and the MIDI1/MIDI2
+     * patch sources (CC1 mod wheel, CC2), 0..1 */
+    lfo_t patch_lfo[2][2];
+    float midi_src[2];
 } synth_engine_t;
 
 /* Move Plugin Host API v1 */
@@ -291,7 +315,7 @@ typedef struct {
     float cutoff_octaves;
     float cutoff_floor_hz;
     float cutoff_ceil_hz;
-    float env_depth_hz;       /* filter EG at full intensity, in Hz added to the cutoff */
+    float bpf_k0;             /* band-pass damping k at resonance 0 (3.06 = Q 0.33, measured) */
     float env_octaves;        /* filter EG at full intensity, in octaves (multiplies the cutoff) */
     float res_damping_range;  /* SVF damping k = 2 - range * resonance */
     float lp24_res_scale;     /* resonance scale per stage of the 24 dB filter */
@@ -301,6 +325,12 @@ typedef struct {
     float release_scale;
     float mixer_trim;         /* gain after the oscillators are summed */
     float delay_send_scale;   /* delay repeats added = depth * scale */
+    float patch_cutoff_octaves; /* virtual patch -> cutoff at intensity 63, full source, in octaves (VST: >= ~10, set to the knob span) */
+    float patch_pitch_scale;  /* virtual patch -> pitch / osc2 pitch at intensity 63, in semitones (VST: 24.1 measured) */
+    float lfo_tempo_bpm;      /* tempo for tempo-synced LFOs (no host tempo is read) */
+    float patch_int_curve;    /* patch depth = full scale * (|int|/63)^curve (VST: 2.4 measured at +20 / +63) */
+    float tilt_db;            /* high-shelf gain on the voice mix, dB (VST open saw vs ideal: 26.7) */
+    float tilt_hz;            /* high-shelf corner, Hz (20000): ~+2 dB at 3 kHz, +7 at 8 kHz, +18 at 17 kHz */
 } tinyk_tuning_t;
 
 #ifdef TINYK_TUNING

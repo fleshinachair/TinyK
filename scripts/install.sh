@@ -26,14 +26,15 @@ DEST=/data/UserData/schwung/modules/sound_generators/TinyK
 echo "Copying module to Move ($MOVE_HOST)..."
 ssh "$MOVE_HOST" "mkdir -p $DEST"
 scp $SRC_DIR/dsp.so $MOVE_HOST:$DEST/dsp.so.new
-scp $SRC_DIR/module.json $SRC_DIR/ui.js $SRC_DIR/presets.json $SRC_DIR/help.json $MOVE_HOST:$DEST/
+scp $SRC_DIR/module.json $SRC_DIR/ui.js $SRC_DIR/presets.json $SRC_DIR/help.json $SRC_DIR/release.json $MOVE_HOST:$DEST/
 ssh "$MOVE_HOST" "mv -f $DEST/dsp.so.new $DEST/dsp.so"
 
-# Optional .syx banks: added to $DEST/banks/ (banks already on the Move are left in place)
+# Optional .syx banks from your local banks/ folder (never part of the release package). Banks already on
+# the Move are left in place.
 ssh "$MOVE_HOST" "mkdir -p $DEST/banks"
-if ls $SRC_DIR/banks/*.syx >/dev/null 2>&1 || ls $SRC_DIR/banks/*.SYX >/dev/null 2>&1; then
-    echo "Copying .syx banks..."
-    scp $SRC_DIR/banks/*.[sS][yY][xX] $MOVE_HOST:$DEST/banks/
+if ls banks/*.syx >/dev/null 2>&1 || ls banks/*.SYX >/dev/null 2>&1; then
+    echo "Copying local .syx banks..."
+    scp banks/*.[sS][yY][xX] "$MOVE_HOST:$DEST/banks/"
 fi
 
 # Set permissions

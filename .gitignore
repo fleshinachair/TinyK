@@ -11,4 +11,17 @@ dist/
 __pycache__/
 .serena/
 .toolchain/
-tools/FactoryBackUpDoResetAfter.syx
+
+# SysEx banks and programs are local inputs: presets.h is generated from them and committed, so the
+# module builds and plays with no .syx present
+*.syx
+banks/*.syx
+# user bank drop folder: contents never tracked, the folder itself is (via .gitkeep)
+banks/*
+!banks/.gitkeep
+
+# calibration recordings
+tools/reference/*.wav
+
+# rendered demos (tools/render_demo_sweeps.py)
+output/
