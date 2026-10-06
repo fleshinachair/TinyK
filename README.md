@@ -7,7 +7,7 @@ A lightweight, microKORG-inspired virtual analog synth engine for Ableton Move, 
 - **TPT zero-delay-feedback state-variable filter** (LPF24, LPF12, BPF12, HPF12) with a pre-filter drive stage, stable from low cutoffs up to 19 kHz at any resonance.
 - **Virtual Patch matrix and two LFOs per timbre**, decoded from the patch data.
 - **microKORG category navigation:** pick one of 8 categories, then scroll its 16 programs (A1–A8, B1–B8) on a single knob, with the patch name in the header. No separate A/B toggle.
-- **Dynamic SysEx bank loader:** drop microKORG `.syx` bank dumps into the module's `banks/` folder and switch between them by name. Banks are decoded once at start-up, so switching never allocates memory or touches files while audio runs.
+- **Dynamic SysEx bank loader:** drop microKORG/MS2000 `.syx` bank dumps into the module's `banks/` folder and switch between them by name. Banks are decoded once at start-up, so switching never allocates memory or touches files while audio runs.
 - **Built-in bank:** plays out of the box with no external files.
 
 ## Requirements
