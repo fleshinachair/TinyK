@@ -27,3 +27,14 @@
 - Voice mode is byte 16 bits 4-5 (0 = Single, 2 = Layer, 3 = Vocoder). Byte 14 is NOT the voice mode; it is `7` in 126 of 128 programs.
 - The program name bytes (0-11) are all spaces in this dump, so labels come from `FACTORY_LABELS` in the extractor (the hardware has only a 3-digit LED).
 - `wave1` is normalized as index/6 over Saw, Pulse, Tri, Sine, Vox, DWGS, Noise. Vox/DWGS are additive approximations (build_wavetable in dsp.c), not the sampled hardware waves.
+- Vocoder programs (16) do not use the synth timbre layout, so the extractor gives them a generic carrier and marks them `data_valid: false`. The delay has no on/off bit: depth (byte 21) 0 = off, otherwise it is a send added to the unity dry signal.
+- Mixer: osc1/osc2 levels and the amp level byte become `osc_mix` (balance, 0.5 = both full) plus `level`; the oscillators add, like the hardware.
+
+## Verification tools
+- `python tools/audit_all_presets.py` renders all 128 presets at note 60 and flags SILENT / VERY QUIET / CLICK ONLY / UNSTABLE (build uses `-DTINYK_DIAG` to count NaN/Inf).
+- `tools/test_behavior.c` checks Layer triggering, timbre-edit routing and the envelope time curves through the public param API.
+
+## Calibration against hardware recordings (tools/calibrate_dsp.py) - findings
+- `python tools/calibrate_dsp.py baseline | identify | tune [--exclude KEY] [--apply]`; engine constants are in `tinyk_tuning_t` (compile-time in the shipped build, adjustable with -DTINYK_TUNING).
+- The six references in `tools/reference/` do NOT all match the dump's programs: only A.12 and A.28 rank near the top of 128 (at MIDI 48, not 60); A.21 ranks 116th and the dump's B.11 is a copy of A.11. Two tuning runs (all 6, and the 4 plausible) were rejected by leave-one-out validation, so no constants were changed.
+- Before tuning again, re-verify that the dump is the factory bank (or re-record references from the dumped programs) and settle which MIDI note "C3" is.

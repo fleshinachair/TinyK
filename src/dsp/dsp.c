@@ -9,6 +9,22 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+#define TINYK_TUNING_DEFAULTS { 15.0f, 10.3f, 20.0f, 20000.0f, 8000.0f, 0.0f, 1.92f, 0.7f, 3.5f, 1.0f, 1.0f, 1.0f, 0.7f, 0.4f }
+#ifdef TINYK_TUNING
+tinyk_tuning_t tinyk_tuning = TINYK_TUNING_DEFAULTS;
+#else
+static const tinyk_tuning_t tinyk_tuning = TINYK_TUNING_DEFAULTS;
+#endif
+
+/* Audit builds (-DTINYK_DIAG) count non-finite values before they are sanitized, so
+ * tools/audit_all_presets.py can detect NaN/Inf that the int16 output would hide. */
+#ifdef TINYK_DIAG
+unsigned tinyk_diag_nonfinite = 0;
+#define DIAG_CHECK(x) do { if (!isfinite(x)) tinyk_diag_nonfinite++; } while (0)
+#else
+#define DIAG_CHECK(x) ((void)0)
+#endif
+
 /* Parameter names and short names */
 typedef struct {
     const char *id;
@@ -103,11 +119,22 @@ static inline float note_to_freq(float note) {
     return 440.0f * powf(2.0f, (note - 69.0f) * (1.0f / 12.0f));
 }
 
+static inline float clamp01f(float v) {
+    return fmaxf(0.0f, fminf(1.0f, v));
+}
+
+/* Envelope time ranges. Knob 0..1 maps exponentially (min * (max/min)^x), so the whole
+ * range is usable: instant stabs at 0, slow swells at 1. The minimums also keep plucks and
+ * note-offs from collapsing into clicks. */
+#define EG_ATTACK_MIN_S 0.0015f
+#define EG_ATTACK_MAX_S 12.0f
+#define EG_DECAY_MIN_S  0.015f   /* decay and release */
+#define EG_DECAY_MAX_S  20.0f
+
 /* ADSR calculation helpers */
 static inline float time_to_coeff(float time_val_01, float min_sec, float max_sec, float fs) {
     /* Exponential curve for decay/release time control */
-    float sec = min_sec * powf(max_sec / min_sec, time_val_01);
-    if (sec < 0.0005f) sec = 0.0005f;
+    float sec = min_sec * powf(max_sec / min_sec, clamp01f(time_val_01));
     float coeff = expf(-4.60517f / (sec * fs));
     if (coeff < 0.0f) coeff = 0.0f;
     if (coeff > 0.999999f) coeff = 0.999999f;
@@ -116,8 +143,7 @@ static inline float time_to_coeff(float time_val_01, float min_sec, float max_se
 
 static inline float attack_time_to_coeff(float time_val_01, float min_sec, float max_sec, float fs) {
     /* Analog RC exponential curve for attack time control targeting 1.35 overshoot for punch */
-    float sec = min_sec * powf(max_sec / min_sec, time_val_01);
-    if (sec < 0.0005f) sec = 0.0005f;
+    float sec = min_sec * powf(max_sec / min_sec, clamp01f(time_val_01));
     float coeff = expf(-1.35f / (sec * fs));
     if (coeff < 0.0f) coeff = 0.0f;
     if (coeff > 0.999999f) coeff = 0.999999f;
@@ -206,15 +232,19 @@ static inline float svf_process_2pole(svf_t *svf, float in, float fc, float res,
 
     /* g = tan(pi * fc / fs) */
     float g = tanf((float)M_PI * fc / fs);
-    /* Resonance mapping: res in [0, 1] -> damping k in [2.0, 0.08] */
-    float k = 2.0f - 1.92f * res;
+    /* Resonance mapping: res in [0, 1] -> damping k in [2.0, 0.08]. Non-finite or out-of-range
+     * values are sanitized so the feedback can never become negatively damped and blow up. */
+    if (!(res >= 0.0f)) res = 0.0f;
+    if (res > 1.0f) res = 1.0f;
+    float k = 2.0f - tinyk_tuning.res_damping_range * res;
+    if (k < 0.05f) k = 0.05f;
 
     /* Sanitize and clamp input signal */
     if (isnan(in) || isinf(in)) in = 0.0f;
     in = fmaxf(-3.0f, fminf(3.0f, in));
 
     /* Pre-filter drive stage with resonance gain compensation (compensating passband volume drop) */
-    float input_gain = (1.0f + drive * 3.5f) * (1.0f + res * 0.5f);
+    float input_gain = (1.0f + drive * tinyk_tuning.drive_gain) * (1.0f + res * 0.5f);
     float v0 = fast_tanh(in * input_gain);
 
     /* Soft non-linear saturation in the resonance feedback loop to prevent runaway spikes */
@@ -259,17 +289,16 @@ static inline float svf_process_2pole(svf_t *svf, float in, float fc, float res,
             break;
     }
 
+    DIAG_CHECK(out);
+    DIAG_CHECK(next_s1);
+    DIAG_CHECK(next_s2);
     if (isnan(out) || isinf(out)) out = 0.0f;
     return fmaxf(-2.0f, fminf(2.0f, out));
 }
 
-static inline float clamp01f(float v) {
-    return fmaxf(0.0f, fminf(1.0f, v));
-}
-
 /* Exponential cutoff map: 0..1 -> ~15 Hz .. ~19.6 kHz (5.1 octaves per half-turn) */
 static inline float cutoff_to_hz(float cutoff) {
-    return 15.0f * powf(2.0f, cutoff * 10.3f);
+    return tinyk_tuning.cutoff_base_hz * powf(2.0f, cutoff * tinyk_tuning.cutoff_octaves);
 }
 
 /* Soft-clipping saturation for the voice mix: unity gain for small signals, bounded at +/-1 */
@@ -339,6 +368,7 @@ static void apply_timbre(float *dst, timbre_extra_t *extra, const struct TimbreP
 
     extra->transpose_semi = (clamp01f(t->transpose) - 0.5f) * 48.0f;
     extra->noise_level = clamp01f(t->noise_level);
+    extra->level = clamp01f(t->level);
     extra->dwgs = clamp01f(t->dwgs);
 }
 
@@ -539,9 +569,6 @@ void synth_set_param(synth_engine_t *synth, const char *key, float val) {
         int t = (val >= 0.5f) ? 1 : 0;
         synth->timbre_edit = t;
         synth->params[PARAM_TIMBRE_EDIT] = (t == 1) ? 1.0f : 0.0f;
-        for (int i = 0; i < PARAM_LFO1_RATE; i++) {
-            synth->params[i] = synth->timbre_params[t][i];
-        }
         return;
     }
 
@@ -601,32 +628,35 @@ void synth_set_param(synth_engine_t *synth, const char *key, float val) {
 
     for (int i = 0; i < NUM_PARAMS; i++) {
         if (strcmp(PARAM_METAS[i].id, key) == 0) {
-            synth->params[i] = val;
             if (i == PARAM_VOICE_MODE) {
+                synth->params[i] = val;
                 synth->voice_mode = (val >= 0.5f) ? 1 : 0;
                 synth_all_notes_off(synth);
                 return;
             }
             if (i == PARAM_TIMBRE_EDIT) {
+                synth->params[i] = val;
                 synth->timbre_edit = (val >= 0.5f) ? 1 : 0;
                 return;
             }
             if (i == PARAM_TIMBRE_BALANCE) {
+                synth->params[i] = val;
                 synth->timbre_balance = val;
                 return;
             }
             int is_layer = (synth->params[PARAM_VOICE_MODE] > 0.5f) || (synth->voice_mode == 1);
             if (i < PARAM_LFO1_RATE) {
-                if (is_layer) {
-                    /* Layer mode: edit the selected timbre */
-                    synth->timbre_params[synth->timbre_edit][i] = val;
-                } else {
-                    /* Single mode: keep both timbres in sync */
-                    synth->timbre_params[0][i] = val;
+                /* params[] always mirrors Timbre 1 (it is what Single mode plays); Timbre 2 is only
+                 * touched when it is the timbre being edited in Layer mode, so its patch data survives. */
+                if (is_layer && synth->timbre_edit == 1) {
                     synth->timbre_params[1][i] = val;
+                } else {
+                    synth->params[i] = val;
+                    synth->timbre_params[0][i] = val;
                 }
             } else {
-                /* Global FX/Master params: keep both timbres in sync */
+                /* Global FX/Master params are shared by both timbres */
+                synth->params[i] = val;
                 synth->timbre_params[0][i] = val;
                 synth->timbre_params[1][i] = val;
             }
@@ -696,17 +726,13 @@ void synth_note_on(synth_engine_t *synth, uint8_t note, uint8_t velocity) {
     /* Compute exponential attack coefficients per timbre */
     float t1_atk1_p = synth->timbre_params[0][PARAM_ATTACK1];
     float t1_atk2_p = synth->timbre_params[0][PARAM_ATTACK2];
-    if (t1_atk1_p < 0.001f) t1_atk1_p = 0.01f;
-    if (t1_atk2_p < 0.001f) t1_atk2_p = 0.01f;
-    float t1_atk1_coef = attack_time_to_coeff(t1_atk1_p, 0.001f, 8.0f, fs);
-    float t1_atk2_coef = attack_time_to_coeff(t1_atk2_p, 0.001f, 8.0f, fs);
+    float t1_atk1_coef = attack_time_to_coeff(t1_atk1_p, EG_ATTACK_MIN_S * tinyk_tuning.attack_scale, EG_ATTACK_MAX_S * tinyk_tuning.attack_scale, fs);
+    float t1_atk2_coef = attack_time_to_coeff(t1_atk2_p, EG_ATTACK_MIN_S * tinyk_tuning.attack_scale, EG_ATTACK_MAX_S * tinyk_tuning.attack_scale, fs);
 
     float t2_atk1_p = synth->timbre_params[1][PARAM_ATTACK1];
     float t2_atk2_p = synth->timbre_params[1][PARAM_ATTACK2];
-    if (t2_atk1_p < 0.001f) t2_atk1_p = 0.01f;
-    if (t2_atk2_p < 0.001f) t2_atk2_p = 0.01f;
-    float t2_atk1_coef = attack_time_to_coeff(t2_atk1_p, 0.001f, 8.0f, fs);
-    float t2_atk2_coef = attack_time_to_coeff(t2_atk2_p, 0.001f, 8.0f, fs);
+    float t2_atk1_coef = attack_time_to_coeff(t2_atk1_p, EG_ATTACK_MIN_S * tinyk_tuning.attack_scale, EG_ATTACK_MAX_S * tinyk_tuning.attack_scale, fs);
+    float t2_atk2_coef = attack_time_to_coeff(t2_atk2_p, EG_ATTACK_MIN_S * tinyk_tuning.attack_scale, EG_ATTACK_MAX_S * tinyk_tuning.attack_scale, fs);
 
     float *params = synth->params;
     /* Synchronize voice_mode flag and params */
@@ -1054,6 +1080,7 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
         float glide_coeff;
         float transpose_semi;
         float noise_level;
+        float level;
         const float *wavetable;
 
         float base_fc;
@@ -1112,6 +1139,7 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
         t_cfg[t].sync_ring_mode = (int)(sync_ring_p * (float)(SYNC_RING_COUNT - 1) + 0.5f);
         t_cfg[t].transpose_semi = extra->transpose_semi;
         t_cfg[t].noise_level = extra->noise_level;
+        t_cfg[t].level = extra->level;
 
         /* Vox / DWGS wavetable: rebuild only when the selection changes */
         t_cfg[t].wavetable = synth->wavetable[t];
@@ -1140,12 +1168,12 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
         t_cfg[t].mod_int = mod_int_p;
         t_cfg[t].vel_sens = vel_sens_p;
 
-        t_cfg[t].dcy1_coef = time_to_coeff(decay1_p, 0.001f, 10.0f, fs);
+        t_cfg[t].dcy1_coef = time_to_coeff(decay1_p, EG_DECAY_MIN_S * tinyk_tuning.decay_scale, EG_DECAY_MAX_S * tinyk_tuning.decay_scale, fs);
         t_cfg[t].sustain1 = sustain1_p;
-        t_cfg[t].rel1_coef = time_to_coeff(release1_p, 0.001f, 10.0f, fs);
-        t_cfg[t].dcy2_coef = time_to_coeff(decay2_p, 0.001f, 10.0f, fs);
+        t_cfg[t].rel1_coef = time_to_coeff(release1_p, EG_DECAY_MIN_S * tinyk_tuning.release_scale, EG_DECAY_MAX_S * tinyk_tuning.release_scale, fs);
+        t_cfg[t].dcy2_coef = time_to_coeff(decay2_p, EG_DECAY_MIN_S * tinyk_tuning.decay_scale, EG_DECAY_MAX_S * tinyk_tuning.decay_scale, fs);
         t_cfg[t].sustain2 = sustain2_p;
-        t_cfg[t].rel2_coef = time_to_coeff(release2_p, 0.001f, 10.0f, fs);
+        t_cfg[t].rel2_coef = time_to_coeff(release2_p, EG_DECAY_MIN_S * tinyk_tuning.release_scale, EG_DECAY_MAX_S * tinyk_tuning.release_scale, fs);
     }
 
     /* LFO Frequencies: 0.05 Hz to 30 Hz */
@@ -1154,15 +1182,15 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
     float lfo1_dt = lfo1_freq / fs;
     float lfo2_dt = lfo2_freq / fs;
 
-    /* Delay buffer config: feedback strictly clamped < 0.92f */
+    /* Delay config. The hardware has one delay depth that sets both the repeats and the level;
+     * depth 0 means the delay is off. Feedback is capped at 0.6 so repeats die away instead of
+     * building into a pseudo-reverb wash. */
     float target_delay_samples = 100.0f + delay_time_p * (float)(DELAY_BUFFER_SIZE - 200);
-    float delay_feedback = fminf(delay_fdbk_p * 0.90f, 0.915f);
+    float delay_feedback = fminf(delay_fdbk_p * 0.75f, 0.6f);
+    float delay_send = delay_mix_p * tinyk_tuning.delay_send_scale;
+    int delay_on = (delay_mix_p > 0.005f);
 
     /* Pan: Left / Right gains */
-    /* Delay dry/wet: equal-power crossfade (constant loudness across the mix range) */
-    float delay_dry = cosf(delay_mix_p * (float)(M_PI * 0.5));
-    float delay_wet = sinf(delay_mix_p * (float)(M_PI * 0.5));
-
     float pan_l = cosf(pan_p * (float)(M_PI * 0.5)) * 1.4142f;
     float pan_r = sinf(pan_p * (float)(M_PI * 0.5)) * 1.4142f;
 
@@ -1253,6 +1281,7 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
                     if (pw > 0.95f) pw = 0.95f;
                     float raw = (v->osc1_phase < pw) ? 1.0f : -1.0f;
                     osc1_out = raw + poly_blep(v->osc1_phase, dt1) - poly_blep(fmod_pos(v->osc1_phase - pw), dt1);
+                    osc1_out -= 2.0f * pw - 1.0f; /* remove the duty-cycle DC offset */
                     break;
                 }
                 case OSC1_WAVE_TRIANGLE:
@@ -1302,8 +1331,13 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
             float sub_out = (v->sub_phase < 0.5f) ? 1.0f : -1.0f;
 
             /* Mixer: crossfade Osc1/Osc2 (peak <= 1.0), plus sub and noise; the voice-mix soft clip handles overs */
-            float osc_sum = (1.0f - cfg->osc_mix) * osc1_out + cfg->osc_mix * osc2_final
-                          + cfg->sub_level * sub_out + cfg->noise_level * white_noise;
+            /* osc_mix: 0 = osc1 only, 0.5 = both at full level, 1 = osc2 only (like the hardware
+             * mixer, the two oscillators add). cfg->level is the patch's overall level. */
+            float g1 = fminf(1.0f, 2.0f * (1.0f - cfg->osc_mix));
+            float g2 = fminf(1.0f, 2.0f * cfg->osc_mix);
+            float osc_sum = (g1 * osc1_out + g2 * osc2_final
+                          + cfg->sub_level * sub_out + cfg->noise_level * white_noise)
+                          * cfg->level * tinyk_tuning.mixer_trim;
 
             /* --- Envelopes (Exponential Curves) --- */
             float f_env = adsr_process(&v->filter_env, cfg->dcy1_coef, cfg->sustain1, cfg->rel1_coef);
@@ -1328,20 +1362,25 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
             /* Key tracking is bipolar around 0.5 (0.5 = none, 1.0 = one octave per octave) */
             float keytrack_mod = (v->note - 60.0f) * ((cfg->keytrack * 2.0f - 1.0f) * (1.0f / 12.0f));
             float lfo2_mod = cfg->mod_int * lfo2_val * 2.0f;
-            float cutoff_hz = cfg->base_fc * powf(2.0f, keytrack_mod + lfo2_mod);
+            float cutoff_hz = cfg->base_fc * powf(2.0f, fmaxf(-10.0f, fminf(10.0f, keytrack_mod + lfo2_mod)));
+            cutoff_hz = fmaxf(tinyk_tuning.cutoff_floor_hz, fminf(tinyk_tuning.cutoff_ceil_hz, cutoff_hz)); /* key tracking can never push it out of range */
 
             /* Bipolar filter envelope: env_int 0.5 = off, > 0.5 opens, < 0.5 closes on note strike */
             float bipolar_env = (cfg->env_int - 0.5f) * 2.0f;
             bipolar_env *= (1.0f - cfg->vel_sens + cfg->vel_sens * v->velocity);
             float eg1_val = f_env;
-            cutoff_hz = fmaxf(20.0f, fminf(20000.0f, cutoff_hz + (bipolar_env * eg1_val * 8000.0f)));
+            if (tinyk_tuning.env_octaves != 0.0f) {
+                cutoff_hz *= powf(2.0f, bipolar_env * eg1_val * tinyk_tuning.env_octaves);
+            }
+            cutoff_hz = fmaxf(tinyk_tuning.cutoff_floor_hz, fminf(tinyk_tuning.cutoff_ceil_hz,
+                              cutoff_hz + (bipolar_env * eg1_val * tinyk_tuning.env_depth_hz)));
             float fc = cutoff_hz;
 
             /* SVF Multimode Filter with feedback tanh saturation & bass preservation */
             float filtered = 0.0f;
             if (cfg->filter_type == FILTER_LP_24) {
-                float stage1 = svf_process_2pole(&v->filter_svf[0], osc_sum, fc, cfg->resonance * 0.7f, cfg->drive, FILTER_LP_12, fs);
-                filtered = svf_process_2pole(&v->filter_svf[1], stage1, fc, cfg->resonance * 0.7f, cfg->drive, FILTER_LP_12, fs);
+                float stage1 = svf_process_2pole(&v->filter_svf[0], osc_sum, fc, cfg->resonance * tinyk_tuning.lp24_res_scale, cfg->drive, FILTER_LP_12, fs);
+                filtered = svf_process_2pole(&v->filter_svf[1], stage1, fc, cfg->resonance * tinyk_tuning.lp24_res_scale, cfg->drive, FILTER_LP_12, fs);
             } else {
                 filtered = svf_process_2pole(&v->filter_svf[0], osc_sum, fc, cfg->resonance, cfg->drive, cfg->filter_type, fs);
             }
@@ -1353,6 +1392,7 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
 
             /* Amp Envelope & Velocity Scaling */
             float voice_audio = filtered * a_env * voice_vel;
+            DIAG_CHECK(voice_audio);
             if (isnan(voice_audio) || isinf(voice_audio)) voice_audio = 0.0f;
 
             /* Stereo pan spread & gain scaling. Layer mode: Voice A (Timbre 1) panned left and
@@ -1378,6 +1418,21 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
 
             voice_sum_l += voice_audio * v_gain_l;
             voice_sum_r += voice_audio * v_gain_r;
+        }
+
+        /* DC blocker (one-pole high-pass, ~3.5 Hz): y[n] = x[n] - x[n-1] + R * y[n-1] */
+        {
+            const float dc_r = 0.9995f;
+            float yl = voice_sum_l - synth->dc_x[0] + dc_r * synth->dc_y[0];
+            float yr = voice_sum_r - synth->dc_x[1] + dc_r * synth->dc_y[1];
+            synth->dc_x[0] = voice_sum_l;
+            synth->dc_x[1] = voice_sum_r;
+            if (fabsf(yl) < 1e-15f) yl = 0.0f;
+            if (fabsf(yr) < 1e-15f) yr = 0.0f;
+            synth->dc_y[0] = yl;
+            synth->dc_y[1] = yr;
+            voice_sum_l = yl;
+            voice_sum_r = yr;
         }
 
         /* Soft-clip the voice mix so stacked voices and layered timbres saturate smoothly */
@@ -1426,7 +1481,17 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
         float out_l = chorus_l;
         float out_r = chorus_r;
 
-        if (delay_mix_p > 0.01f) {
+        if (!delay_on) {
+            /* Bypassed: 100% dry. Flush the line once so stale repeats cannot reappear later. */
+            if (synth->delay_active) {
+                memset(synth->delay_buf_l, 0, sizeof(synth->delay_buf_l));
+                memset(synth->delay_buf_r, 0, sizeof(synth->delay_buf_r));
+                synth->delay_filter_l = 0.0f;
+                synth->delay_filter_r = 0.0f;
+                synth->delay_active = 0;
+            }
+        } else {
+            synth->delay_active = 1;
             uint32_t dwpos = synth->delay_write_pos;
 
             float drpos_l = (float)dwpos - target_delay_samples;
@@ -1457,14 +1522,16 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
             synth->delay_buf_r[dwpos] = chorus_r + fast_tanh(synth->delay_filter_r * delay_feedback);
             synth->delay_write_pos = (dwpos + 1) % DELAY_BUFFER_SIZE;
 
-            /* Proper dry/wet crossfading */
-            out_l = chorus_l * delay_dry + dtap_l * delay_wet;
-            out_r = chorus_r * delay_dry + dtap_r * delay_wet;
+            /* Dry stays at unity; the repeats are added as an aux send */
+            out_l = chorus_l + dtap_l * delay_send;
+            out_r = chorus_r + dtap_r * delay_send;
         }
 
         /* 6. Master Volume, Pan, Soft-Knee Limiter & Convert to int16 */
         if (master_vol_p <= 0.01f) master_vol_p = 0.8f;
 
+        DIAG_CHECK(out_l);
+        DIAG_CHECK(out_r);
         float pre_lim_l = out_l * master_vol_p * pan_l;
         float pre_lim_r = out_r * master_vol_p * pan_r;
 
@@ -1763,9 +1830,6 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         }
         synth->timbre_edit = t;
         synth->params[PARAM_TIMBRE_EDIT] = (t == 1) ? 1.0f : 0.0f;
-        for (int i = 0; i < PARAM_LFO1_RATE; i++) {
-            synth->params[i] = synth->timbre_params[t][i];
-        }
         return;
     }
 
