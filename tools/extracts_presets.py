@@ -53,7 +53,7 @@ FACTORY_LABELS = [
 
 # Timbre float fields, in the order they appear in struct TimbreParams.
 TIMBRE_FIELDS = [
-    "wave1", "pulse_width", "wave2", "detune", "sync_ring", "osc_mix", "sub_level", "noise_level",
+    "wave1", "pulse_width", "wave2", "detune", "sync_ring", "osc_mix", "sub_level", "noise_level", "level",
     "portamento", "transpose", "dwgs",
     "cutoff", "resonance", "filter_type", "keytrack", "env_int", "drive",
     "attack1", "decay1", "sustain1", "release1", "attack2", "decay2", "sustain2", "release2",
@@ -63,6 +63,21 @@ FX_FIELDS = ["chorus_mix", "delay_time", "delay_feedback", "delay_mix"]
 # Hardware osc2 mod-select (0 off, 1 ring, 2 sync, 3 ring+sync) -> engine
 # sync_ring index (0 off, 1 sync, 2 ring, 3 both).
 MODSEL_TO_ENGINE = {0: 0, 1: 2, 2: 1, 3: 3}
+
+
+# Vocoder programs (voice mode 3) do not use the synth timbre layout: their Timbre 2 area holds
+# vocoder channel data (bytes > 127) and the carrier fields are constants (portamento 127,
+# osc1 level 0). That layout is not documented here and the engine has no vocoder, so decoding
+# them as synth timbres yields near-silent garbage. They get this generic, audible carrier
+# instead and are flagged data_valid=false in the JSON.
+VOCODER_CARRIER = {
+    "wave1": 0.0, "pulse_width": 0.0, "wave2": 0.0, "detune": 0.5 + 0.12 / 48.0, "sync_ring": 0.0,
+    "osc_mix": 0.5, "sub_level": 0.0, "noise_level": 0.0, "level": 0.9, "portamento": 0.0, "transpose": 0.5,
+    "dwgs": 0.0, "cutoff": 0.72, "resonance": 0.12, "filter_type": 0.0, "keytrack": 0.75,
+    "env_int": 0.5, "drive": 0.0,
+    "attack1": 0.2, "decay1": 0.5, "sustain1": 1.0, "release1": 0.45,
+    "attack2": 0.25, "decay2": 0.5, "sustain2": 1.0, "release2": 0.45,
+}
 
 
 def clamp01(val):
@@ -124,8 +139,18 @@ def parse_timbre(prog, t):
     # Timbre pitch: transpose (+-24) plus tune (+-50 cents).
     transpose_semis = (prog[t + 5] - 64) + (prog[t + 3] - 64) / 100.0
 
-    osc1_lvl, osc2_lvl = prog[t + 16], prog[t + 17]
-    osc_mix = osc2_lvl / float(osc1_lvl + osc2_lvl) if osc1_lvl + osc2_lvl else 0.5
+    # Mixer: the hardware sums osc1 and osc2 at their own levels. The engine models that as a
+    # balance knob (0 = osc1 only, 0.5 = both full, 1 = osc2 only) plus an overall level, which
+    # also carries the timbre's amp level byte.
+    osc1_lvl, osc2_lvl = prog[t + 16] / 127.0, prog[t + 17] / 127.0
+    loudest = max(osc1_lvl, osc2_lvl)
+    if loudest <= 0.0:
+        osc_mix = 0.5
+    elif osc1_lvl >= osc2_lvl:
+        osc_mix = 0.5 * osc2_lvl / osc1_lvl
+    else:
+        osc_mix = 1.0 - 0.5 * osc1_lvl / osc2_lvl
+    level = loudest * unit(prog[t + 25])
 
     return {
         "wave1": wave1 / 6.0,
@@ -134,6 +159,7 @@ def parse_timbre(prog, t):
         "detune": clamp01(0.5 + osc2_semis / 48.0),
         "sync_ring": mod_select / 3.0,
         "osc_mix": clamp01(osc_mix),
+        "level": clamp01(level),
         "sub_level": 0.0,  # the microKORG has no sub oscillator
         "noise_level": unit(prog[t + 18]),
         "portamento": unit(prog[t + 15]),
@@ -161,24 +187,32 @@ def parse_program(idx, prog):
     mode_bits = (prog[16] >> 4) & 0x03
     mode = {0: "single", 2: "layer", 3: "vocoder"}.get(mode_bits, "single")
 
-    delay_depth = prog[21]
-    delay_fb = unit(delay_depth)
+    # The hardware has one delay depth (byte 21) that sets repeats and level together, and no
+    # separate on/off: depth 0 is off. The engine adds the repeats as a send (dry stays unity),
+    # so mix and feedback both come from the depth, and depth 0 bypasses the delay line.
+    delay_fb = unit(prog[21])
     fx = {
         "chorus_mix": unit(prog[24]),
         "delay_time": unit(prog[20]),
         "delay_feedback": delay_fb,
-        # The hardware has a single delay depth; wet level is derived from it.
-        "delay_mix": clamp01(0.25 + 0.25 * delay_fb) if delay_depth else 0.0,
+        "delay_mix": delay_fb,
     }
+
+    data_valid = mode != "vocoder"
+    if data_valid:
+        t1, t2 = parse_timbre(prog, TIMBRE_OFFSETS[0]), parse_timbre(prog, TIMBRE_OFFSETS[1])
+    else:
+        t1, t2 = dict(VOCODER_CARRIER), dict(VOCODER_CARRIER)
 
     return {
         "label": f"{code} {name}",
         "name_from_syx": bool(raw_name),
         "mode": mode,
+        "data_valid": data_valid,
         # Vocoder programs have no engine equivalent; they play as Single.
         "voice_mode": 1.0 if mode == "layer" else 0.0,
-        "t1": parse_timbre(prog, TIMBRE_OFFSETS[0]),
-        "t2": parse_timbre(prog, TIMBRE_OFFSETS[1]),
+        "t1": t1,
+        "t2": t2,
         "fx": fx,
     }
 
@@ -193,7 +227,7 @@ def render_header(presets):
     out.append("#ifndef PRESETS_H\n#define PRESETS_H\n\n")
     out.append("/* All floats are normalized to [0.0, 1.0]. */\n")
     out.append("struct TimbreParams {\n")
-    out.append("    float wave1, pulse_width, wave2, detune, sync_ring, osc_mix, sub_level, noise_level;\n")
+    out.append("    float wave1, pulse_width, wave2, detune, sync_ring, osc_mix, sub_level, noise_level, level;\n")
     out.append("    float portamento, transpose, dwgs;\n")
     out.append("    float cutoff, resonance, filter_type, keytrack, env_int, drive;\n")
     out.append("    float attack1, decay1, sustain1, release1, attack2, decay2, sustain2, release2;\n")
@@ -229,6 +263,7 @@ def render_json(presets):
             "label": p["label"],
             "name_from_syx": p["name_from_syx"],
             "mode": p["mode"],
+            "data_valid": p["data_valid"],
             "voice_mode": p["voice_mode"],
         }
         for f in TIMBRE_FIELDS:

@@ -172,6 +172,7 @@ typedef struct {
 typedef struct {
     float transpose_semi;   /* Timbre transpose + tune, in semitones */
     float noise_level;      /* 0..1 white noise in the mixer */
+    float level;            /* 0..1 overall timbre level (osc levels x amp level) */
     float dwgs;             /* 0..1 -> DWGS waveform 0..63 */
 } timbre_extra_t;
 
@@ -201,6 +202,11 @@ typedef struct {
     uint32_t delay_write_pos;
     float delay_filter_l;
     float delay_filter_r;
+    int delay_active;       /* 0 while the delay line is bypassed (depth 0) */
+
+    /* DC blocker state (L/R) on the voice mix */
+    float dc_x[2];
+    float dc_y[2];
 
     float chorus_buf_l[CHORUS_BUFFER_SIZE];
     float chorus_buf_r[CHORUS_BUFFER_SIZE];
@@ -276,6 +282,30 @@ audio_fx_api_v2_t* move_audio_fx_init_v2(const host_api_v1_t *host);
 void move_audio_fx_on_midi(void *instance, const uint8_t *msg, int len, int source);
 void move_plugin_on_midi(void *instance, const uint8_t *msg, int len, int source);
 void move_audio_fx_process(void *instance, int16_t *out_interleaved_lr, int frames);
+
+/* Global transfer-function constants. They are plain compile-time constants in the shipped
+ * build; tools/calibrate_dsp.py builds the engine with -DTINYK_TUNING so it can adjust them
+ * at run time (see tools/test_render.c) and fit them against hardware recordings. */
+typedef struct {
+    float cutoff_base_hz;     /* cutoff = base * 2^(cutoff_param * cutoff_octaves) */
+    float cutoff_octaves;
+    float cutoff_floor_hz;
+    float cutoff_ceil_hz;
+    float env_depth_hz;       /* filter EG at full intensity, in Hz added to the cutoff */
+    float env_octaves;        /* filter EG at full intensity, in octaves (multiplies the cutoff) */
+    float res_damping_range;  /* SVF damping k = 2 - range * resonance */
+    float lp24_res_scale;     /* resonance scale per stage of the 24 dB filter */
+    float drive_gain;         /* input gain added per unit of drive */
+    float attack_scale;       /* multipliers on the EG time ranges (1.0 = 1.5 ms..12 s, 15 ms..20 s) */
+    float decay_scale;
+    float release_scale;
+    float mixer_trim;         /* gain after the oscillators are summed */
+    float delay_send_scale;   /* delay repeats added = depth * scale */
+} tinyk_tuning_t;
+
+#ifdef TINYK_TUNING
+extern tinyk_tuning_t tinyk_tuning;
+#endif
 
 /* Engine functions */
 void synth_init(synth_engine_t *synth);
