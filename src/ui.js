@@ -3,18 +3,19 @@
  *
  * Handles 128x64 OLED display rendering and 8 hardware encoders
  * across the parameter pages (the same pages as the module.json ui_hierarchy):
- *   PERF:         Category, Program, Cutoff, Res, Amp Attack, Amp Release, Arp, Mod Wheel
+ *   PERF:         Category, Program, Cutoff, Res, Amp Attack, Amp Release, Timbre Edit, Arp
+ *   OSC / TIMBRE: Wave1, Wave2, Pulse Width, Semi, Tune, Voice Mode, Timbre Balance, Mod Wheel
+ *   ENVELOPES:    Filter Atk/Dcy/Sus/Rel, Amp Dcy/Sus, Key Track, EG Int
+ *   MIX / FILTER: Osc Mix, Noise, Sync/Ring, Filter Type, Drive, Level, Portamento
+ *   EFFECTS:      Chorus Mix, Delay Time/Feedback/Mix, Master Vol, Pan, LFO1/LFO2 Rate
  *   ARP SETTINGS: Type, Range, Resolution, Gate, Swing, Latch, Key Sync, Target
  *   ARP STEPS:    Step 1..8 of the arpeggiator's pattern (Rest / Play), drawn as the microKORG's 2 x 4 step LEDs
  *                 (hollow = Rest, filled = Play, inverted = sounding, dotted = past the pattern's length), as
  *                 canvas.js draws them on the Schwung param pages
- *   OSC / TIMBRE: Wave1, Pulse Width, Wave2, Semi, Tune, Voice Mode, Timbre Edit, Timbre Balance
- *   ENVELOPES:    Filter Atk/Dcy/Sus/Rel, Amp Dcy/Sus, Key Track, EG Int
- *   MIX / FILTER: Osc Mix, Noise, Sync/Ring, Filter Type, Portamento, Level, Drive
- *   EFFECTS:      Chorus Mix, Delay Time/Feedback/Mix, LFO1/LFO2 Rate, Master Vol, Pan
  *   BANK:         the active bank file
  * Pages marked `timbre` edit the timbre selected by Timbre Edit (in Layer mode): their header shows
- * [T1] or [T2], and with Timbre 2 their per-timbre labels read "T2.CUT" etc.
+ * [T1] or [T2], and in Layer mode their per-timbre labels name it ("T1.CUT" / "T2.CUT"). Single mode has
+ * one timbre: plain labels, and Timbre Edit reads "N/A".
  */
 
 // Cutoff knob -> Hz, the engine's measured mapping (cutoff_base_hz * 2^(knob * cutoff_octaves))
@@ -41,33 +42,11 @@ export const PAGES = [
             { key: "resonance",      label: "Res",     short: "Res",  t2: "T2.RES", format: pct },
             { key: "attack2",        label: "AmpAtk",  short: "Atk",  t2: "T2.ATK", format: pct },
             { key: "release2",       label: "AmpRel",  short: "Rel",  t2: "T2.REL", format: pct },
+            // which timbre the per-timbre controls edit (Layer mode; "N/A" in Single)
+            { key: "timbre_edit",    label: "Edit",    short: "Edit", values: ["Timb 1", "Timb 2"] },
             // the program's arpeggiator (stored on / off until changed here)
-            { key: "arp_on",         label: "Arp",     short: "Arp",   values: ["Off", "On"] },
-            // stands in for the mod wheel the Move lacks: virtual patch source 7, same as CC1
-            { key: "mod_wheel",      label: "ModWhl",  short: "MOD",   int: [0, 127], format: (v) => `${Math.round(v)}` }
+            { key: "arp_on",         label: "Arp",     short: "Arp",   values: ["Off", "On"] }
         ]
-    },
-    {
-        id: "arpset",
-        name: "ARP SETTINGS",
-        // the program's arpeggiator; a turn changes the running arpeggio at once
-        params: [
-            { key: "arp_type",       label: "Type",   short: "Type",  index: true, values: ["UP", "DOWN", "ALT1", "ALT2", "RND", "TRIG"] },
-            { key: "arp_range",      label: "Range",  short: "Range", index: true, values: ["1 Oct", "2 Oct", "3 Oct", "4 Oct"] },
-            { key: "arp_resolution", label: "Reso",   short: "Reso",  index: true, values: ["1/24", "1/16", "1/12", "1/8", "1/6", "1/4"] },
-            { key: "arp_gate",       label: "Gate",   short: "Gate",  int: [0, 100], format: (v) => `${Math.round(v)}%` },
-            { key: "arp_swing",      label: "Swing",  short: "Swing", int: [-100, 100], format: (v) => `${v > 0 ? "+" : ""}${Math.round(v)}%` },
-            { key: "arp_latch",      label: "Latch",  short: "Latch", index: true, values: ["Off", "On"] },
-            { key: "arp_key_sync",   label: "KeySync", short: "KSync", index: true, values: ["Off", "On"] },
-            { key: "arp_target",     label: "Target", short: "Targ",  index: true, values: ["Both", "T1", "T2"] }
-        ]
-    },
-    {
-        id: "steps",
-        name: "ARP STEPS",
-        // the arpeggiator's 8-step trigger pattern: each step plays or rests, live; drawn as LEDs (drawStepLeds)
-        leds: true,
-        params: [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ key: `arp_step${n}`, label: `Step${n}`, short: `St${n}`, values: ["Rest", "Play"] }))
     },
     {
         id: "osc",
@@ -75,14 +54,15 @@ export const PAGES = [
         timbre: true,
         params: [
             { key: "wave1",          label: "Wave1",   short: "Wav1", t2: "T2.WV1", index: true, values: ["SAW", "SQR", "TRI", "SIN", "VOX", "DWG", "NZ"] },
-            { key: "pulse_width",    label: "Width",   short: "PulW", t2: "T2.PW",  format: (v) => `${Math.round(50 + 45 * v)}%` },
             { key: "wave2",          label: "Wave2",   short: "Wav2", t2: "T2.WV2", index: true, values: ["SAW", "SQR", "TRI"] },
+            { key: "pulse_width",    label: "Width",   short: "PulW", t2: "T2.PW",  format: (v) => `${Math.round(50 + 45 * v)}%` },
             { key: "osc2_semi",      label: "Semi",    short: "Semi", t2: "T2.SEMI", int: [-24, 24], format: signed("st") },
             { key: "osc2_tune",      label: "Tune",    short: "Tune", t2: "T2.TUNE", int: [-50, 50], format: signed("ct") },
-            // 2-position voice/timbre switches
+            // Single (one timbre, 4 voices) or Layer (two timbres, 2 voices each), and the layers' balance
             { key: "voice_mode",     label: "Mode",    short: "Mode", values: ["Single", "Layer"] },
-            { key: "timbre_edit",    label: "Edit",    short: "Edit", values: ["Timb 1", "Timb 2"] },
-            { key: "timbre_balance", label: "Balance", short: "Bal",  format: (v) => `${Math.round((1 - v) * 100)}:${Math.round(v * 100)}` }
+            { key: "timbre_balance", label: "Balance", short: "Bal",  format: (v) => `${Math.round((1 - v) * 100)}:${Math.round(v * 100)}` },
+            // stands in for the mod wheel the Move lacks: virtual patch source 7, same as CC1
+            { key: "mod_wheel",      label: "ModWhl",  short: "MOD",   int: [0, 127], format: (v) => `${Math.round(v)}` }
         ]
     },
     {
@@ -110,9 +90,9 @@ export const PAGES = [
             // option indices, in the hardware's order (the engine remaps Sync / Ring to its own)
             { key: "sync_ring",   label: "SyncR", short: "SyncR", t2: "T2.SYNC", index: true, values: ["OFF", "RING", "SYNC", "R.SNC"] },
             { key: "filter_type", label: "Type",  short: "Type",  t2: "T2.FTYP", index: true, values: ["LPF24", "LPF12", "BPF12", "HPF12"] },
-            { key: "portamento",  label: "Porta", short: "Porta", t2: "T2.PORT", format: pct },
+            { key: "drive",       label: "Drive", short: "Drive", t2: "T2.DRV", format: pct },
             { key: "level",       label: "Level", short: "Level", t2: "T2.LVL",  format: pct },
-            { key: "drive",       label: "Drive", short: "Drive", t2: "T2.DRV", format: pct }
+            { key: "portamento",  label: "Porta", short: "Porta", t2: "T2.PORT", format: pct }
         ]
     },
     {
@@ -123,11 +103,33 @@ export const PAGES = [
             { key: "delay_time",  label: "Time",  short: "Time",  format: (v) => `${Math.round(v * 1000)}ms` },
             { key: "delay_feedback",label: "Fdbk",short: "Fdbk",  format: pct },
             { key: "delay_mix",   label: "D.Mix", short: "D.Mix", format: pct },
-            { key: "lfo1_rate",   label: "LFO1",  short: "LFO1",  format: (v) => `${(0.05 * Math.pow(600, v)).toFixed(1)}Hz` },
-            { key: "lfo2_rate",   label: "LFO2",  short: "LFO2",  format: (v) => `${(0.05 * Math.pow(600, v)).toFixed(1)}Hz` },
             { key: "master_vol",  label: "Vol",   short: "Vol",   format: pct },
-            { key: "pan",         label: "Pan",   short: "Pan",   format: (v) => v < 0.48 ? `L${Math.round((0.5 - v) * 200)}` : (v > 0.52 ? `R${Math.round((v - 0.5) * 200)}` : "C") }
+            { key: "pan",         label: "Pan",   short: "Pan",   format: (v) => v < 0.48 ? `L${Math.round((0.5 - v) * 200)}` : (v > 0.52 ? `R${Math.round((v - 0.5) * 200)}` : "C") },
+            { key: "lfo1_rate",   label: "LFO1",  short: "LFO1",  format: (v) => `${(0.05 * Math.pow(600, v)).toFixed(1)}Hz` },
+            { key: "lfo2_rate",   label: "LFO2",  short: "LFO2",  format: (v) => `${(0.05 * Math.pow(600, v)).toFixed(1)}Hz` }
         ]
+    },
+    {
+        id: "arpset",
+        name: "ARP SETTINGS",
+        // the program's arpeggiator; a turn changes the running arpeggio at once
+        params: [
+            { key: "arp_type",       label: "Type",   short: "Type",  index: true, values: ["UP", "DOWN", "ALT1", "ALT2", "RND", "TRIG"] },
+            { key: "arp_range",      label: "Range",  short: "Range", index: true, values: ["1 Oct", "2 Oct", "3 Oct", "4 Oct"] },
+            { key: "arp_resolution", label: "Reso",   short: "Reso",  index: true, values: ["1/24", "1/16", "1/12", "1/8", "1/6", "1/4"] },
+            { key: "arp_gate",       label: "Gate",   short: "Gate",  int: [0, 100], format: (v) => `${Math.round(v)}%` },
+            { key: "arp_swing",      label: "Swing",  short: "Swing", int: [-100, 100], format: (v) => `${v > 0 ? "+" : ""}${Math.round(v)}%` },
+            { key: "arp_latch",      label: "Latch",  short: "Latch", index: true, values: ["Off", "On"] },
+            { key: "arp_key_sync",   label: "KeySync", short: "KSync", index: true, values: ["Off", "On"] },
+            { key: "arp_target",     label: "Target", short: "Targ",  index: true, values: ["Both", "T1", "T2"] }
+        ]
+    },
+    {
+        id: "steps",
+        name: "ARP STEPS",
+        // the arpeggiator's 8-step trigger pattern: each step plays or rests, live; drawn as LEDs (drawStepLeds)
+        leds: true,
+        params: [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ key: `arp_step${n}`, label: `Step${n}`, short: `St${n}`, values: ["Rest", "Play"] }))
     },
     {
         id: "bank",
@@ -300,6 +302,9 @@ export class MicroKorgUI {
         if (paramDef.presetName) {
             return this.getPresetName();
         }
+        if (paramDef.key === "timbre_edit" && !this.isLayer()) {
+            return "N/A"; // Single mode: Timbre 2 is not playing
+        }
         if (paramDef.values) {
             const num = parseFloat(val);
             let idx = 0;
@@ -330,10 +335,13 @@ export class MicroKorgUI {
         return `${Math.round(val * 100)}%`;
     }
 
+    isLayer() {
+        return parseFloat(this.getParam("voice_mode")) >= 0.5;
+    }
+
     // The timbre the per-timbre controls edit, as the engine routes them: 2 only for Timbre 2 in Layer mode
     editTimbre() {
-        const layer = parseFloat(this.getParam("voice_mode")) >= 0.5;
-        return (layer && parseInt(this.getParam("timbre_edit")) === 1) ? 2 : 1;
+        return (this.isLayer() && parseInt(this.getParam("timbre_edit")) === 1) ? 2 : 1;
     }
 
     // The step lit on the Arp Steps LEDs (-1: none) and the pattern length, from the engine's arp_playhead
@@ -429,9 +437,10 @@ export class MicroKorgUI {
             const x = col * colWidth;
             const y = 16 + row * 24;
 
-            // Parameter short label (e.g. "Wav1", "Cut"; "T2.CUT" while Timbre 2 is edited)
+            // Parameter short label (e.g. "Wav1", "Cut"; "T1.CUT" / "T2.CUT" in Layer mode)
             if (typeof display.print === "function") {
-                display.print(x + 2, y, (timbre === 2 && paramDef.t2) ? paramDef.t2 : paramDef.short);
+                const label = (timbre && paramDef.t2 && this.isLayer()) ? paramDef.t2.replace("T2", `T${timbre}`) : paramDef.short;
+                display.print(x + 2, y, label);
             }
 
             // Value label or mini bar
