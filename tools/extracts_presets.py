@@ -8,13 +8,20 @@ Timbre 1 and Timbre 2 parameters, all normalized to [0.0, 1.0].
 
 Program layout (offsets into the 254-byte unpacked program):
     0..11     patch name (ASCII)
+    14        arpeggiator trigger length - 1 (0..7 = 1..8 steps)
+    15        arpeggiator trigger pattern: bit n = step n + 1, SET = rest (most factory arps store 0: all steps)
     16        bits 4-5: voice mode (0 = Single, 2 = Layer, 3 = Vocoder)
     19..25    delay / mod-FX
+    30..31    arpeggiator tempo (MSB, LSB; the engine follows the session tempo instead)
+    32        arpeggiator: bit 7 on, bit 6 latch, bits 4-5 target (both, timbre 1, timbre 2), bit 0 key sync
+    33        arpeggiator: bits 0-3 type (up, down, alt1, alt2, random, trigger), bits 4-7 range - 1 octaves
+    34/35/36  arpeggiator gate time (0..100 %), resolution (1/24, 1/16, 1/12, 1/8, 1/6, 1/4), swing (signed, %)
     38..145   Timbre 1 (108 bytes)
     146..253  Timbre 2 (108 bytes)
 
 Timbre layout (offset from timbre start):
-    3 tune, 5 transpose, 7 osc1 wave, 8 osc1 ctrl1 (pulse width), 10 DWGS wave,
+    3 tune, 5 transpose, 7 osc1 wave, 8 / 9 osc1 ctrl1 / ctrl2 (what they control depends on the wave:
+    pulse width for Pulse; for Sine, cross-modulation depth by Osc 2 / LFO1 modulation of it), 10 DWGS wave,
     12 osc2 (bits 4-5 mod select, bits 0-1 wave), 13 osc2 semitone, 14 osc2 tune,
     15 portamento, 16/17/18 osc1/osc2/noise level, 19 filter type, 20 cutoff,
     21 resonance, 22 EG1 intensity, 24 key track, 27 distortion,
@@ -64,6 +71,7 @@ TIMBRE_FIELDS = [
     "lfo2_wave", "lfo2_rate", "lfo2_keysync", "lfo2_sync_note",
     "patch1_src", "patch1_dst", "patch1_int", "patch2_src", "patch2_dst", "patch2_int",
     "patch3_src", "patch3_dst", "patch3_int", "patch4_src", "patch4_dst", "patch4_int",
+    "osc1_ctrl1", "osc1_ctrl2",
 ]
 # LFO / virtual patch encoding (all [0, 1]):
 #   lfoN_wave      wave index / 3     (LFO1: saw, square, triangle, S&H; LFO2: saw, square, sine, S&H)
@@ -72,8 +80,14 @@ TIMBRE_FIELDS = [
 #   patchN_src     source / 7         (EG1, EG2, LFO1, LFO2, velocity, keyboard track, pitch bend, mod wheel)
 #   patchN_dst     destination / 7    (pitch, osc2 pitch, osc1 ctrl1, noise level, cutoff, amp, pan, LFO2 freq)
 #   patchN_int     bipolar, 0.5 = no modulation
+#   osc1_ctrlN     Osc 1 Control 1 / 2, raw 0..127 / 127 (pulse_width repeats ctrl1 for the Pulse wave)
 # delay_sync: 0 = free (delay_time is a time), else (time base index + 1) / 15 of the tempo-sync note table
 FX_FIELDS = ["chorus_mix", "delay_time", "delay_feedback", "delay_mix", "delay_sync"]
+# Arpeggiator (struct ArpParams), all [0, 1]: on / latch / key_sync 0 or 1; target index / 2 (both, timbre 1,
+# timbre 2); type index / 5; range (octaves - 1) / 3; gate percent / 100; resolution index / 5; swing 0.5 + %/200;
+# length (steps - 1) / 7; pattern the raw byte / 255 (bit n set = step n + 1 rests).
+ARP_FIELDS = ["arp_on", "arp_latch", "arp_key_sync", "arp_target", "arp_type", "arp_range", "arp_gate",
+              "arp_resolution", "arp_swing", "arp_length", "arp_pattern"]
 
 # Hardware osc2 mod-select (0 off, 1 ring, 2 sync, 3 ring+sync) -> engine
 # sync_ring index (0 off, 1 sync, 2 ring, 3 both).
@@ -95,6 +109,7 @@ VOCODER_CARRIER = {
     "lfo1_wave": 0.0, "lfo1_rate": 0.5, "lfo1_keysync": 0.0, "lfo1_sync_note": 0.0,
     "lfo2_wave": 0.0, "lfo2_rate": 0.5, "lfo2_keysync": 0.0, "lfo2_sync_note": 0.0,
     **{f"patch{n}_{k}": (0.5 if k == "int" else 0.0) for n in range(1, 5) for k in ("src", "dst", "int")},
+    "osc1_ctrl1": 0.0, "osc1_ctrl2": 0.0,
 }
 
 
@@ -188,6 +203,8 @@ def parse_timbre(prog, t):
         **lfo,
         "wave1": wave1 / 6.0,
         "pulse_width": unit(prog[t + 8]),  # engine maps 0..1 -> 50%..95% duty
+        "osc1_ctrl1": unit(prog[t + 8]),
+        "osc1_ctrl2": unit(prog[t + 9]),
         "wave2": osc2_wave / 2.0,
         "detune": clamp01(0.5 + osc2_semis / 48.0),
         "sync_ring": mod_select / 3.0,
@@ -233,6 +250,21 @@ def parse_program(idx, prog):
         "delay_sync": (min(prog[19] & 0x0F, 14) + 1) / 15.0 if prog[19] & 0x80 else 0.0,
     }
 
+    swing = prog[36] - 256 if prog[36] >= 128 else prog[36]
+    arp = {
+        "arp_on": 1.0 if prog[32] & 0x80 else 0.0,
+        "arp_latch": 1.0 if prog[32] & 0x40 else 0.0,
+        "arp_key_sync": 1.0 if prog[32] & 0x01 else 0.0,
+        "arp_target": min((prog[32] >> 4) & 0x03, 2) / 2.0,
+        "arp_type": min(prog[33] & 0x0F, 5) / 5.0,
+        "arp_range": min(prog[33] >> 4, 3) / 3.0,
+        "arp_gate": min(prog[34], 100) / 100.0,
+        "arp_resolution": min(prog[35], 5) / 5.0,
+        "arp_swing": clamp01(0.5 + max(-100, min(100, swing)) / 200.0),
+        "arp_length": min(prog[14], 7) / 7.0,
+        "arp_pattern": prog[15] / 255.0,
+    }
+
     data_valid = mode != "vocoder"
     if data_valid:
         t1, t2 = parse_timbre(prog, TIMBRE_OFFSETS[0]), parse_timbre(prog, TIMBRE_OFFSETS[1])
@@ -249,6 +281,7 @@ def parse_program(idx, prog):
         "t1": t1,
         "t2": t2,
         "fx": fx,
+        "arp": arp,
     }
 
 
@@ -269,12 +302,18 @@ def render_header(presets):
     out.append("    float lfo1_wave, lfo1_rate, lfo1_keysync, lfo1_sync_note, lfo2_wave, lfo2_rate, lfo2_keysync, lfo2_sync_note;\n")
     out.append("    float patch1_src, patch1_dst, patch1_int, patch2_src, patch2_dst, patch2_int;\n")
     out.append("    float patch3_src, patch3_dst, patch3_int, patch4_src, patch4_dst, patch4_int;\n")
+    out.append("    float osc1_ctrl1, osc1_ctrl2; /* Osc 1 Control 1 / 2 (raw / 127): for Sine, cross-mod depth / LFO1 mod of it */\n")
+    out.append("};\n\n")
+    out.append("/* Arpeggiator, normalized as ARP_FIELDS in tools/extracts_presets.py */\n")
+    out.append("struct ArpParams {\n")
+    out.append("    float on, latch, key_sync, target, type, range, gate, resolution, swing, length, pattern;\n")
     out.append("};\n\n")
     out.append("struct Preset {\n")
     out.append("    const char *label;\n")
     out.append("    int voice_mode; /* 0 = Single, 1 = Layer */\n")
     out.append("    struct TimbreParams t1, t2;\n")
     out.append("    float chorus_mix, delay_time, delay_feedback, delay_mix, delay_sync;\n")
+    out.append("    struct ArpParams arp;\n")
     out.append("};\n\n")
     out.append(f"static const struct Preset FACTORY_PRESETS[{len(presets)}] = {{\n")
 
@@ -284,6 +323,7 @@ def render_header(presets):
             vals = ", ".join(c_float(p[key][f]) for f in TIMBRE_FIELDS)
             timbres.append("{ " + vals + " }")
         fx = ", ".join(c_float(p["fx"][f]) for f in FX_FIELDS)
+        fx += ",\n      { " + ", ".join(c_float(p["arp"][f]) for f in ARP_FIELDS) + " }"
         label = p["label"].replace("\\", "\\\\").replace('"', '\\"')
         comma = "," if i < len(presets) - 1 else ""
         out.append(f"    /* [{i:3d}] {p['label']} */\n")
@@ -308,6 +348,8 @@ def render_json(presets):
             e[f] = round(p["t1"][f], 6)
         for f in FX_FIELDS:
             e[f] = round(p["fx"][f], 6)
+        for f in ARP_FIELDS:
+            e[f] = round(p["arp"][f], 6)
         e["timbre2"] = {f: round(p["t2"][f], 6) for f in TIMBRE_FIELDS}
         entries.append(e)
     return json.dumps({"presets": entries}, indent=2, ensure_ascii=True)
@@ -329,7 +371,7 @@ def main():
 
     # Every float must be a finite value in [0, 1].
     for p in presets:
-        for key in ("t1", "t2", "fx"):
+        for key in ("t1", "t2", "fx", "arp"):
             for name, v in p[key].items():
                 assert 0.0 <= v <= 1.0, f"{p['label']} {key}.{name} = {v} out of range"
 

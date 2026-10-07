@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include "arp.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -178,6 +179,7 @@ typedef struct {
     float noise_level;      /* 0..1 white noise in the mixer */
     float level;            /* 0..1 overall timbre level (osc levels x amp level) */
     float dwgs;             /* 0..1 -> DWGS waveform 0..63 */
+    float osc1_ctrl[2];     /* Osc 1 Control 1 / 2 (raw / 127); for Sine: cross-mod depth / LFO1 modulation of it */
 
     /* Per-timbre LFOs (index 0 = LFO1, 1 = LFO2) and the 4-slot virtual patch matrix */
     int lfo_wave[2];        /* LFO1: saw, square, triangle, S&H; LFO2: saw, square, sine, S&H */
@@ -270,6 +272,9 @@ typedef struct {
      * tempo sync: -1 = free, else the time base index (DELAY_SYNC_NOTES) the Delay Time knob starts on */
     float tempo_bpm;
     int delay_sync_note;
+
+    /* The program's arpeggiator (src/dsp/arp.c): MIDI keys go through it while it is on */
+    arp_t arp;
 } synth_engine_t;
 
 /* Move Plugin Host API v1: field for field Schwung's src/host/plugin_api_v1.h (the order is the ABI). Every
@@ -405,6 +410,10 @@ typedef struct {
     float noise_tilt_db;      /* audible noise is pre-shaped by the inverse of a shelf this high (tilt_hz corner), so it
                                * keeps tilt_db - noise_tilt_db of the tilt's top: 13.8 fits A.21's off-beat hat to the
                                * VST (ref_a21_timbre2_drum_c3: hat 8.7 dB under the kick; 26.7 = white left it 21 under) */
+    float xmod_semitones;     /* synced Sine cross-mod: Osc 1 pitch offset per unit of depth (ctrl1 + ctrl2 * LFO1),
+                               * semitones; 0 = off. Fitted on the A.21 T2 takes (sine_xmod_ratio in dsp.c) */
+    float xmod_offset_semitones; /* ...and the offset at depth 0 */
+    float hpf_ceil_hz;        /* HPF12's highest cutoff, knob plus modulation (fitted on A.21's hat) */
 } tinyk_tuning_t;
 
 #ifdef TINYK_TUNING

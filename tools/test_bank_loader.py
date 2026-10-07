@@ -31,7 +31,7 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import calibrate_dsp as cal  # noqa: E402
-from extracts_presets import FX_FIELDS, TIMBRE_FIELDS, load_programs, parse_program, unpack_7to8  # noqa: E402
+from extracts_presets import ARP_FIELDS, FX_FIELDS, TIMBRE_FIELDS, load_programs, parse_program, unpack_7to8  # noqa: E402
 
 FACTORY = os.path.join(os.path.dirname(HERE), "banks", "TinyK_Default.syx")  # the source of presets.h (tools/make_default_bank.py)
 USER_BANKS = os.path.join(cal.ROOT, "banks")
@@ -76,6 +76,7 @@ def user_banks(fptr):
         lib.tinyk_bank_scan.argtypes = [ctypes.c_char_p]
         lib.tinyk_bank_name.restype = ctypes.c_char_p
         lib.tinyk_bank_preset.argtypes = [ctypes.c_int, ctypes.c_int, fptr, fptr, fptr, ctypes.c_char_p, ctypes.c_int]
+        lib.tinyk_bank_arp.argtypes = [ctypes.c_int, ctypes.c_int, fptr]
         n = lib.tinyk_bank_scan(USER_BANKS.encode())
         loaded = [lib.tinyk_bank_name(b).decode() for b in range(1, n + 1)]
         skipped = [f for f in files if os.path.splitext(f)[0] not in loaded]
@@ -92,6 +93,10 @@ def user_banks(fptr):
                 want = np.array([ref[i]["t1"][f] for f in TIMBRE_FIELDS] + [ref[i]["t2"][f] for f in TIMBRE_FIELDS]
                                 + [ref[i]["fx"][f] for f in FX_FIELDS], np.float32)
                 worst = max(worst, float(np.abs(np.concatenate([t1, t2, fx]) - want).max()))
+                arp = np.zeros(len(ARP_FIELDS), np.float32)
+                n_arp = lib.tinyk_bank_arp(b, i, arp.ctypes.data_as(fptr))
+                want_arp = np.array([ref[i]["arp"][f] for f in ARP_FIELDS], np.float32)
+                worst = max(worst, float(np.abs(arp - want_arp).max()) if n_arp == len(ARP_FIELDS) else 1.0)
                 worst = max(worst, 0.0 if vm == int(ref[i]["voice_mode"]) else 1.0)
                 labels.append(lab.value.decode())
                 named += len(labels[-1]) > 4
@@ -153,17 +158,22 @@ def host_api():
         manifest = json.load(open(os.path.join(cal.ROOT, "src", "module.json"), encoding="utf-8"))
         check(hier == manifest["capabilities"]["ui_hierarchy"], "engine ui_hierarchy == module.json ui_hierarchy")
         levels = hier["levels"]
-        pages = {"perf": ("Perf [T1]", ["category", "patch", "cutoff", "resonance", "attack2", "release2", "drive", "mod_wheel"]),
+        pages = {"perf": ("Perf [T1]", ["category", "patch", "cutoff", "resonance", "attack2", "release2", "arp_on", "mod_wheel"]),
                  "osc": ("Osc/Timbre [T1]", ["wave1", "pulse_width", "wave2", "osc2_semi", "osc2_tune", "voice_mode",
                                              "timbre_edit", "timbre_balance"]),
                  "env": ("Envelopes [T1]", ["attack1", "decay1", "sustain1", "release1", "decay2", "sustain2", "keytrack", "env_int"]),
                  "fx": ("Effects", ["chorus_mix", "delay_time", "delay_feedback", "delay_mix", "lfo1_rate", "lfo2_rate",
                                     "master_vol", "pan"]),
-                 "mix": ("Mix/Filter [T1]", ["osc_mix", "noise_level", "sync_ring", "filter_type", "portamento", "level"])}
-        check([p.get("level") for p in levels["root"]["params"]] == list(pages) + ["bank"] and levels["root"]["knobs"] == [],
+                 "mix": ("Mix/Filter [T1]", ["osc_mix", "noise_level", "sync_ring", "filter_type", "portamento", "level", "drive"]),
+                 "arpset": ("Arp Settings", ["arp_type", "arp_range", "arp_resolution", "arp_gate", "arp_swing", "arp_latch",
+                                             "arp_key_sync", "arp_target"]),
+                 "steps": ("Arp Steps", [f"arp_step{n}" for n in range(1, 9)])}
+        check([p.get("level") for p in levels["root"]["params"]] == [k for k in pages if k not in ("arpset", "steps")]
+              + ["bank", "arpset", "steps"]
+              and levels["root"]["knobs"] == [],
               f"root is the preset browser with the page levels in order: {[p.get('level') for p in levels['root']['params']]}")
         check(all(levels[k]["name"] == name and levels[k]["knobs"] == knobs for k, (name, knobs) in pages.items()),
-              "Perf / Osc/Timbre / Envelopes / Effects / Mix/Filter pages hold their knobs (per-timbre pages badged [T1])")
+              "Perf / Osc/Timbre / Envelopes / Effects / Mix/Filter / Arp Settings / Arp Steps pages hold their knobs (per-timbre pages badged [T1])")
         every = [k for _, knobs in pages.values() for k in knobs]
         check(len(every) == len(set(every)) and not {"bank_side", "program", "bank_file", "detune", "sub_level"} & set(every),
               "each control on one page; no A/B, Bank, Detune or Sub Level knob")
@@ -281,7 +291,7 @@ def host_api():
         except ValueError:
             doc = {}
         check(doc.get("tinyk_state") == 1 and doc.get("bank") == "MicroKorgFactory" and doc.get("preset") == 20
-              and len(doc.get("params", [])) == 35 and len(doc.get("extra2", [])) == 24,
+              and len(doc.get("params", [])) == 35 and len(doc.get("extra2", [])) == 26,
               f"state is JSON ({len(state)} bytes): bank, preset, params, extras")
         put("bank_file", "0")
         put("preset", "99")
@@ -290,11 +300,82 @@ def host_api():
         put("timbre_edit", "1")
         t2 = (get("cutoff"), get("level"))
         check(after == before and t2 == ("0.1230", "0.3000"), f"state restores bank, program and edits: {after}, T2 {t2}")
+        # A state saved before Osc 1 Ctrl 1 / 2 were decoded (24 extras) still restores its extras
+        old_doc = dict(doc)
+        old_doc["extra2"] = doc["extra2"][:24]
+        old_doc["extra2"][2] = 0.4  # Timbre 2 level
+        put("preset", "99")
+        put("state", json.dumps(old_doc))
+        put("timbre_edit", "1")
+        check(get("level") == "0.4000" and get("preset") == "20", f"24-value extras (older state) restore: level {get('level')}")
         put("preset", "5")
         put("state", "{\"tinyk_state\":1,\"preset\":7,\"params\":[1,2]}")
         check(get("preset") == "7" and get("bank_file_name") == "Built-in", "a partial state keeps the program's values")
         put("state", "garbage")
         check(get("preset") == "7", "a state that is not TinyK's is ignored")
+
+        # The Arp knob: a program loads its stored arp setting; the knob overrides it; the slot state keeps it
+        put("bank_file", "0")
+        put("preset", "8")  # A.21: arp on
+        a21_on = get("arp_on")
+        put("preset", "2")  # A.13: arp off
+        a13_on = get("arp_on")
+        put("arp_on", "On")
+        knob_on = get("arp_on")
+        st = json.loads(get("state"))
+        put("preset", "2")
+        reloaded = get("arp_on")
+        put("state", json.dumps(st))
+        check(a21_on == "1" and a13_on == "0" and knob_on == "1" and st.get("arp_on") == 1 and reloaded == "0"
+              and get("arp_on") == "1",
+              f"Arp: programs load their own (A.21 {a21_on}, A.13 {a13_on}); knob On -> {knob_on}; saved in the state and restored")
+        meta_arp = {p["key"]: p for p in json.loads(get("chain_params"))}.get("arp_on", {})
+        check(meta_arp.get("options") == ["Off", "On"] and "arp_on" in manifest["capabilities"]["ui_hierarchy"]["levels"]["perf"]["knobs"],
+              "Arp knob on the Perf page, an Off / On enum in chain_params")
+        put("arp_on", "0")
+
+        # Arp Steps: 1 = play, 0 = rest; starts from the program's stored pattern, edits are live and saved
+        put("preset", "8")  # A.21: pattern 0x52 (steps 2, 5, 7 rest), 8 steps
+        stored = [get(f"arp_step{n}") for n in range(1, 9)]
+        put("arp_step1", "Rest")
+        put("arp_step2", "1")
+        edited = [get(f"arp_step{n}") for n in range(1, 9)]
+        st = json.loads(get("state"))
+        put("preset", "8")
+        reloaded = [get(f"arp_step{n}") for n in range(1, 9)]
+        put("state", json.dumps(st))
+        restored = [get(f"arp_step{n}") for n in range(1, 9)]
+        meta_st = {p["key"]: p for p in json.loads(get("chain_params"))}.get("arp_step3", {})
+        check(stored == list("10110101") and edited == list("01110101") and st.get("arp_pattern") == 0x51
+              and reloaded == stored and restored == edited and meta_st.get("options") == ["Rest", "Play"],
+              f"Arp Steps: A.21 loads {''.join(stored)}; Step 1 Rest / Step 2 Play -> {''.join(edited)} (pattern "
+              f"0x{st.get('arp_pattern', 0):02X} in the state); a program reload restores the stored steps, the state the edit")
+        st1 = dict(json.loads(get("state")), arp_length=1, arp_pattern=0)  # an MS2000-style 1-step pattern
+        put("state", json.dumps(st1))
+        st64 = json.loads(get("state"))
+        put("arp_step4", "Rest")
+        st64b = json.loads(get("state"))
+        check(st64.get("arp_length") == 1 and st64b.get("arp_length") == 4 and get("arp_step4") == "0"
+              and get("arp_step2") == "1" and get("arp_step3") == "1",
+              f"Step 4 past a {st64.get('arp_length')}-step pattern extends it to {st64b.get('arp_length')} steps, steps between play")
+        # Arp Settings: A.21's stored values, set by option name or index, saved and restored
+        put("preset", "8")
+        keys8 = ["arp_type", "arp_range", "arp_resolution", "arp_gate", "arp_swing", "arp_latch", "arp_key_sync", "arp_target"]
+        a21 = [get(k) for k in keys8]
+        for k, v in zip(keys8, ["ALT1", "3", "1/8", "55", "-40", "Off", "0", "Timbre 2"]):
+            put(k, v)
+        edited8 = [get(k) for k in keys8]
+        st8 = json.loads(get("state"))
+        put("preset", "8")
+        back8 = [get(k) for k in keys8]
+        put("state", json.dumps(st8))
+        restored8 = [get(k) for k in keys8]
+        meta8 = {p["key"]: p for p in json.loads(get("chain_params"))}
+        check(a21 == ["0", "1", "1", "80", "0", "1", "1", "1"] and edited8 == ["2", "3", "3", "55", "-40", "0", "0", "2"]
+              and back8 == a21 and restored8 == edited8 and st8.get("arp_type") == 2 and st8.get("arp_swing") == -40
+              and meta8.get("arp_type", {}).get("options") == ["UP", "DOWN", "ALT1", "ALT2", "RANDOM", "TRIGGER"]
+              and meta8.get("arp_swing", {}).get("min") == -100 and meta8.get("arp_target", {}).get("short_options") == ["BOTH", "T1", "T2"],
+              f"Arp Settings: A.21 {a21} -> set by name {edited8}, saved in the state; the program restores its own, the state the edits")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

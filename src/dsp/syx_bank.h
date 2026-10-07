@@ -58,6 +58,7 @@ static const struct TimbreParams SYX_VOCODER_CARRIER = {
     .lfo1_wave = 0.0f, .lfo1_rate = 0.5f, .lfo1_keysync = 0.0f, .lfo1_sync_note = 0.0f,
     .lfo2_wave = 0.0f, .lfo2_rate = 0.5f, .lfo2_keysync = 0.0f, .lfo2_sync_note = 0.0f,
     .patch1_int = 0.5f, .patch2_int = 0.5f, .patch3_int = 0.5f, .patch4_int = 0.5f,
+    .osc1_ctrl1 = 0.0f, .osc1_ctrl2 = 0.0f,
 };
 
 /* Korg 7-to-8 decode: each 8-byte group is [MSB bits][7 data bytes]. Returns bytes written. */
@@ -92,6 +93,8 @@ static void syx_parse_timbre(const uint8_t *p, int t, struct TimbreParams *o) {
 
     o->wave1 = (float)(wave1 / 6.0);
     o->pulse_width = (float)syx_unit(p[t + 8]);
+    o->osc1_ctrl1 = (float)syx_unit(p[t + 8]);  /* Osc 1 Control 1 / 2: what they drive depends on the wave */
+    o->osc1_ctrl2 = (float)syx_unit(p[t + 9]);
     o->wave2 = (float)(osc2_wave / 2.0);
     o->detune = (float)syx_clamp01(0.5 + osc2_semis / 48.0);
     o->sync_ring = (float)(mod_select / 3.0);
@@ -172,6 +175,20 @@ static void syx_parse_program(const uint8_t *p, int idx, struct Preset *out, cha
     out->delay_mix = (float)delay_fb;
     /* byte 19: bit 7 = delay tempo sync, bits 0-3 = time base (1/32 .. 1/1); stored as (index + 1) / 15 */
     out->delay_sync = (p[19] & 0x80) ? (float)(((p[19] & 0x0F) > 14 ? 14 : (p[19] & 0x0F)) + 1) / 15.0f : 0.0f;
+    /* arpeggiator: 14 length - 1, 15 pattern (bit set = rest), 32 on / latch / target / key sync, 33 type / range,
+     * 34 gate, 35 resolution, 36 swing (signed); normalized as extracts_presets.ARP_FIELDS */
+    int target = (p[32] >> 4) & 0x03, type = p[33] & 0x0F, range = p[33] >> 4, swing = p[36] >= 128 ? p[36] - 256 : p[36];
+    out->arp.on = (p[32] & 0x80) ? 1.0f : 0.0f;
+    out->arp.latch = (p[32] & 0x40) ? 1.0f : 0.0f;
+    out->arp.key_sync = (p[32] & 0x01) ? 1.0f : 0.0f;
+    out->arp.target = (float)((target > 2 ? 2 : target) / 2.0);
+    out->arp.type = (float)((type > 5 ? 5 : type) / 5.0);
+    out->arp.range = (float)((range > 3 ? 3 : range) / 3.0);
+    out->arp.gate = (float)((p[34] > 100 ? 100 : p[34]) / 100.0);
+    out->arp.resolution = (float)((p[35] > 5 ? 5 : p[35]) / 5.0);
+    out->arp.swing = (float)syx_clamp01(0.5 + (swing < -100 ? -100 : (swing > 100 ? 100 : swing)) / 200.0);
+    out->arp.length = (float)((p[14] > 7 ? 7 : p[14]) / 7.0);
+    out->arp.pattern = (float)(p[15] / 255.0);
     if (mode_bits == 3) { /* vocoder: no engine equivalent, generic carrier, plays as Single */
         out->t1 = SYX_VOCODER_CARRIER;
         out->t2 = SYX_VOCODER_CARRIER;
