@@ -72,7 +72,8 @@ TIMBRE_FIELDS = [
 #   patchN_src     source / 7         (EG1, EG2, LFO1, LFO2, velocity, keyboard track, pitch bend, mod wheel)
 #   patchN_dst     destination / 7    (pitch, osc2 pitch, osc1 ctrl1, noise level, cutoff, amp, pan, LFO2 freq)
 #   patchN_int     bipolar, 0.5 = no modulation
-FX_FIELDS = ["chorus_mix", "delay_time", "delay_feedback", "delay_mix"]
+# delay_sync: 0 = free (delay_time is a time), else (time base index + 1) / 15 of the tempo-sync note table
+FX_FIELDS = ["chorus_mix", "delay_time", "delay_feedback", "delay_mix", "delay_sync"]
 
 # Hardware osc2 mod-select (0 off, 1 ring, 2 sync, 3 ring+sync) -> engine
 # sync_ring index (0 off, 1 sync, 2 ring, 3 both).
@@ -228,6 +229,8 @@ def parse_program(idx, prog):
         "delay_time": unit(prog[20]),
         "delay_feedback": delay_fb,
         "delay_mix": delay_fb,
+        # byte 19: bit 7 = delay tempo sync, bits 0-3 = time base (1/32 .. 1/1)
+        "delay_sync": (min(prog[19] & 0x0F, 14) + 1) / 15.0 if prog[19] & 0x80 else 0.0,
     }
 
     data_valid = mode != "vocoder"
@@ -271,7 +274,7 @@ def render_header(presets):
     out.append("    const char *label;\n")
     out.append("    int voice_mode; /* 0 = Single, 1 = Layer */\n")
     out.append("    struct TimbreParams t1, t2;\n")
-    out.append("    float chorus_mix, delay_time, delay_feedback, delay_mix;\n")
+    out.append("    float chorus_mix, delay_time, delay_feedback, delay_mix, delay_sync;\n")
     out.append("};\n\n")
     out.append(f"static const struct Preset FACTORY_PRESETS[{len(presets)}] = {{\n")
 

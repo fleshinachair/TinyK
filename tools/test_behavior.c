@@ -334,12 +334,104 @@ static void test_lfo_saw_gate(void) {
     free(b);
 }
 
+/* A fake Schwung host: session tempo and a transport position the render loop below advances */
+static float g_fake_bpm = 120.0f;
+static double g_fake_beat = -1.0;
+static float fake_get_bpm(void) { return g_fake_bpm; }
+static double fake_get_beat_position(void) { return g_fake_beat; }
+
+/* Render `seconds`, advancing the fake transport per 128-frame block (when it runs) */
+static int16_t *render_clocked(double seconds, int *frames_out) {
+    int frames = (int)(seconds * SR);
+    int16_t *buf = calloc((size_t)frames * 2, sizeof(int16_t));
+    for (int done = 0; done < frames;) {
+        int n = frames - done < 128 ? frames - done : 128;
+        synth_render(&S, buf + done * 2, n);
+        if (g_fake_beat >= 0.0) g_fake_beat += n / (double)SR * g_fake_bpm / 60.0;
+        done += n;
+    }
+    *frames_out = frames;
+    return buf;
+}
+
+/* Time of the loudest 10 ms window in [t0, t1) of the left channel */
+static double loudest_at(const int16_t *b, int frames, double t0, double t1) {
+    double best = -1.0, at = t0;
+    for (double t = t0; t < t1; t += 0.002) {
+        double e = 0.0;
+        for (int i = (int)(t * SR); i < (int)((t + 0.01) * SR) && i < frames; i++) e += (double)b[2 * i] * b[2 * i];
+        if (e > best) { best = e; at = t; }
+    }
+    return at;
+}
+
+static void test_host_tempo(void) {
+    printf("\nHost tempo (fake Schwung host):\n");
+    static host_api_v1_t host;
+    memset(&host, 0, sizeof host);
+    host.get_bpm = fake_get_bpm;
+    host.get_beat_position = fake_get_beat_position;
+    move_plugin_init_v2(&host);
+    int n;
+    char what[128];
+
+    /* A.21's key-synced quarter-note gate at 90 BPM: beats 0.667 s apart */
+    g_fake_bpm = 90.0f; g_fake_beat = -1.0;
+    fresh(8);
+    synth_set_param(&S, "timbre_balance", 1.0f);
+    synth_set_param(&S, "delay_mix", 0.0f);
+    synth_note_on(&S, 60, 100);
+    int16_t *b = render_clocked(1.5, &n);
+    double end1 = window_energy(b, n, 0.60, 0.66), start2 = window_energy(b, n, 0.67, 0.77);
+    snprintf(what, sizeof what, "90 BPM: the gate's 2nd beat starts at 0.667 s (%.0f dB above the end of the 1st)",
+             10.0 * log10(start2 / 0.10 / (end1 / 0.06 + 1e-12)));
+    check(start2 / 0.10 > 100.0 * end1 / 0.06, what);
+    free(b);
+
+    /* A synced 1/4 delay echoes 60 / BPM after a short blip */
+    open_voice();
+    synth_set_param(&S, "decay2", 0.0f);
+    synth_set_param(&S, "sustain2", 0.0f);
+    synth_set_param(&S, "delay_mix", 0.6f);
+    synth_set_param(&S, "delay_feedback", 0.3f);
+    S.delay_sync_note = 8;                               /* 1/4 */
+    synth_set_param(&S, "delay_time", 8.0f / 14.0f);
+    synth_note_on(&S, 60, 100);
+    b = render_clocked(0.03, &n);
+    free(b);
+    synth_note_off(&S, 60);
+    b = render_clocked(1.0, &n);
+    double echo = 0.03 + loudest_at(b, n, 0.3, 0.95);
+    snprintf(what, sizeof what, "synced 1/4 delay at 90 BPM echoes at %.3f s (0.667 expected)", echo);
+    check(fabs(echo - 60.0 / 90.0) < 0.02, what);
+    free(b);
+
+    /* Transport running: a free-running synced LFO follows the beat grid, not the note-on. A.21's Timbre 2 with
+     * LFO1 key sync off, note played a quarter of a beat late: the gate's next hit lands on the next beat. */
+    g_fake_bpm = 120.0f; g_fake_beat = 4.25;
+    fresh(8);
+    synth_set_param(&S, "timbre_balance", 1.0f);
+    synth_set_param(&S, "delay_mix", 0.0f);
+    S.timbre_extra[1].lfo_keysync[0] = 0;
+    synth_note_on(&S, 60, 100);
+    b = render_clocked(0.6, &n);
+    double at_note = window_energy(b, n, 0.005, 0.045), on_beat = window_energy(b, n, 0.380, 0.420);
+    snprintf(what, sizeof what, "transport at beat 4.25: the gate peaks on beat 5 (+0.375 s), %.0f dB over note-on",
+             10.0 * log10(on_beat / (at_note + 1e-12)));
+    check(on_beat > 4.0 * at_note, what);
+    free(b);
+
+    g_fake_beat = -1.0;
+    move_plugin_init_v2(NULL);
+}
+
 int main(void) {
     test_layer();
     test_edit_routing();
     test_envelopes();
     test_patch_sources();
     test_lfo_saw_gate();
+    test_host_tempo();
     printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "ALL PASSED", failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;
 }

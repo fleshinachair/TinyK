@@ -24,6 +24,7 @@ static int format_preset_name(int idx, char *buf, int buf_len) {
     return snprintf(buf, buf_len, "%c.%d%d%s%s", idx >= 64 ? 'B' : 'A', (idx % 64) / 8 + 1, idx % 8 + 1,
                     *name ? " " : "", name);
 }
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -110,6 +111,28 @@ static const param_meta_t PARAM_METAS[NUM_PARAMS] = {
 static synth_engine_t g_synth;
 static const host_api_v1_t *g_host = NULL;
 
+/* The host callbacks below sit at fixed offsets in Schwung's host_api_v1 (get_bpm at +88 is the one modules
+ * have long called); a field out of place would call into someone else's memory. */
+#if UINTPTR_MAX == 0xFFFFFFFFFFFFFFFFu
+_Static_assert(offsetof(host_api_v1_t, get_bpm) == 88, "host_api_v1_t layout differs from Schwung's");
+_Static_assert(offsetof(host_api_v1_t, get_beat_position) == 112, "host_api_v1_t layout differs from Schwung's");
+#endif
+
+/* Session tempo from the host (MIDI clock -> Set tempo -> settings), else lfo_tempo_bpm; called once per
+ * block on the audio thread, as the host intends. Out-of-range answers are ignored. */
+static float host_tempo_bpm(void) {
+    if (g_host && g_host->get_bpm) {
+        float bpm = g_host->get_bpm();
+        if (bpm >= 20.0f && bpm <= 400.0f) return bpm;
+    }
+    return tinyk_tuning.lfo_tempo_bpm;
+}
+
+/* Beats since transport start, or < 0 when the transport is stopped or the host cannot say */
+static double host_beat_position(void) {
+    return (g_host && g_host->get_beat_position) ? g_host->get_beat_position() : -1.0;
+}
+
 /* Filter key tracking: +63 = KEYTRACK_SLOPE octaves of cutoff per octave of pitch about KEYTRACK_PIVOT. The VST measured
  * 2.0 about ~62 at +63 (tools/reference/kt*), but that made the +48 presets (A11, A12) much worse, so this stays 1:1
  * about C4 until intermediate key-track values are measured. */
@@ -120,6 +143,14 @@ static const host_api_v1_t *g_host = NULL;
 static const float LFO_SYNC_NOTES[15] = {
     1.0f, 3.0f / 4.0f, 2.0f / 3.0f, 1.0f / 2.0f, 3.0f / 8.0f, 1.0f / 3.0f, 1.0f / 4.0f, 3.0f / 16.0f,
     1.0f / 6.0f, 1.0f / 8.0f, 3.0f / 32.0f, 1.0f / 12.0f, 1.0f / 16.0f, 1.0f / 24.0f, 1.0f / 32.0f
+};
+
+/* Delay time base when the delay is tempo-synced, the other way round (1/32 .. 1/1, as the Time knob turns):
+ * the factory programs' most used values 7, 5, 8 are then 3/16, 1/8, 1/4 (the LFO order would make 5 and 8
+ * a 1/3 and a 1/6). */
+static const float DELAY_SYNC_NOTES[15] = {
+    1.0f / 32.0f, 1.0f / 24.0f, 1.0f / 16.0f, 1.0f / 12.0f, 3.0f / 32.0f, 1.0f / 8.0f, 1.0f / 6.0f, 3.0f / 16.0f,
+    1.0f / 4.0f, 1.0f / 3.0f, 3.0f / 8.0f, 1.0f / 2.0f, 2.0f / 3.0f, 3.0f / 4.0f, 1.0f
 };
 
 /* One patch LFO sample in -1..1. LFO1 waves: saw, square, triangle, S&H; LFO2: saw, square, sine, S&H. */
@@ -474,6 +505,10 @@ static void load_preset_from(const struct Preset *p, int index) {
     g_synth.params[PARAM_DELAY_TIME] = clamp01f(p->delay_time);
     g_synth.params[PARAM_DELAY_FEEDBACK] = clamp01f(p->delay_feedback);
     g_synth.params[PARAM_DELAY_MIX] = clamp01f(p->delay_mix);
+    /* A tempo-synced delay: the Delay Time knob then steps the time base, starting on the program's */
+    g_synth.delay_sync_note = (p->delay_sync > 0.0f) ? (int)lroundf(p->delay_sync * 15.0f) - 1 : -1;
+    if (g_synth.delay_sync_note > 14) g_synth.delay_sync_note = 14;
+    if (g_synth.delay_sync_note >= 0) g_synth.params[PARAM_DELAY_TIME] = (float)g_synth.delay_sync_note / 14.0f;
 
     /* Parameters not stored in Preset struct: guarantee valid audible defaults */
     if (g_synth.params[PARAM_MASTER_VOL] <= 0.05f) {
@@ -558,6 +593,7 @@ static void sync_from_global(synth_engine_t *synth) {
         synth->timbre_edit = g_synth.timbre_edit;
         synth->timbre_balance = g_synth.timbre_balance;
         synth->voice_mode = g_synth.voice_mode;
+        synth->delay_sync_note = g_synth.delay_sync_note;
         synth->params[PARAM_VOICE_MODE] = g_synth.params[PARAM_VOICE_MODE];
         synth->params[PARAM_TIMBRE_BALANCE] = g_synth.params[PARAM_TIMBRE_BALANCE];
     }
@@ -583,12 +619,12 @@ void tinyk_load_patch(synth_engine_t *synth, const struct Preset *p, int slot) {
 int tinyk_dsp_bank_scan(const char *dir) { return syx_scan_dir(dir); }
 int tinyk_dsp_bank_count(void) { return g_syx_bank_count; }
 const char *tinyk_dsp_bank_name(int b) { return (b >= 1 && b <= g_syx_bank_count) ? g_syx_banks[b - 1].name : "Built-in"; }
-/* Copies preset idx of bank b (0 = built-in) into t1/t2 (TimbreParams floats) and fx[4]; returns voice_mode */
+/* Copies preset idx of bank b (0 = built-in) into t1/t2 (TimbreParams floats) and fx[5]; returns voice_mode */
 int tinyk_dsp_bank_preset(int b, int idx, float *t1, float *t2, float *fx, char *label, int label_len) {
     const struct Preset *p = (b >= 1 && b <= g_syx_bank_count) ? &g_syx_banks[b - 1].presets[idx] : &FACTORY_PRESETS[idx];
     memcpy(t1, &p->t1, sizeof p->t1);
     memcpy(t2, &p->t2, sizeof p->t2);
-    fx[0] = p->chorus_mix; fx[1] = p->delay_time; fx[2] = p->delay_feedback; fx[3] = p->delay_mix;
+    fx[0] = p->chorus_mix; fx[1] = p->delay_time; fx[2] = p->delay_feedback; fx[3] = p->delay_mix; fx[4] = p->delay_sync;
     snprintf(label, (size_t)label_len, "%s", p->label);
     return p->voice_mode;
 }
@@ -598,6 +634,8 @@ int tinyk_dsp_bank_preset(int b, int idx, float *t1, float *t2, float *fx, char 
 void synth_init(synth_engine_t *synth) {
     if (!synth) synth = &g_synth;
     memset(synth, 0, sizeof(*synth));
+    synth->tempo_bpm = tinyk_tuning.lfo_tempo_bpm;
+    synth->delay_sync_note = -1;
     noise_state = NOISE_SEED;
 
     /* Initialize all default parameters from PARAM_METAS */
@@ -1385,6 +1423,10 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
 
     const float fs = (float)MOVE_SAMPLE_RATE;
 
+    /* Session tempo and transport position, once per block: tempo-synced LFOs and delays follow the Move */
+    synth->tempo_bpm = host_tempo_bpm();
+    const double beat = host_beat_position();
+
     /* Extract global parameters */
     float lfo1_rate_p   = synth->params[PARAM_LFO1_RATE];
     float lfo2_rate_p   = synth->params[PARAM_LFO2_RATE];
@@ -1545,11 +1587,23 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
             float curve = (extra->patch_dst[p] == PATCH_DST_PAN) ? tinyk_tuning.patch_pan_curve : tinyk_tuning.patch_int_curve;
             t_cfg[t].patch_amt[p] = copysignf(powf(fabsf(a), curve), a);
         }
+        int lfo2_rate_modulated = 0;
+        for (int p = 0; p < 4; p++) {
+            if (extra->patch_dst[p] == PATCH_DST_LFO2_FREQ && extra->patch_int[p] != 0.0f) lfo2_rate_modulated = 1;
+        }
         for (int l = 0; l < 2; l++) {
             float hz;
             if (extra->lfo_sync_note[l] >= 0) {
-                /* tempo sync: period = note length (fraction of a whole note) at lfo_tempo_bpm */
-                hz = tinyk_tuning.lfo_tempo_bpm / (240.0f * LFO_SYNC_NOTES[extra->lfo_sync_note[l]]);
+                /* tempo sync: period = note length (fraction of a whole note) at the session tempo */
+                float note = LFO_SYNC_NOTES[extra->lfo_sync_note[l]];
+                hz = synth->tempo_bpm / (240.0f * note);
+                /* Free-running (no key sync) synced LFOs also lock their phase to the transport while it runs,
+                 * cycle start on beat 0; key-synced ones restart on each note, as on the hardware. An LFO2 whose
+                 * rate a patch modulates is left to run. */
+                if (beat >= 0.0 && extra->lfo_keysync[l] == 0 && !(l == 1 && lfo2_rate_modulated)) {
+                    double cycles = beat / (4.0 * (double)note);
+                    synth->patch_lfo[t][l].phase = (float)(cycles - floor(cycles));
+                }
             } else {
                 hz = 0.05f * powf(600.0f, extra->lfo_rate[l]); /* same 0.05..30 Hz curve as the UI LFOs */
             }
@@ -1566,7 +1620,15 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
     /* Delay config. The hardware has one delay depth that sets both the repeats and the level;
      * depth 0 means the delay is off. Feedback is capped at 0.6 so repeats die away instead of
      * building into a pseudo-reverb wash. */
-    float target_delay_samples = 100.0f + delay_time_p * (float)(DELAY_BUFFER_SIZE - 200);
+    float target_delay_samples;
+    if (synth->delay_sync_note >= 0) {
+        /* tempo-synced: the Delay Time knob steps the time base (1/32 .. 1/1) at the session tempo */
+        int base = (int)lroundf(clamp01f(delay_time_p) * 14.0f);
+        target_delay_samples = 240.0f / synth->tempo_bpm * DELAY_SYNC_NOTES[base] * fs;
+        target_delay_samples = fmaxf(100.0f, fminf((float)(DELAY_BUFFER_SIZE - 2), target_delay_samples));
+    } else {
+        target_delay_samples = 100.0f + delay_time_p * (float)(DELAY_FREE_MAX_SAMPLES - 200);
+    }
     float delay_feedback = fminf(delay_fdbk_p * 0.75f, 0.6f);
     float delay_send = delay_mix_p * tinyk_tuning.delay_send_scale;
     int delay_on = (delay_mix_p > 0.005f);

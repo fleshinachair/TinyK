@@ -170,6 +170,8 @@ static void syx_parse_program(const uint8_t *p, int idx, struct Preset *out, cha
     out->delay_time = (float)syx_unit(p[20]);
     out->delay_feedback = (float)delay_fb;
     out->delay_mix = (float)delay_fb;
+    /* byte 19: bit 7 = delay tempo sync, bits 0-3 = time base (1/32 .. 1/1); stored as (index + 1) / 15 */
+    out->delay_sync = (p[19] & 0x80) ? (float)(((p[19] & 0x0F) > 14 ? 14 : (p[19] & 0x0F)) + 1) / 15.0f : 0.0f;
     if (mode_bits == 3) { /* vocoder: no engine equivalent, generic carrier, plays as Single */
         out->t1 = SYX_VOCODER_CARRIER;
         out->t2 = SYX_VOCODER_CARRIER;

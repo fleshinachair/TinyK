@@ -146,7 +146,7 @@ TK_EXPORT int tinyk_render(int preset, int note, double gate_s, double total_s, 
 }
 
 /* As tinyk_render, but plays an external patch: t1/t2 hold the 26 struct TimbreParams floats in
- * declaration order, fx the 4 FX floats (chorus_mix, delay_time, delay_feedback, delay_mix). */
+ * declaration order, fx the 5 FX floats (chorus_mix, delay_time, delay_feedback, delay_mix, delay_sync). */
 TK_EXPORT int tinyk_render_patch(int slot, int voice_mode, const float *t1, const float *t2, const float *fx,
                                  int note, double gate_s, double total_s, float *out_lr, int max_frames) {
 #ifdef TINYK_TUNING
@@ -160,6 +160,7 @@ TK_EXPORT int tinyk_render_patch(int slot, int voice_mode, const float *t1, cons
     p.delay_time = fx[1];
     p.delay_feedback = fx[2];
     p.delay_mix = fx[3];
+    p.delay_sync = fx[4];
     return render_float(slot, &p, note, gate_s, total_s, out_lr, max_frames);
 #else
     (void)slot; (void)voice_mode; (void)t1; (void)t2; (void)fx; (void)note; (void)gate_s; (void)total_s;
@@ -224,6 +225,7 @@ TK_EXPORT int tinyk_render_patch_events(int slot, int voice_mode, const float *t
     p.delay_time = fx[1];
     p.delay_feedback = fx[2];
     p.delay_mix = fx[3];
+    p.delay_sync = fx[4];
 
     int16_t *tmp = calloc((size_t)frames * 2, sizeof(int16_t));
     if (!tmp) return -1;
