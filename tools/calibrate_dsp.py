@@ -523,7 +523,8 @@ TUNING_ORDER = ["cutoff_base_hz", "cutoff_octaves", "cutoff_floor_hz", "cutoff_c
                 "res_damping_range", "lp24_res_scale", "drive_gain", "attack_scale", "decay_scale", "release_scale",
                 "mixer_trim", "delay_send_scale", "patch_cutoff_octaves", "patch_pitch_scale", "lfo_tempo_bpm",
                 "patch_int_curve", "tilt_db", "tilt_hz", "patch_pan_curve", "bpf_cutoff_octaves", "bpf_cutoff_offset", "dist_ceiling",
-                "noise_tilt_db"]
+                "noise_tilt_db", "xmod_semitones", "xmod_offset_semitones",
+                "hpf_ceil_hz"]
 DSP_C = os.path.join(ROOT, "src", "dsp", "dsp.c")
 DEFAULTS_RE = r"#define TINYK_TUNING_DEFAULTS \{([^}]*)\}"
 

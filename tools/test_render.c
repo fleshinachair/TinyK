@@ -74,6 +74,9 @@ static const struct { const char *name; float *value; } TUNING_TABLE[] = {
     { "bpf_cutoff_offset",  &tinyk_tuning.bpf_cutoff_offset },
     { "dist_ceiling",       &tinyk_tuning.dist_ceiling },
     { "noise_tilt_db",      &tinyk_tuning.noise_tilt_db },
+    { "xmod_semitones",     &tinyk_tuning.xmod_semitones },
+    { "xmod_offset_semitones", &tinyk_tuning.xmod_offset_semitones },
+    { "hpf_ceil_hz",        &tinyk_tuning.hpf_ceil_hz },
 };
 #define TUNING_COUNT ((int)(sizeof TUNING_TABLE / sizeof TUNING_TABLE[0]))
 
@@ -189,6 +192,8 @@ TK_EXPORT const char *tinyk_bank_name(int b) { return tinyk_dsp_bank_name(b); }
 TK_EXPORT int tinyk_bank_preset(int b, int idx, float *t1, float *t2, float *fx, char *label, int label_len) {
     return tinyk_dsp_bank_preset(b, idx, t1, t2, fx, label, label_len);
 }
+int tinyk_dsp_bank_arp(int b, int idx, float *arp);
+TK_EXPORT int tinyk_bank_arp(int b, int idx, float *arp) { return tinyk_dsp_bank_arp(b, idx, arp); }
 /* Bank / program selection through the public parameter API, then the active preset's name */
 TK_EXPORT int tinyk_select(const char *key, const char *val, char *name, int name_len) {
     synth_set_param(&synth, key, (float)atof(val));

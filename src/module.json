@@ -48,6 +48,14 @@
             {
               "level": "bank",
               "label": "Bank"
+            },
+            {
+              "level": "arpset",
+              "label": "Arp Settings"
+            },
+            {
+              "level": "steps",
+              "label": "Arp Steps"
             }
           ],
           "knobs": []
@@ -134,13 +142,19 @@
               "step": 0.01
             },
             {
-              "key": "drive",
-              "label": "Drive",
-              "type": "float",
-              "min": 0.0,
-              "max": 1.0,
-              "default": 0.2,
-              "step": 0.01
+              "key": "arp_on",
+              "label": "Arp",
+              "short_name": "ARP",
+              "type": "enum",
+              "options": [
+                "Off",
+                "On"
+              ],
+              "short_options": [
+                "OFF",
+                "ON"
+              ],
+              "default": 0
             },
             {
               "key": "mod_wheel",
@@ -159,7 +173,7 @@
             "resonance",
             "attack2",
             "release2",
-            "drive",
+            "arp_on",
             "mod_wheel"
           ]
         },
@@ -537,6 +551,15 @@
               "max": 1.0,
               "default": 0.9,
               "step": 0.01
+            },
+            {
+              "key": "drive",
+              "label": "Drive",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.2,
+              "step": 0.01
             }
           ],
           "knobs": [
@@ -545,7 +568,8 @@
             "sync_ring",
             "filter_type",
             "portamento",
-            "level"
+            "level",
+            "drive"
           ]
         },
         "bank": {
@@ -576,6 +600,290 @@
           "items_param": "bank_list",
           "select_param": "bank_file",
           "navigate_to": "root"
+        },
+        "arpset": {
+          "name": "Arp Settings",
+          "label": "Arp Settings",
+          "params": [
+            {
+              "key": "arp_type",
+              "label": "Type",
+              "short_name": "TYPE",
+              "type": "enum",
+              "options": [
+                "UP",
+                "DOWN",
+                "ALT1",
+                "ALT2",
+                "RANDOM",
+                "TRIGGER"
+              ],
+              "short_options": [
+                "UP",
+                "DOWN",
+                "ALT1",
+                "ALT2",
+                "RND",
+                "TRIG"
+              ],
+              "default": 0
+            },
+            {
+              "key": "arp_range",
+              "label": "Range",
+              "short_name": "RANGE",
+              "type": "enum",
+              "options": [
+                "1 Oct",
+                "2 Oct",
+                "3 Oct",
+                "4 Oct"
+              ],
+              "short_options": [
+                "1OCT",
+                "2OCT",
+                "3OCT",
+                "4OCT"
+              ],
+              "default": 0
+            },
+            {
+              "key": "arp_resolution",
+              "label": "Resolution",
+              "short_name": "RESO",
+              "type": "enum",
+              "options": [
+                "1/24",
+                "1/16",
+                "1/12",
+                "1/8",
+                "1/6",
+                "1/4"
+              ],
+              "short_options": [
+                "1/24",
+                "1/16",
+                "1/12",
+                "1/8",
+                "1/6",
+                "1/4"
+              ],
+              "default": 1
+            },
+            {
+              "key": "arp_gate",
+              "label": "Gate",
+              "short_name": "GATE",
+              "type": "int",
+              "min": 0,
+              "max": 100,
+              "default": 80,
+              "unit": "%"
+            },
+            {
+              "key": "arp_swing",
+              "label": "Swing",
+              "short_name": "SWING",
+              "type": "int",
+              "min": -100,
+              "max": 100,
+              "default": 0,
+              "unit": "%"
+            },
+            {
+              "key": "arp_latch",
+              "label": "Latch",
+              "short_name": "LATCH",
+              "type": "enum",
+              "options": [
+                "Off",
+                "On"
+              ],
+              "short_options": [
+                "OFF",
+                "ON"
+              ],
+              "default": 0
+            },
+            {
+              "key": "arp_key_sync",
+              "label": "Key Sync",
+              "short_name": "KSYNC",
+              "type": "enum",
+              "options": [
+                "Off",
+                "On"
+              ],
+              "short_options": [
+                "OFF",
+                "ON"
+              ],
+              "default": 0
+            },
+            {
+              "key": "arp_target",
+              "label": "Target",
+              "short_name": "TARGT",
+              "type": "enum",
+              "options": [
+                "Both",
+                "Timbre 1",
+                "Timbre 2"
+              ],
+              "short_options": [
+                "BOTH",
+                "T1",
+                "T2"
+              ],
+              "default": 0
+            }
+          ],
+          "knobs": [
+            "arp_type",
+            "arp_range",
+            "arp_resolution",
+            "arp_gate",
+            "arp_swing",
+            "arp_latch",
+            "arp_key_sync",
+            "arp_target"
+          ]
+        },
+        "steps": {
+          "name": "Arp Steps",
+          "label": "Arp Steps",
+          "params": [
+            {
+              "key": "arp_step1",
+              "label": "Step 1",
+              "short_name": "ST1",
+              "type": "enum",
+              "options": [
+                "Rest",
+                "Play"
+              ],
+              "short_options": [
+                "REST",
+                "PLAY"
+              ],
+              "default": 1
+            },
+            {
+              "key": "arp_step2",
+              "label": "Step 2",
+              "short_name": "ST2",
+              "type": "enum",
+              "options": [
+                "Rest",
+                "Play"
+              ],
+              "short_options": [
+                "REST",
+                "PLAY"
+              ],
+              "default": 1
+            },
+            {
+              "key": "arp_step3",
+              "label": "Step 3",
+              "short_name": "ST3",
+              "type": "enum",
+              "options": [
+                "Rest",
+                "Play"
+              ],
+              "short_options": [
+                "REST",
+                "PLAY"
+              ],
+              "default": 1
+            },
+            {
+              "key": "arp_step4",
+              "label": "Step 4",
+              "short_name": "ST4",
+              "type": "enum",
+              "options": [
+                "Rest",
+                "Play"
+              ],
+              "short_options": [
+                "REST",
+                "PLAY"
+              ],
+              "default": 1
+            },
+            {
+              "key": "arp_step5",
+              "label": "Step 5",
+              "short_name": "ST5",
+              "type": "enum",
+              "options": [
+                "Rest",
+                "Play"
+              ],
+              "short_options": [
+                "REST",
+                "PLAY"
+              ],
+              "default": 1
+            },
+            {
+              "key": "arp_step6",
+              "label": "Step 6",
+              "short_name": "ST6",
+              "type": "enum",
+              "options": [
+                "Rest",
+                "Play"
+              ],
+              "short_options": [
+                "REST",
+                "PLAY"
+              ],
+              "default": 1
+            },
+            {
+              "key": "arp_step7",
+              "label": "Step 7",
+              "short_name": "ST7",
+              "type": "enum",
+              "options": [
+                "Rest",
+                "Play"
+              ],
+              "short_options": [
+                "REST",
+                "PLAY"
+              ],
+              "default": 1
+            },
+            {
+              "key": "arp_step8",
+              "label": "Step 8",
+              "short_name": "ST8",
+              "type": "enum",
+              "options": [
+                "Rest",
+                "Play"
+              ],
+              "short_options": [
+                "REST",
+                "PLAY"
+              ],
+              "default": 1
+            }
+          ],
+          "knobs": [
+            "arp_step1",
+            "arp_step2",
+            "arp_step3",
+            "arp_step4",
+            "arp_step5",
+            "arp_step6",
+            "arp_step7",
+            "arp_step8"
+          ]
         }
       }
     }

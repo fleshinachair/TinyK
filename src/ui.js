@@ -3,12 +3,14 @@
  *
  * Handles 128x64 OLED display rendering and 8 hardware encoders
  * across the parameter pages (the same pages as the module.json ui_hierarchy):
- *   PERF:         Category, Program, Cutoff, Res, Amp Attack, Amp Release, Drive, Mod Wheel
+ *   PERF:         Category, Program, Cutoff, Res, Amp Attack, Amp Release, Arp, Mod Wheel
  *   OSC / TIMBRE: Wave1, Pulse Width, Wave2, Semi, Tune, Voice Mode, Timbre Edit, Timbre Balance
  *   ENVELOPES:    Filter Atk/Dcy/Sus/Rel, Amp Dcy/Sus, Key Track, EG Int
  *   EFFECTS:      Chorus Mix, Delay Time/Feedback/Mix, LFO1/LFO2 Rate, Master Vol, Pan
- *   MIX / FILTER: Osc Mix, Noise, Sync/Ring, Filter Type, Portamento, Level
+ *   MIX / FILTER: Osc Mix, Noise, Sync/Ring, Filter Type, Portamento, Level, Drive
  *   BANK:         the active bank file
+ *   ARP SETTINGS: Type, Range, Resolution, Gate, Swing, Latch, Key Sync, Target
+ *   ARP STEPS:    Step 1..8 of the arpeggiator's pattern (Rest / Play)
  * Pages marked `timbre` edit the timbre selected by Timbre Edit (in Layer mode): their header shows
  * [T1] or [T2], and with Timbre 2 their per-timbre labels read "T2.CUT" etc.
  */
@@ -37,7 +39,8 @@ export const PAGES = [
             { key: "resonance",      label: "Res",     short: "Res",  t2: "T2.RES", format: pct },
             { key: "attack2",        label: "AmpAtk",  short: "Atk",  t2: "T2.ATK", format: pct },
             { key: "release2",       label: "AmpRel",  short: "Rel",  t2: "T2.REL", format: pct },
-            { key: "drive",          label: "Drive",   short: "Drive", t2: "T2.DRV", format: pct },
+            // the program's arpeggiator (stored on / off until changed here)
+            { key: "arp_on",         label: "Arp",     short: "Arp",   values: ["Off", "On"] },
             // stands in for the mod wheel the Move lacks: virtual patch source 7, same as CC1
             { key: "mod_wheel",      label: "ModWhl",  short: "MOD",   int: [0, 127], format: (v) => `${Math.round(v)}` }
         ]
@@ -98,7 +101,8 @@ export const PAGES = [
             { key: "sync_ring",   label: "SyncR", short: "SyncR", t2: "T2.SYNC", index: true, values: ["OFF", "RING", "SYNC", "R.SNC"] },
             { key: "filter_type", label: "Type",  short: "Type",  t2: "T2.FTYP", index: true, values: ["LPF24", "LPF12", "BPF12", "HPF12"] },
             { key: "portamento",  label: "Porta", short: "Porta", t2: "T2.PORT", format: pct },
-            { key: "level",       label: "Level", short: "Level", t2: "T2.LVL",  format: pct }
+            { key: "level",       label: "Level", short: "Level", t2: "T2.LVL",  format: pct },
+            { key: "drive",       label: "Drive", short: "Drive", t2: "T2.DRV", format: pct }
         ]
     },
     {
@@ -108,6 +112,27 @@ export const PAGES = [
             // 0 = built-in, 1..N = .syx dumps in the module's banks/ folder; shows the file name
             { key: "bank_file",      label: "Bank",    short: "Bank", bank: true }
         ]
+    },
+    {
+        id: "arpset",
+        name: "ARP SETTINGS",
+        // the program's arpeggiator; a turn changes the running arpeggio at once
+        params: [
+            { key: "arp_type",       label: "Type",   short: "Type",  index: true, values: ["UP", "DOWN", "ALT1", "ALT2", "RND", "TRIG"] },
+            { key: "arp_range",      label: "Range",  short: "Range", index: true, values: ["1 Oct", "2 Oct", "3 Oct", "4 Oct"] },
+            { key: "arp_resolution", label: "Reso",   short: "Reso",  index: true, values: ["1/24", "1/16", "1/12", "1/8", "1/6", "1/4"] },
+            { key: "arp_gate",       label: "Gate",   short: "Gate",  int: [0, 100], format: (v) => `${Math.round(v)}%` },
+            { key: "arp_swing",      label: "Swing",  short: "Swing", int: [-100, 100], format: (v) => `${v > 0 ? "+" : ""}${Math.round(v)}%` },
+            { key: "arp_latch",      label: "Latch",  short: "Latch", index: true, values: ["Off", "On"] },
+            { key: "arp_key_sync",   label: "KeySync", short: "KSync", index: true, values: ["Off", "On"] },
+            { key: "arp_target",     label: "Target", short: "Targ",  index: true, values: ["Both", "T1", "T2"] }
+        ]
+    },
+    {
+        id: "steps",
+        name: "ARP STEPS",
+        // the arpeggiator's 8-step trigger pattern: each step plays or rests, live
+        params: [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ key: `arp_step${n}`, label: `Step${n}`, short: `St${n}`, values: ["Rest", "Play"] }))
     }
 ];
 

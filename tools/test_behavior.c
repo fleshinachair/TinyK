@@ -498,6 +498,316 @@ static void test_noise_is_white(void) {
     free(b);
 }
 
+/* --- Arpeggiator ------------------------------------------------------------------------------------------------
+ * Drives keys as MIDI (the path the Move uses) and reads the voices' gates block by block: which notes start when. */
+#define ARP_LOG_MAX 64
+typedef struct { double t; int note; int timbre; } arp_hit_t;
+
+/* Renders `seconds` in 128-frame blocks; logs every gate that opened during a block (note, timbre, block time) */
+static int arp_log(double seconds, arp_hit_t *log, int max) {
+    int frames = (int)(seconds * SR), count = 0;
+    int16_t buf[256];
+    int was[NUM_VOICES], note_was[NUM_VOICES];
+    for (int v = 0; v < NUM_VOICES; v++) { was[v] = S.voices[v].gate; note_was[v] = S.voices[v].note; }
+    for (int done = 0; done < frames; done += 128) {
+        uint32_t age_before[NUM_VOICES];
+        for (int v = 0; v < NUM_VOICES; v++) age_before[v] = S.voices[v].age;
+        synth_render(&S, buf, 128);
+        if (g_fake_beat >= 0.0) g_fake_beat += 128.0 / SR * g_fake_bpm / 60.0;
+        for (int v = 0; v < NUM_VOICES; v++) {
+            int started = S.voices[v].gate && (!was[v] || S.voices[v].age != age_before[v] || S.voices[v].note != note_was[v]);
+            if (started && count < max) {
+                log[count].t = (double)done / SR;
+                log[count].note = S.voices[v].note;
+                log[count].timbre = S.voices[v].is_timbre_2;
+                count++;
+            }
+            was[v] = S.voices[v].gate;
+            note_was[v] = S.voices[v].note;
+        }
+    }
+    return count;
+}
+
+static void arp_voice(int type, int range, int resolution, float gate, uint8_t pattern, int length) {
+    open_voice();
+    S.arp.set.on = 1;
+    S.arp.set.latch = 0;
+    S.arp.set.key_sync = 1;
+    S.arp.set.target = 0;
+    S.arp.set.type = type;
+    S.arp.set.range = range;
+    S.arp.set.resolution = resolution;
+    S.arp.set.gate = gate;
+    S.arp.set.swing = 0.0f;
+    S.arp.set.pattern = pattern;
+    S.arp.set.length = length;
+}
+
+static void keys(const int *notes, int n, int on) {
+    for (int i = 0; i < n; i++) midi(on ? 0x90 : 0x80, (uint8_t)notes[i], on ? 100 : 0);
+}
+
+/* "60 64 67 ..." of the first n hits */
+static void hit_notes(const arp_hit_t *h, int n, char *out, size_t cap) {
+    out[0] = '\0';
+    for (int i = 0; i < n; i++) snprintf(out + strlen(out), cap - strlen(out), "%s%d", i ? " " : "", h[i].note);
+}
+
+static int hits_match(const arp_hit_t *h, int n, const int *want, int wn) {
+    if (n < wn) return 0;
+    for (int i = 0; i < wn; i++) if (h[i].note != want[i]) return 0;
+    return 1;
+}
+
+static void test_arp(void) {
+    printf("\nArpeggiator (MIDI keys, 120 BPM):\n");
+    static host_api_v1_t host;
+    memset(&host, 0, sizeof host);
+    host.get_bpm = fake_get_bpm;
+    host.get_beat_position = fake_get_beat_position;
+    move_plugin_init_v2(&host);
+    g_fake_bpm = 120.0f;
+    g_fake_beat = -1.0;
+    arp_hit_t h[ARP_LOG_MAX];
+    char got[256], what[400];
+    const int chord[3] = { 60, 64, 67 };
+    int n;
+
+    /* Off: keys play directly */
+    open_voice();
+    S.arp.set.on = 0;
+    midi(0x90, 60, 100);
+    check(S.voices[0].gate && S.voices[0].note == 60, "arp off: a key plays at once, as before");
+    midi(0x80, 60, 0);
+
+    /* UP, 1 octave, 1/16 (125 ms at 120 BPM), gate 50 % */
+    arp_voice(ARP_UP, 1, 1, 0.5f, 0, 8);
+    keys(chord, 3, 1);
+    n = arp_log(1.0, h, ARP_LOG_MAX);
+    hit_notes(h, n < 8 ? n : 8, got, sizeof got);
+    {
+        const int want[] = { 60, 64, 67, 60, 64, 67, 60, 64 };
+        int timing = n >= 8;
+        for (int i = 0; i < 8 && timing; i++) timing = fabs(h[i].t - 0.125 * i) < 0.004;
+        snprintf(what, sizeof what, "UP: %s, one step per 1/16 (125 ms) from the first key", got);
+        check(hits_match(h, n, want, 8) && timing, what);
+    }
+    {   /* gate 50 %: the note is released mid-step */
+        int16_t b[256];
+        arp_voice(ARP_UP, 1, 1, 0.5f, 0, 8);
+        keys(chord, 1, 1);
+        for (int i = 0; i < 20; i++) synth_render(&S, b, 128); /* 58 ms */
+        int open_mid = S.voices[0].gate;
+        for (int i = 0; i < 5; i++) synth_render(&S, b, 128);  /* 72 ms */
+        check(open_mid && !S.voices[0].gate, "gate 50 %: the step's note is held 62.5 ms of its 125 ms");
+    }
+    keys(chord, 3, 0);
+
+    /* Range 2, DOWN, ALT1, ALT2 */
+    arp_voice(ARP_UP, 2, 1, 0.5f, 0, 8);
+    keys(chord, 3, 1);
+    n = arp_log(1.0, h, ARP_LOG_MAX);
+    hit_notes(h, n < 7 ? n : 7, got, sizeof got);
+    { const int want[] = { 60, 64, 67, 72, 76, 79, 60 }; snprintf(what, sizeof what, "range 2 octaves: %s", got); check(hits_match(h, n, want, 7), what); }
+    keys(chord, 3, 0);
+    arp_voice(ARP_DOWN, 1, 1, 0.5f, 0, 8);
+    keys(chord, 3, 1);
+    n = arp_log(0.8, h, ARP_LOG_MAX);
+    hit_notes(h, n < 6 ? n : 6, got, sizeof got);
+    { const int want[] = { 67, 64, 60, 67, 64, 60 }; snprintf(what, sizeof what, "DOWN: %s", got); check(hits_match(h, n, want, 6), what); }
+    keys(chord, 3, 0);
+    arp_voice(ARP_ALT1, 1, 1, 0.5f, 0, 8);
+    keys(chord, 3, 1);
+    n = arp_log(1.0, h, ARP_LOG_MAX);
+    hit_notes(h, n < 7 ? n : 7, got, sizeof got);
+    { const int want[] = { 60, 64, 67, 64, 60, 64, 67 }; snprintf(what, sizeof what, "ALT1 (ends once): %s", got); check(hits_match(h, n, want, 7), what); }
+    keys(chord, 3, 0);
+    arp_voice(ARP_ALT2, 1, 1, 0.5f, 0, 8);
+    keys(chord, 3, 1);
+    n = arp_log(1.0, h, ARP_LOG_MAX);
+    hit_notes(h, n < 7 ? n : 7, got, sizeof got);
+    { const int want[] = { 60, 64, 67, 67, 64, 60, 60 }; snprintf(what, sizeof what, "ALT2 (ends twice): %s", got); check(hits_match(h, n, want, 7), what); }
+    keys(chord, 3, 0);
+
+    /* RANDOM: only held notes, not one note over and over */
+    arp_voice(ARP_RANDOM, 1, 1, 0.5f, 0, 8);
+    keys(chord, 3, 1);
+    n = arp_log(2.0, h, ARP_LOG_MAX);
+    {
+        int ok = n >= 15, seen[3] = { 0, 0, 0 };
+        for (int i = 0; i < n; i++) {
+            int k = h[i].note == 60 ? 0 : (h[i].note == 64 ? 1 : (h[i].note == 67 ? 2 : -1));
+            if (k < 0) ok = 0; else seen[k] = 1;
+        }
+        hit_notes(h, n < 10 ? n : 10, got, sizeof got);
+        snprintf(what, sizeof what, "RANDOM picks among the held keys: %s ...", got);
+        check(ok && seen[0] && seen[1] && seen[2], what);
+    }
+    keys(chord, 3, 0);
+
+    /* TRIGGER: the chord together each step, the octave rising over the range */
+    arp_voice(ARP_TRIGGER, 2, 1, 0.5f, 0, 8);
+    keys(chord, 3, 1);
+    n = arp_log(0.3, h, ARP_LOG_MAX);
+    {
+        int first = 0, second = 0;
+        for (int i = 0; i < n; i++) {
+            if (h[i].t < 0.01) first += (h[i].note == 60 || h[i].note == 64 || h[i].note == 67);
+            else if (fabs(h[i].t - 0.125) < 0.004) second += (h[i].note == 72 || h[i].note == 76 || h[i].note == 79);
+        }
+        snprintf(what, sizeof what, "TRIGGER: %d of 3 chord notes together on step 1, %d of 3 an octave up on step 2", first, second);
+        check(first == 3 && second == 3, what);
+    }
+    keys(chord, 3, 0);
+
+    /* Step mask: bit set = rest. Steps 2 and 4 rest; the note order carries on over them */
+    arp_voice(ARP_UP, 1, 1, 0.5f, 0x0A, 4);
+    keys(chord, 3, 1);
+    n = arp_log(1.0, h, ARP_LOG_MAX);
+    {
+        int ok = n >= 4 && fabs(h[0].t) < 0.004 && fabs(h[1].t - 0.25) < 0.004 && fabs(h[2].t - 0.5) < 0.004 &&
+                 h[0].note == 60 && h[1].note == 64 && h[2].note == 67 && h[3].note == 60;
+        hit_notes(h, n < 4 ? n : 4, got, sizeof got);
+        snprintf(what, sizeof what, "pattern 0x0A over 4 steps: steps 2 and 4 rest, notes %s at %.0f / %.0f / %.0f ms",
+                 got, n > 0 ? h[0].t * 1000 : -1, n > 1 ? h[1].t * 1000 : -1, n > 2 ? h[2].t * 1000 : -1);
+        check(ok, what);
+    }
+    keys(chord, 3, 0);
+
+    /* Release stops it; latch keeps it, and the next key after a release starts a new set */
+    arp_voice(ARP_UP, 1, 1, 0.5f, 0, 8);
+    keys(chord, 3, 1);
+    arp_log(0.3, h, ARP_LOG_MAX);
+    keys(chord, 3, 0);
+    n = arp_log(0.5, h, ARP_LOG_MAX);
+    check(n == 0 && !S.arp.running, "releasing the keys stops the arpeggio");
+    arp_voice(ARP_UP, 1, 1, 0.5f, 0, 8);
+    S.arp.set.latch = 1;
+    keys(chord, 3, 1);
+    arp_log(0.3, h, ARP_LOG_MAX);
+    keys(chord, 3, 0);
+    n = arp_log(0.5, h, ARP_LOG_MAX);
+    int latched = n >= 3;
+    midi(0x90, 50, 100);
+    n = arp_log(0.5, h, ARP_LOG_MAX);
+    int replaced = n >= 3;
+    for (int i = 0; i < n; i++) replaced = replaced && h[i].note == 50;
+    snprintf(what, sizeof what, "latch: the arpeggio carries on after release (%s); a new key replaces the set (%s)",
+             latched ? "yes" : "no", replaced ? "yes" : "no");
+    check(latched && replaced, what);
+    midi(0x80, 50, 0);
+
+    /* Transport running, key sync off: steps fall on the beat grid (a key at beat 0.1 waits for 0.25) */
+    arp_voice(ARP_UP, 1, 1, 0.5f, 0, 8);
+    S.arp.set.key_sync = 0;
+    g_fake_beat = 0.1;
+    {
+        int16_t b[256];
+        synth_render(&S, b, 128); /* the arpeggiator picks up the transport */
+        g_fake_beat += 128.0 / SR * g_fake_bpm / 60.0;
+    }
+    double beat_at_key = g_fake_beat;
+    keys(chord, 1, 1);
+    n = arp_log(0.5, h, ARP_LOG_MAX);
+    {
+        double first_beat = beat_at_key + (n > 0 ? h[0].t : 0) * g_fake_bpm / 60.0;
+        snprintf(what, sizeof what, "transport lock: key at beat %.3f, first step at beat %.3f (grid 0.25)", beat_at_key, first_beat);
+        check(n > 0 && fabs(first_beat - 0.25) < 0.012, what);
+    }
+    keys(chord, 1, 0);
+    g_fake_beat = -1.0;
+
+    /* A.21 AutoHouse as stored: arp on (UP, 2 octaves, Timbre 1 only); Timbre 2 holds the key */
+    fresh(8);
+    check(S.arp.set.on && S.arp.set.target == 1 && S.arp.set.type == ARP_UP && S.arp.set.range == 2,
+          "A.21 loads its stored arpeggiator: on, UP, 2 octaves, Timbre 1");
+    midi(0x90, 48, 100);
+    n = arp_log(1.0, h, ARP_LOG_MAX);
+    {
+        int t1 = 0, t2 = 0, t1_oct = 0;
+        for (int i = 0; i < n; i++) {
+            if (h[i].timbre == 0) { t1++; t1_oct += h[i].note == 60; }
+            else t2++;
+        }
+        int t2_held = (S.voices[1].gate && S.voices[1].note == 48) || (S.voices[3].gate && S.voices[3].note == 48);
+        snprintf(what, sizeof what, "A.21: Timbre 1 steps %d times (%d an octave up); Timbre 2 holds the key from the press "
+                 "(%d restarts, still on: %s)", t1, t1_oct, t2, t2_held ? "yes" : "no");
+        check(t1 >= 6 && t1_oct >= 2 && t2 == 0 && t2_held, what);
+    }
+    midi(0x80, 48, 0);
+    synth_set_param(&S, "arp_on", 0.0f);
+    midi(0x90, 48, 100);
+    check(S.voices[0].gate && S.voices[1].gate && S.voices[0].note == 48, "Arp knob off: the key plays both timbres directly");
+    midi(0x80, 48, 0);
+    check(synth_get_param(&S, "arp_on") == 0.0f, "Arp knob reads back off");
+
+    /* Arp Steps knobs change the playing pattern live: rest steps 2..8 mid-run, then only step 1 of each bar plays */
+    arp_voice(ARP_UP, 1, 1, 0.5f, 0, 8);
+    keys(chord, 1, 1);
+    arp_log(0.3, h, ARP_LOG_MAX);                    /* steps 1-3 */
+    for (int st = 2; st <= 8; st++) {
+        char k[16];
+        snprintf(k, sizeof k, "arp_step%d", st);
+        synth_set_param(&S, k, 0.0f);
+    }
+    n = arp_log(2.0, h, ARP_LOG_MAX);                /* from step 4: only steps 1 (at 1.0 s and 2.0 s from the start) */
+    {
+        int ok = n >= 1;
+        for (int i = 0; i < n; i++) ok = ok && fabs(h[i].t + 0.3 - floor(h[i].t + 0.3 + 0.5)) < 0.01;
+        snprintf(what, sizeof what, "Arp Steps edited mid-run: %d hit%s in the next 2 s, all on step 1 of the bar", n, n == 1 ? "" : "s");
+        check(ok && n == 2, what);
+    }
+    keys(chord, 1, 0);
+
+    /* Arp Settings knobs change a running arpeggio at once */
+    arp_voice(ARP_UP, 1, 1, 0.5f, 0, 8);
+    keys(chord, 3, 1);
+    arp_log(0.3, h, ARP_LOG_MAX);                   /* 60 64 67 */
+    synth_set_param(&S, "arp_type", (float)ARP_DOWN);
+    n = arp_log(0.4, h, ARP_LOG_MAX);
+    {
+        int down = n >= 3 && h[1].note < h[0].note && h[2].note < h[1].note + (h[1].note == 60 ? 12 : 0);
+        hit_notes(h, n < 3 ? n : 3, got, sizeof got);
+        snprintf(what, sizeof what, "Type -> DOWN mid-run: the next steps fall (%s)", got);
+        check(n >= 3 && (down || (h[0].note > h[1].note)), what);
+    }
+    synth_set_param(&S, "arp_resolution", 3.0f);    /* 1/8: 250 ms */
+    n = arp_log(1.0, h, ARP_LOG_MAX);
+    {
+        int ok = n >= 3 && fabs((h[2].t - h[1].t) - 0.25) < 0.004;
+        snprintf(what, sizeof what, "Resolution -> 1/8 mid-run: steps %.0f ms apart", n >= 3 ? (h[2].t - h[1].t) * 1000 : -1);
+        check(ok, what);
+    }
+    keys(chord, 3, 0);
+    arp_voice(ARP_UP, 1, 1, 0.5f, 0, 8);
+    S.arp.set.latch = 1;
+    keys(chord, 3, 1);
+    arp_log(0.2, h, ARP_LOG_MAX);
+    keys(chord, 3, 0);
+    synth_set_param(&S, "arp_latch", 0.0f);         /* no key is held: latch off stops it */
+    n = arp_log(0.5, h, ARP_LOG_MAX);
+    check(n == 0 && !S.arp.running, "Latch -> Off with no key held: the latched arpeggio stops");
+
+    /* Target change in Layer mode: no voice is left gated on the old timbre after the keys are released */
+    fresh(8);                                         /* A.21: Layer, arp on Timbre 1 */
+    midi(0x90, 48, 100);
+    arp_log(0.3, h, ARP_LOG_MAX);
+    synth_set_param(&S, "arp_target", 2.0f);        /* Timbre 2 arpeggiates, Timbre 1 holds the key */
+    n = arp_log(0.5, h, ARP_LOG_MAX);
+    int t2_steps = 0;
+    for (int i = 0; i < n; i++) t2_steps += h[i].timbre == 1;
+    int t1_held = (S.voices[0].gate && S.voices[0].note == 48) || (S.voices[2].gate && S.voices[2].note == 48);
+    midi(0x80, 48, 0);
+    arp_log(0.05, h, ARP_LOG_MAX);
+    int gated = 0;
+    for (int v = 0; v < NUM_VOICES; v++) gated += S.voices[v].gate;
+    snprintf(what, sizeof what, "Target -> Timbre 2 mid-run: Timbre 2 steps (%d), Timbre 1 holds the key (%s), nothing left on after release (%d gated)",
+             t2_steps, t1_held ? "yes" : "no", gated);
+    check(t2_steps >= 2 && t1_held && gated == 0, what);
+    move_plugin_init_v2(NULL);
+}
+
 int main(void) {
     test_layer();
     test_edit_routing();
@@ -507,6 +817,7 @@ int main(void) {
     test_host_tempo();
     test_lfo_steps_click_free();
     test_noise_is_white();
+    test_arp();
     printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "ALL PASSED", failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;
 }
