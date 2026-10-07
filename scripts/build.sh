@@ -94,8 +94,13 @@ fi
 
 # === Packaging ===
 echo "Packaging module..."
-MODULE_NAME="TinyK"
+# The directory is the module id: lowercase, as Schwung requires (^[a-z0-9][a-z0-9-]*$). Slot files store the id
+# and the chain host loads sound_generators/<id>/dsp.so from it on boot; the release asset keeps its name.
+MODULE_NAME="tinyk"
+ASSET_NAME="TinyK.tar.gz"
 DIST_DIR="dist/$MODULE_NAME"
+# A fresh directory (dist/TinyK from older builds is the same folder on a case-insensitive disk and kept its case)
+rm -rf "$DIST_DIR" dist/TinyK
 mkdir -p "$DIST_DIR"
 
 cp src/module.json "$DIST_DIR/module.json"
@@ -120,16 +125,17 @@ mkdir -p "$DIST_DIR/banks"
 printf 'Drop microKORG bank dumps (.syx, 128 programs) here; they appear on the Bank page after reloading TinyK.
 ' > "$DIST_DIR/banks/README.txt"
 
-# Create release tarball (packaging ONLY TinyK.tar.gz)
+# Create release tarball (packaging ONLY TinyK.tar.gz, holding tinyk/)
+rm -f "dist/$ASSET_NAME"
 cd dist
-tar -czvf "$MODULE_NAME.tar.gz" "$MODULE_NAME/"
+tar -czvf "$ASSET_NAME" "$MODULE_NAME/"
 cd ..
-cp "dist/$MODULE_NAME.tar.gz" "./$MODULE_NAME.tar.gz"
+cp "dist/$ASSET_NAME" "./$ASSET_NAME"
 
 echo ""
 echo "=== Build Complete ==="
 echo "Output Directory: $DIST_DIR"
-echo "Tarball: dist/$MODULE_NAME.tar.gz (and ./$MODULE_NAME.tar.gz)"
+echo "Tarball: dist/$ASSET_NAME (and ./$ASSET_NAME)"
 if command -v file &>/dev/null; then
     echo "Binary inspection:"
     file build/dsp.so

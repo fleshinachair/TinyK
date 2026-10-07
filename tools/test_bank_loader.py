@@ -264,6 +264,37 @@ def host_api():
               "preset 127 -> Category Vocoder, Program B8")
         put("bank_file", "MicroKorgFactory")
         check(get("bank_file") == "1" and get("bank_file_name") == "MicroKorgFactory", "bank by name")
+
+        # Slot state (the host's autosave / boot restore): edits survive a round trip through another program
+        put("preset", "20")
+        put("voice_mode", "1")
+        put("timbre_edit", "1")
+        put("cutoff", "0.123")
+        put("level", "0.3")
+        put("timbre_edit", "0")
+        put("resonance", "0.777")
+        put("delay_mix", "0.42")
+        before = {k: get(k) for k in ("bank_file_name", "preset", "voice_mode", "resonance", "delay_mix", "level")}
+        state = get("state")
+        try:
+            doc = json.loads(state)
+        except ValueError:
+            doc = {}
+        check(doc.get("tinyk_state") == 1 and doc.get("bank") == "MicroKorgFactory" and doc.get("preset") == 20
+              and len(doc.get("params", [])) == 35 and len(doc.get("extra2", [])) == 24,
+              f"state is JSON ({len(state)} bytes): bank, preset, params, extras")
+        put("bank_file", "0")
+        put("preset", "99")
+        put("state", state)
+        after = {k: get(k) for k in before}
+        put("timbre_edit", "1")
+        t2 = (get("cutoff"), get("level"))
+        check(after == before and t2 == ("0.1230", "0.3000"), f"state restores bank, program and edits: {after}, T2 {t2}")
+        put("preset", "5")
+        put("state", "{\"tinyk_state\":1,\"preset\":7,\"params\":[1,2]}")
+        check(get("preset") == "7" and get("bank_file_name") == "Built-in", "a partial state keeps the program's values")
+        put("state", "garbage")
+        check(get("preset") == "7", "a state that is not TinyK's is ignored")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
