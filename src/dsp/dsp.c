@@ -125,7 +125,7 @@ static const float LFO_SYNC_NOTES[15] = {
 /* One patch LFO sample in -1..1. LFO1 waves: saw, square, triangle, S&H; LFO2: saw, square, sine, S&H. */
 static inline float patch_lfo_value(const lfo_t *l, int which, int wave) {
     switch (wave) {
-        case 0: return 2.0f * l->phase - 1.0f;
+        case 0: return 1.0f - 2.0f * l->phase; /* saw falls: +LFO -> amp gates decaying hits (A.21 AutoHouse) */
         case 1: return (l->phase < 0.5f) ? 1.0f : -1.0f;
         case 2: return which == 0 ? 2.0f * fabsf(2.0f * l->phase - 1.0f) - 1.0f
                                   : sinf(2.0f * (float)M_PI * l->phase);
@@ -1314,8 +1314,8 @@ void synth_note_on(synth_engine_t *synth, uint8_t note, uint8_t velocity) {
     for (int t = 0; t < (is_layer ? 2 : 1); t++) {
         for (int l = 0; l < 2; l++) {
             if (synth->timbre_extra[t].lfo_keysync[l] != 0) {
-                /* start at the positive peak, as the VST does: sine peaks at phase 0.25; triangle and
-                 * square are already +1 at phase 0; the saw starts its ramp */
+                /* start at the positive peak, as the VST does: sine peaks at phase 0.25; triangle, square and
+                 * the (falling) saw are +1 at phase 0 */
                 int sine = (l == 1 && synth->timbre_extra[t].lfo_wave[l] == 2);
                 synth->patch_lfo[t][l].phase = sine ? 0.25f : 0.0f;
             }
