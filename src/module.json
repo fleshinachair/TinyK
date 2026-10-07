@@ -342,7 +342,13 @@
                 "REST",
                 "PLAY"
               ],
-              "default": 1
+              "default": 1,
+              "viz": {
+                "kind": "custom:tinyk_step",
+                "extra_keys": [
+                  "arp_playhead"
+                ]
+              }
             },
             {
               "key": "arp_step2",
@@ -357,7 +363,13 @@
                 "REST",
                 "PLAY"
               ],
-              "default": 1
+              "default": 1,
+              "viz": {
+                "kind": "custom:tinyk_step",
+                "extra_keys": [
+                  "arp_playhead"
+                ]
+              }
             },
             {
               "key": "arp_step3",
@@ -372,7 +384,13 @@
                 "REST",
                 "PLAY"
               ],
-              "default": 1
+              "default": 1,
+              "viz": {
+                "kind": "custom:tinyk_step",
+                "extra_keys": [
+                  "arp_playhead"
+                ]
+              }
             },
             {
               "key": "arp_step4",
@@ -387,7 +405,13 @@
                 "REST",
                 "PLAY"
               ],
-              "default": 1
+              "default": 1,
+              "viz": {
+                "kind": "custom:tinyk_step",
+                "extra_keys": [
+                  "arp_playhead"
+                ]
+              }
             },
             {
               "key": "arp_step5",
@@ -402,7 +426,13 @@
                 "REST",
                 "PLAY"
               ],
-              "default": 1
+              "default": 1,
+              "viz": {
+                "kind": "custom:tinyk_step",
+                "extra_keys": [
+                  "arp_playhead"
+                ]
+              }
             },
             {
               "key": "arp_step6",
@@ -417,7 +447,13 @@
                 "REST",
                 "PLAY"
               ],
-              "default": 1
+              "default": 1,
+              "viz": {
+                "kind": "custom:tinyk_step",
+                "extra_keys": [
+                  "arp_playhead"
+                ]
+              }
             },
             {
               "key": "arp_step7",
@@ -432,7 +468,13 @@
                 "REST",
                 "PLAY"
               ],
-              "default": 1
+              "default": 1,
+              "viz": {
+                "kind": "custom:tinyk_step",
+                "extra_keys": [
+                  "arp_playhead"
+                ]
+              }
             },
             {
               "key": "arp_step8",
@@ -447,7 +489,13 @@
                 "REST",
                 "PLAY"
               ],
-              "default": 1
+              "default": 1,
+              "viz": {
+                "kind": "custom:tinyk_step",
+                "extra_keys": [
+                  "arp_playhead"
+                ]
+              }
             }
           ],
           "knobs": [

@@ -5,7 +5,9 @@
  * across the parameter pages (the same pages as the module.json ui_hierarchy):
  *   PERF:         Category, Program, Cutoff, Res, Amp Attack, Amp Release, Arp, Mod Wheel
  *   ARP SETTINGS: Type, Range, Resolution, Gate, Swing, Latch, Key Sync, Target
- *   ARP STEPS:    Step 1..8 of the arpeggiator's pattern (Rest / Play)
+ *   ARP STEPS:    Step 1..8 of the arpeggiator's pattern (Rest / Play), drawn as the microKORG's 2 x 4 step LEDs
+ *                 (hollow = Rest, filled = Play, inverted = sounding, dotted = past the pattern's length), as
+ *                 canvas.js draws them on the Schwung param pages
  *   OSC / TIMBRE: Wave1, Pulse Width, Wave2, Semi, Tune, Voice Mode, Timbre Edit, Timbre Balance
  *   ENVELOPES:    Filter Atk/Dcy/Sus/Rel, Amp Dcy/Sus, Key Track, EG Int
  *   MIX / FILTER: Osc Mix, Noise, Sync/Ring, Filter Type, Portamento, Level, Drive
@@ -63,7 +65,8 @@ export const PAGES = [
     {
         id: "steps",
         name: "ARP STEPS",
-        // the arpeggiator's 8-step trigger pattern: each step plays or rests, live
+        // the arpeggiator's 8-step trigger pattern: each step plays or rests, live; drawn as LEDs (drawStepLeds)
+        leds: true,
         params: [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ key: `arp_step${n}`, label: `Step${n}`, short: `St${n}`, values: ["Rest", "Play"] }))
     },
     {
@@ -333,6 +336,52 @@ export class MicroKorgUI {
         return (layer && parseInt(this.getParam("timbre_edit")) === 1) ? 2 : 1;
     }
 
+    // The step lit on the Arp Steps LEDs (-1: none) and the pattern length, from the engine's arp_playhead
+    // ("1,<length>,<next>,..." while running, "0,<length>" stopped; the lit step is the one before <next>)
+    arpPlayhead() {
+        const raw = this.host && this.host.getParam ? this.host.getParam("arp_playhead") : null;
+        const f = String(raw || "").split(",").map(Number);
+        const len = f[1] >= 1 && f[1] <= 8 ? Math.round(f[1]) : 8;
+        if (f[0] !== 1 || !Number.isFinite(f[2])) return { lit: -1, len };
+        return { lit: (((Math.round(f[2]) - 1) % 1680) + 1680) % 1680 % len, len };
+    }
+
+    // Arp Steps: one LED box per encoder, steps 1-4 on the top row and 5-8 below
+    drawStepLeds(display, page) {
+        if (typeof display.fill_rect !== "function") return;
+        const { lit, len } = this.arpPlayhead();
+        const B = 11;
+        const outline = (x, y, c) => {
+            display.fill_rect(x, y, B, 1, c);
+            display.fill_rect(x, y + B - 1, B, 1, c);
+            display.fill_rect(x, y + 1, 1, B - 2, c);
+            display.fill_rect(x + B - 1, y + 1, 1, B - 2, c);
+        };
+        for (let i = 0; i < 8; i++) {
+            const paramDef = page.params[i];
+            const x0 = (i % 4) * 32, y0 = 16 + Math.floor(i / 4) * 24;
+            if (typeof display.print === "function") display.print(x0 + 2, y0, paramDef.short);
+            const x = x0 + 18, y = y0 + 1;
+            const play = parseFloat(this.getParam(paramDef.key)) >= 0.5;
+            if (i === lit) {
+                display.fill_rect(x - 2, y - 2, B + 4, B + 4, 1);
+                if (play) display.fill_rect(x, y, B, B, 0);
+                else outline(x, y, 0);
+            } else if (i >= len) {
+                for (let d = 0; d < B; d += 2) {
+                    display.fill_rect(x + d, y, 1, 1, 1);
+                    display.fill_rect(x + d, y + B - 1, 1, 1, 1);
+                    display.fill_rect(x, y + d, 1, 1, 1);
+                    display.fill_rect(x + B - 1, y + d, 1, 1, 1);
+                }
+            } else if (play) {
+                display.fill_rect(x, y, B, B, 1);
+            } else {
+                outline(x, y, 1);
+            }
+        }
+    }
+
     // Render OLED Display (128x64 pixels)
     drawUI(display) {
         if (!display) return;
@@ -357,6 +406,11 @@ export class MicroKorgUI {
         // Horizontal separator line under header
         if (typeof display.draw_line === "function") {
             display.draw_line(0, 13, 127, 13);
+        }
+
+        if (page.leds) {
+            this.drawStepLeds(display, page);
+            return;
         }
 
         // 2. Encoder Slots Grid (8 parameters arranged in 2 rows of 4 columns)

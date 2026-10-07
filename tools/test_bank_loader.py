@@ -349,6 +349,17 @@ def host_api():
               and reloaded == stored and restored == edited and meta_st.get("options") == ["Rest", "Play"],
               f"Arp Steps: A.21 loads {''.join(stored)}; Step 1 Rest / Step 2 Play -> {''.join(edited)} (pattern "
               f"0x{st.get('arp_pattern', 0):02X} in the state); a program reload restores the stored steps, the state the edit")
+        # the steps draw as canvas.js's LEDs: a custom viz on each step (served and in module.json), fed by arp_playhead
+        viz = {"kind": "custom:tinyk_step", "extra_keys": ["arp_playhead"]}
+        cp_now = {p["key"]: p for p in json.loads(get("chain_params"))}
+        inline = manifest["capabilities"]["ui_hierarchy"]["levels"]["steps"]["params"]
+        ph = cp_now.get("arp_playhead", {})
+        check(all(cp_now.get(f"arp_step{n}", {}).get("viz") == viz for n in range(1, 9))
+              and all(p.get("viz") == viz for p in inline)
+              and ph.get("type") == "string" and ph.get("access") == "read" and get("arp_playhead") == "0,8"
+              and os.path.isfile(os.path.join(cal.ROOT, "src", "canvas.js")),
+              f"Arp Steps LEDs: custom:tinyk_step on the 8 steps (chain_params and module.json), read-only arp_playhead "
+              f"({get('arp_playhead')!r} with no keys held), src/canvas.js present")
         st1 = dict(json.loads(get("state")), arp_length=1, arp_pattern=0)  # an MS2000-style 1-step pattern
         put("state", json.dumps(st1))
         st64 = json.loads(get("state"))

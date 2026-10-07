@@ -3,11 +3,14 @@
 A lightweight, microKORG-inspired virtual analog synth engine for Ableton Move, built on the [Schwung](https://github.com/charlesvestal/schwung) module runtime.
 
 ## Features
-- **4-voice polyphonic / 2-voice dual-timbre** virtual analog engine (Single and Layer modes).
+- **4-voice polyphonic / 2-voice dual-timbre** virtual analog engine (Single and Layer modes) with authentic Unison voice stacking, detune, and stereo spread.
+- **Full microKORG Arpeggiator Engine:** Authentic 6-type arpeggiator (Up, Down, Alt1, Alt2, Random, Trigger), 1–4 octaves, variable resolution, swing (-100% to +100%), gate length, key sync, and target timbre routing.
+- **Dedicated 8-Step Sequencer Page:** Interactive per-step mute/play toggles matching the classic microKORG step pattern matrix.
 - **TPT zero-delay-feedback state-variable filter** (LPF24, LPF12, BPF12, HPF12) with an amp-stage drive circuit, stable from low cutoffs up to 19 kHz at any resonance.
-- **Virtual Patch matrix and two LFOs per timbre**, decoded from the patch data.
-- **microKORG category navigation:** pick one of 8 categories, then scroll its 16 programs (A1–A8, B1–B8) on a single knob, with the patch name in the header. No separate A/B toggle.
-- **Dynamic SysEx bank loader:** drop microKORG/MS2000 `.syx` bank dumps into the module's `banks/` folder and switch between them by name. Banks are decoded once at start-up, so switching never allocates memory or touches files while audio runs.
+- **Integrated Mod FX Engine:** Distinct Chorus/Flanger, 3-tap Ensemble, and 6-stage all-pass Phaser algorithms with output DC-blocking.
+- **Virtual Patch matrix and two LFOs per timbre**, decoded directly from patch data.
+- **microKORG category navigation:** pick one of 8 categories, then scroll its 16 programs (A1–A8, B1–B8) on a single knob, with the patch name in the header.
+- **Dynamic SysEx bank loader (microKORG & MS2000):** drop microKORG or MS2000 `.syx` bank dumps into the module's `banks/` folder and switch between them by name. Banks are decoded once at start-up, so switching never allocates memory or touches files while audio runs.
 - **Built-in factory bank:** 128 production-ready performance presets covering classic leads, pads, basses, and arpeggios, playable immediately without external files.
 
 ## Requirements
@@ -32,7 +35,7 @@ If TinyK is listed in the Schwung module catalog, install it from there; updates
 3. Reload a track slot with TinyK (or restart Schwung).
 
 ## Playing
-- **Pages,** in order: **Perf** (Category, Program, Cutoff, Resonance, Amp Attack, Amp Release, Arp, Mod Wheel), **Arp Settings** (Type, Range, Resolution, Gate, Swing, Latch, Key Sync, Target), **Arp Steps** (Step 1-8: Rest / Play), **Osc/Timbre** (Wave 1, Pulse Width, Wave 2, Semi, Tune, Voice Mode, Timbre Edit, Timbre Balance), **Envelopes** (filter EG, amp decay/sustain, Key Track, EG Int), **Mix/Filter** (Osc Mix, Noise, Sync/Ring, Filter Type, Portamento, Level, Drive), **Effects** (Chorus, Delay, LFO rates, Master Vol, Pan) and **Bank**. Shift+Click opens Schwung's page picker to jump straight to any page. The Move has no mod wheel, so **Mod Wheel** (0–127) on Perf plays its part for patches that route it; a wheel on an external controller (CC1) works too, and whichever moved last wins. Category picks one of the 8 categories (Trance, Techno/House, Electronica, DnB/Breaks, Hiphop/Vintage, Retro, SE/Hit, Vocoder) and Program its 16 programs (A1–A8, B1–B8); touching or turning Program shows the full code and name, e.g. "B.17 Flashin'Pad". The header shows the current patch name; the jog wheel steps through all 128 programs. The wave knobs show the waveform.
+- **Pages,** in order: **Perf** (Category, Program, Cutoff, Resonance, Amp Attack, Amp Release, Arp, Mod Wheel), **Arp Settings** (Type, Range, Resolution, Gate, Swing, Latch, Key Sync, Target), **Arp Steps** (Step 1-8: Rest / Play, drawn as the microKORG's 2 x 4 step LEDs: hollow = rest, filled = play, the sounding step inverted), **Osc/Timbre** (Wave 1, Pulse Width, Wave 2, Semi, Tune, Voice Mode, Timbre Edit, Timbre Balance), **Envelopes** (filter EG, amp decay/sustain, Key Track, EG Int), **Mix/Filter** (Osc Mix, Noise, Sync/Ring, Filter Type, Portamento, Level, Drive), **Effects** (Chorus, Delay, LFO rates, Master Vol, Pan) and **Bank**. Shift+Click opens Schwung's page picker to jump straight to any page. The Move has no mod wheel, so **Mod Wheel** (0–127) on Perf plays its part for patches that route it; a wheel on an external controller (CC1) works too, and whichever moved last wins. Category picks one of the 8 categories (Trance, Techno/House, Electronica, DnB/Breaks, Hiphop/Vintage, Retro, SE/Hit, Vocoder) and Program its 16 programs (A1–A8, B1–B8); touching or turning Program shows the full code and name, e.g. "B.17 Flashin'Pad". The header shows the current patch name; the jog wheel steps through all 128 programs. The wave knobs show the waveform.
 - **Arpeggiator:** each program plays its own microKORG arpeggio (type, octave range, resolution, gate, swing, step pattern, latch) when its arpeggiator is on, in time with the Move's tempo and, while the transport runs, on its beat grid. **Arp** on the Perf page turns it on or off for the current program, **Arp Settings** changes its type, range, resolution, gate, swing, latch, key sync and target timbre, and **Arp Steps** sets which of its 8 steps play, all live (the slot remembers them).
 - **Layer mode:** Timbre Edit chooses which timbre the per-timbre pages edit. Their header shows [T1] or [T2], and with Timbre 2 their knob labels read T2.CUT, T2.RES, and so on.
 - **Bank page:** open **Bank** from the main page. The **Bank** knob shows "Built-in" and the file name of each bank found in `banks/`; **Browse banks** lists them, and picking one returns to the main page. Changing bank keeps the selected category and program.
@@ -71,7 +74,7 @@ The module is cross-compiled for the Move's ARM64 (Cortex-A72) Linux. `./scripts
    Then reload the TinyK slot.
 
 ### Development tools
-The `tools/` folder holds the calibration and test tooling (Python 3 with NumPy and SciPy; C sources built with the same Zig): `test_behavior.c`, `test_bank_loader.py`, `audit_all_presets.py`, `render_demo_sweeps.py` (renders audition WAVs without hardware) and `calibrate_dsp.py`. See `CLAUDE.md` for the architecture notes.
+The `tools/` folder holds the calibration and test tooling (Python 3 with NumPy and SciPy; C sources built with the same Zig): `test_behavior.c`, `test_bank_loader.py`, `test_canvas.js` (Node), `audit_all_presets.py`, `render_demo_sweeps.py` (renders audition WAVs without hardware) and `calibrate_dsp.py`. See `CLAUDE.md` for the architecture notes.
 
 ## License
 MIT. See `src/module.json`.

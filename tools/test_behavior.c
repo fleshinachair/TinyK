@@ -569,7 +569,7 @@ static void test_arp(void) {
     memset(&host, 0, sizeof host);
     host.get_bpm = fake_get_bpm;
     host.get_beat_position = fake_get_beat_position;
-    move_plugin_init_v2(&host);
+    plugin_api_v2_t *api = move_plugin_init_v2(&host);
     g_fake_bpm = 120.0f;
     g_fake_beat = -1.0;
     arp_hit_t h[ARP_LOG_MAX];
@@ -606,6 +606,26 @@ static void test_arp(void) {
         check(open_mid && !S.voices[0].gate, "gate 50 %: the step's note is held 62.5 ms of its 125 ms");
     }
     keys(chord, 3, 0);
+
+    /* arp_playhead, which the Arp Steps LEDs (src/canvas.js) run the playhead from: stopped "0,<length>";
+     * running "1,<length>,<next step>,<ms to it>,<step ms>,<swing>" */
+    {
+        char ph0[64] = "", ph1[64] = "", ph2[64] = "";
+        arp_voice(ARP_UP, 1, 1, 0.5f, 0, 6);
+        api->get_param(&S, "arp_playhead", ph0, sizeof ph0);
+        keys(chord, 1, 1);
+        arp_log(0.3, h, ARP_LOG_MAX);          /* steps at 0, 125, 250 ms: step 3 sounds, the 4th is next */
+        api->get_param(&S, "arp_playhead", ph1, sizeof ph1);
+        keys(chord, 1, 0);
+        api->get_param(&S, "arp_playhead", ph2, sizeof ph2);
+        int on = 0, len = 0, next = -1;
+        float to_next = -1.0f, step_ms = 0.0f, swing = 9.0f;
+        int got_n = sscanf(ph1, "%d,%d,%d,%f,%f,%f", &on, &len, &next, &to_next, &step_ms, &swing);
+        snprintf(what, sizeof what, "arp_playhead: stopped \"%s\"; 0.302 s into a 6-step 1/16 arpeggio \"%s\" "
+                 "(step 3 lit, the next in ~73 ms); released \"%s\"", ph0, ph1, ph2);
+        check(strcmp(ph0, "0,6") == 0 && got_n == 6 && on == 1 && len == 6 && next == 3 && fabsf(to_next - 73.1f) < 1.0f
+              && fabsf(step_ms - 125.0f) < 0.01f && swing == 0.0f && strcmp(ph2, "0,6") == 0, what);
+    }
 
     /* Range 2, DOWN, ALT1, ALT2 */
     arp_voice(ARP_UP, 2, 1, 0.5f, 0, 8);

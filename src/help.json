@@ -1,68 +1,136 @@
 {
-  "title": "microKORG VA",
+  "title": "TinyK",
   "children": [
     {
       "title": "Overview",
       "lines": [
-        "schwung-mk-va",
-        "4-voice virtual",
-        "analog synthesizer",
-        "inspired by 2000s",
-        "dual-oscillator VA",
-        "engines (microKORG).",
+        "microKORG-style",
+        "virtual analog synth.",
+        "4 voices, or two",
+        "timbres layered.",
         "",
-        "Features:",
-        "Dual PolyBLEP oscs,",
-        "multimode filter,",
-        "dual ADSRs + LFOs,",
-        "chorus & delay FX."
+        "128 built-in programs",
+        "or your own microKORG",
+        "/ MS2000 .syx banks.",
+        "",
+        "Jog: browse programs.",
+        "Shift+Click: jump to",
+        "any page."
       ]
     },
     {
       "title": "Pages",
       "children": [
         {
-          "title": "Page 1: OSC",
+          "title": "1: Perf",
           "lines": [
-            "Osc 1 Wave & PW,",
-            "Osc 2 Wave & Detune,",
-            "Sync/Ring modulation,",
-            "Osc Mix & Sub Osc,",
-            "Portamento glide."
+            "Category, Program,",
+            "Cutoff, Resonance,",
+            "Amp Attack, Release,",
+            "Arp on / off,",
+            "Mod Wheel (as CC1)."
           ]
         },
         {
-          "title": "Page 2: FILTER",
+          "title": "2: Arp Settings",
           "lines": [
-            "Cutoff & Resonance,",
-            "Multimode Type",
-            "(24LP, 12LP, BP, HP),",
-            "Key tracking, Drive,",
-            "Env & LFO modulation,",
-            "Velocity sensitivity."
+            "Type: UP, DOWN, ALT1,",
+            "ALT2, RANDOM, TRIGGER",
+            "Range 1-4 octaves,",
+            "Resolution 1/24-1/4,",
+            "Gate, Swing, Latch,",
+            "Key Sync, Target",
+            "timbre (Layer mode)."
           ]
         },
         {
-          "title": "Page 3: ENVs",
+          "title": "3: Arp Steps",
           "lines": [
-            "Attack1, Decay1,",
-            "Sustain1, Release1",
-            "(Filter Envelope)",
-            "Attack2, Decay2,",
-            "Sustain2, Release2",
-            "(Amp Envelope)"
+            "8 knobs = 8 steps:",
+            "top row 1-4,",
+            "bottom row 5-8.",
+            "Hollow box: rest",
+            "Filled box: play",
+            "Inverted: sounding",
+            "Dotted: past the",
+            "pattern length."
           ]
         },
         {
-          "title": "Page 4: FX/MOD",
+          "title": "4: Osc/Timbre",
           "lines": [
-            "LFO 1 & 2 Rates,",
-            "Stereo Chorus mix,",
-            "Delay Time, Fdbk,",
+            "Wave 1, Pulse Width,",
+            "Wave 2, Semi, Tune,",
+            "Voice Mode (Single /",
+            "Layer), Timbre Edit,",
+            "Timbre Balance."
+          ]
+        },
+        {
+          "title": "5: Envelopes",
+          "lines": [
+            "Filter EG: Attack,",
+            "Decay, Sustain,",
+            "Release.",
+            "Amp EG: Decay,",
+            "Sustain.",
+            "Key Track, EG Int."
+          ]
+        },
+        {
+          "title": "6: Mix/Filter",
+          "lines": [
+            "Osc Mix, Noise,",
+            "Sync / Ring,",
+            "Filter Type (LPF24,",
+            "LPF12, BPF12, HPF12),",
+            "Portamento, Level,",
+            "Drive."
+          ]
+        },
+        {
+          "title": "7: Effects",
+          "lines": [
+            "Chorus mix,",
+            "Delay Time, Feedback,",
             "Delay mix,",
-            "Master Volume & Pan."
+            "LFO 1 & 2 rates,",
+            "Master Vol, Pan."
+          ]
+        },
+        {
+          "title": "8: Bank",
+          "lines": [
+            "Built-in bank or a",
+            ".syx file in banks/.",
+            "Browse banks lists",
+            "them. Changing bank",
+            "keeps the program."
           ]
         }
+      ]
+    },
+    {
+      "title": "Arpeggiator",
+      "lines": [
+        "Each program plays",
+        "its own arpeggio,",
+        "on or off as stored.",
+        "Arp on Perf turns it",
+        "on / off until the",
+        "next program. Edits",
+        "are saved with the",
+        "slot."
+      ]
+    },
+    {
+      "title": "Layer Mode",
+      "lines": [
+        "Timbre Edit picks the",
+        "timbre the per-timbre",
+        "pages edit: [T1] or",
+        "[T2] in the header,",
+        "labels T2.CUT etc."
       ]
     }
   ]
