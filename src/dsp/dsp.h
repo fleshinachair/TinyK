@@ -176,6 +176,13 @@ typedef struct {
     float unison_cents;
     float unison_pan;
     float unison_gain;
+
+    /* De-click: a voice starting from silence fades in over DECLICK_SAMPLES (raised cosine, declick_pos counts up);
+     * vel_gain is the velocity as heard, gliding to velocity so a steal or retrigger never steps the level; kill is
+     * an all-notes-off fade (a fast release) instead of a cut */
+    int declick_pos;
+    float vel_gain;
+    bool kill;
 } voice_t;
 
 /* Per-timbre settings that come from the patch but have no PARAM_* slot */

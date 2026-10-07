@@ -105,6 +105,7 @@ mkdir -p "$DIST_DIR"
 
 cp src/module.json "$DIST_DIR/module.json"
 cp src/ui.js "$DIST_DIR/ui.js"
+cp src/canvas.js "$DIST_DIR/canvas.js"   # the Arp Steps LED widget (Schwung param pages)
 cp src/presets.json "$DIST_DIR/presets.json"
 cp src/help.json "$DIST_DIR/help.json"
 if [ -f src/dsp/presets.h ]; then

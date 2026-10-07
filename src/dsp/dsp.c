@@ -187,6 +187,18 @@ static const float LFO_SYNC_NOTES[15] = {
 #define LFO_SMOOTH_S 0.0005f
 #endif
 
+/* Note-on de-click: a voice starting from silence fades in over this many samples (raised cosine, 1 ms at 44.1 kHz),
+ * on top of its amp EG. The EG's fastest attack (1.5 ms) starts at its steepest slope, and with random start phases
+ * the waveform is rarely at zero there: that corner, lifted by the brightness tilt, was a click on every fast-attack
+ * note. */
+#ifndef DECLICK_SAMPLES
+#define DECLICK_SAMPLES 44
+#endif
+/* A steal or retrigger glides the voice's velocity gain over this time constant instead of stepping it */
+#define VEL_GLIDE_S 0.0005f
+/* All notes off (CC 120 / 123, voice mode change, state restore) fades the voices out over this (to -40 dB) */
+#define KILL_RELEASE_S 0.003f
+
 /* Delay time base when the delay is tempo-synced, the other way round (1/32 .. 1/1, as the Time knob turns):
  * the factory programs' most used values 7, 5, 8 are then 3/16, 1/8, 1/4 (the LFO order would make 5 and 8
  * a 1/3 and a 1/6). */
@@ -1258,6 +1270,8 @@ static void voice_fresh_state(synth_engine_t *synth, voice_t *v) {
     v->sub_phase = voice_rand_phase(synth);
     v->amp_env.value = 0.0f;
     v->filter_env.value = 0.0f;
+    v->declick_pos = 0;
+    v->vel_gain = v->velocity;
 }
 
 /* A timbre's voices: in Layer mode t and t + 2 (two per timbre), in Single mode all four */
@@ -1292,6 +1306,7 @@ static void group_voice_start(synth_engine_t *synth, voice_t *v, int t, uint8_t 
     v->unison_cents = 0.5f * place * x->unison_cents * tinyk_tuning.unison_cents_scale;
     v->unison_pan = place * tinyk_tuning.unison_spread;
     v->unison_gain = 1.0f / sqrtf((float)n);
+    v->kill = false;
     if (!was_active || synth->timbre_params[t][PARAM_PORTAMENTO] < 0.005f) v->current_pitch = target_pitch;
     v->target_pitch = target_pitch;
     if (!was_active) voice_fresh_state(synth, v);
@@ -1387,16 +1402,12 @@ static void layer_voice_start(synth_engine_t *synth, int t, uint8_t note, float 
     v->layer_partner = -1;
     v->unison_cents = v->unison_pan = 0.0f;
     v->unison_gain = 1.0f;
+    v->kill = false;
     if (!was_active || synth->timbre_params[t][PARAM_PORTAMENTO] < 0.005f) v->current_pitch = target_pitch;
     v->target_pitch = target_pitch;
-    if (!was_active) {
-        voice_fresh_state(synth, v);
-    } else {
-        v->filter_svf[0].s1 *= 0.05f;
-        v->filter_svf[0].s2 *= 0.05f;
-        v->filter_svf[1].s1 *= 0.05f;
-        v->filter_svf[1].s2 *= 0.05f;
-    }
+    /* A sounding voice (retrigger, steal) keeps its filter state and EG levels: the EGs restart from where they are,
+     * so its sound never jumps (crushing the filter state to 5 % stepped an open filter's output) */
+    if (!was_active) voice_fresh_state(synth, v);
     adsr_gate_on(&v->filter_env, atk1_coef);
     adsr_gate_on(&v->amp_env, atk2_coef);
 }
@@ -1522,24 +1533,15 @@ static void voice_note_on(synth_engine_t *synth, uint8_t note, uint8_t velocity,
         v->layer_partner = -1;
         v->unison_cents = v->unison_pan = 0.0f;
         v->unison_gain = 1.0f;
+        v->kill = false;
 
         if (!was_active || portamento < 0.005f) {
             v->current_pitch = target_pitch;
         }
         v->target_pitch = target_pitch;
 
-        if (!was_active) {
-            v->filter_svf[0].s1 = 0.0f;
-            v->filter_svf[0].s2 = 0.0f;
-            v->filter_svf[1].s1 = 0.0f;
-            v->filter_svf[1].s2 = 0.0f;
-            voice_fresh_state(synth, v);
-        } else {
-            v->filter_svf[0].s1 *= 0.05f;
-            v->filter_svf[0].s2 *= 0.05f;
-            v->filter_svf[1].s1 *= 0.05f;
-            v->filter_svf[1].s2 *= 0.05f;
-        }
+        /* as in layer_voice_start: a sounding voice keeps its filter state and EG levels */
+        if (!was_active) voice_fresh_state(synth, v);
 
         adsr_gate_on(&v->filter_env, t1_atk1_coef);
         adsr_gate_on(&v->amp_env, t1_atk2_coef);
@@ -1748,6 +1750,26 @@ static void arp_param_set(synth_engine_t *synth, int i, int v) {
 
 /* Arp Steps page: step (0..7) plays or rests from its next turn on, live. A step past the pattern's length extends
  * it to that step (the MS2000 banks store length 1), the steps in between playing. */
+/* Where the arpeggiator is, for the Arp Steps LEDs (canvas.js). The host reads it about four times a second, so it
+ * gives what the widget needs to run the playhead on by itself between reads:
+ *   "0,<length>"                                          stopped (no playhead)
+ *   "1,<length>,<next>,<ms to next>,<step ms>,<swing>"    running: <next> is the index of the next step (mod 1680,
+ *                                                          which keeps its parity and its place in any length 1..8);
+ *                                                          the step now lit is the one before it
+ * From an even step to the next takes step x (1 + swing / 3), from an odd one step x (1 - swing / 3) (arp_step_time). Read on
+ * the host's param thread: the doubles it reads are written by the audio thread, a torn read only misplaces one frame. */
+static int format_arp_playhead(const synth_engine_t *synth, char *buf, int buf_len) {
+    const arp_t *a = &synth->arp;
+    int len = arp_clampi(a->set.length, 1, 8);
+    float bpm = synth->tempo_bpm > 1.0f ? synth->tempo_bpm : 120.0f;
+    if (!a->set.on || !a->running) return snprintf(buf, buf_len, "0,%d", len);
+    double ms_per_beat = 60000.0 / (double)bpm;
+    double to_next = (a->next_step - a->pos) * ms_per_beat;
+    if (to_next < 0.0) to_next = 0.0;
+    return snprintf(buf, buf_len, "1,%d,%d,%.1f,%.2f,%.3f", len, (int)(a->step_k % 1680), to_next,
+                    arp_step_beats(a) * ms_per_beat, a->set.swing);
+}
+
 static void set_arp_step(synth_engine_t *synth, int step, int play) {
     uint8_t bit = (uint8_t)(1u << step);
     if (step + 1 > synth->arp.set.length) {
@@ -1776,17 +1798,17 @@ void synth_all_notes_off(synth_engine_t *synth) {
     if (!synth) synth = &g_synth;
     arp_reset(&synth->arp);
     synth->mono_count[0] = synth->mono_count[1] = 0;
+    /* Sounding voices fade out over KILL_RELEASE_S (a cut was a click); the render frees them at the end */
     for (int i = 0; i < NUM_VOICES; i++) {
-        synth->voices[i].gate = false;
-        synth->voices[i].active = false;
-        synth->voices[i].amp_env.stage = ENV_IDLE;
-        synth->voices[i].amp_env.value = 0.0f;
-        synth->voices[i].filter_env.stage = ENV_IDLE;
-        synth->voices[i].filter_env.value = 0.0f;
-        synth->voices[i].filter_svf[0].s1 = 0.0f;
-        synth->voices[i].filter_svf[0].s2 = 0.0f;
-        synth->voices[i].filter_svf[1].s1 = 0.0f;
-        synth->voices[i].filter_svf[1].s2 = 0.0f;
+        voice_t *v = &synth->voices[i];
+        v->gate = false;
+        if (!v->active || v->amp_env.stage == ENV_IDLE) {
+            v->active = false;
+            continue;
+        }
+        v->kill = true;
+        adsr_gate_off(&v->filter_env);
+        adsr_gate_off(&v->amp_env);
     }
 }
 
@@ -1926,6 +1948,8 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
     const float fs = (float)MOVE_SAMPLE_RATE;
     const float lfo_slew_step = 2.0f / (LFO_SLEW_S * fs);
     const float lfo_smooth_k = 1.0f - expf(-1.0f / (LFO_SMOOTH_S * fs));
+    const float vel_glide_k = 1.0f - expf(-1.0f / (VEL_GLIDE_S * fs));
+    const float kill_coef = expf(-4.60517f / (KILL_RELEASE_S * fs));
 
 #ifdef TINYK_TEMPO_LOG
     /* Diagnostic builds only (-DTINYK_TEMPO_LOG): what the host reports, logged at start and on every change.
@@ -2402,12 +2426,13 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
 
             /* --- Envelopes (Exponential Curves) --- */
             float f_env = adsr_process(&v->filter_env, cfg->dcy1_coef, cfg->sustain1, cfg->rel1_coef);
-            float a_env = adsr_process(&v->amp_env, cfg->dcy2_coef, cfg->sustain2, cfg->rel2_coef);
+            float a_env = adsr_process(&v->amp_env, cfg->dcy2_coef, cfg->sustain2, v->kill ? kill_coef : cfg->rel2_coef);
 
             /* Clean voice deactivation when envelope finishes or drops to zero while released */
             if (v->amp_env.stage == ENV_IDLE || (!v->gate && a_env <= 0.0005f)) {
                 v->active = false;
                 v->gate = false;
+                v->kill = false;
                 v->amp_env.stage = ENV_IDLE;
                 v->amp_env.value = 0.0f;
                 v->filter_env.stage = ENV_IDLE;
@@ -2458,9 +2483,17 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
 
             float voice_vel = v->velocity;
             if (voice_vel <= 0.01f) voice_vel = 0.8f;
+            v->vel_gain += (voice_vel - v->vel_gain) * vel_glide_k;
+
+            /* De-click: a fresh voice fades in (raised cosine, zero slope at the start) */
+            float declick = 1.0f;
+            if (v->declick_pos < DECLICK_SAMPLES) {
+                declick = 0.5f - 0.5f * cosf((float)M_PI * (float)v->declick_pos / (float)DECLICK_SAMPLES);
+                v->declick_pos++;
+            }
 
             /* Amp Envelope & Velocity Scaling */
-            float voice_audio = filtered * a_env * voice_vel * amp_gain * v->unison_gain;
+            float voice_audio = filtered * a_env * v->vel_gain * declick * amp_gain * v->unison_gain;
             DIAG_CHECK(voice_audio);
             if (isnan(voice_audio) || isinf(voice_audio)) voice_audio = 0.0f;
 
@@ -3334,11 +3367,14 @@ static const char *build_chain_params_json(const synth_engine_t *synth) {
             json_put(&o, num);
         }
     }
+    /* The steps draw as the module's LED boxes (canvas.js, custom:tinyk_step), which read arp_playhead too */
     for (int i = 1; i <= 8; i++) {
         snprintf(num, sizeof num, "{\"key\":\"arp_step%d\",\"name\":\"Step %d\",\"short_name\":\"ST%d\",\"type\":\"enum\","
-                 "\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1},", i, i, i);
+                 "\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,", i, i, i);
         json_put(&o, num);
+        json_put(&o, "\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},");
     }
+    json_put(&o, "{\"key\":\"arp_playhead\",\"name\":\"Arp Playhead\",\"type\":\"string\",\"access\":\"read\"},");
     json_put(&o, "{\"key\":\"mod_wheel\",\"name\":\"Mod Wheel\",\"short_name\":\"MOD\",\"type\":\"int\",\"min\":0,\"max\":127,\"default\":0},");
     json_put(&o, "{\"key\":\"timbre_balance\",\"name\":\"Timbre Bal\",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":0.5}");
     for (int i = 0; i < NUM_PARAMS; i++) {
@@ -3424,54 +3460,59 @@ static const char MK_UI_HIERARCHY[] =
     "options\":[\"Both\",\"Timbre 1\",\"Timbre 2\"],\"short_options\":[\"BOTH\",\"T1\",\"T2\"],\"default\":0}],\"knobs\":[\"arp_type\",\"arp_rang"
     "e\",\"arp_resolution\",\"arp_gate\",\"arp_swing\",\"arp_latch\",\"arp_key_sync\",\"arp_target\"]},\"steps\":{\"name\":\"Arp Steps\",\"label\""
     ":\"Arp Steps\",\"params\":[{\"key\":\"arp_step1\",\"label\":\"Step 1\",\"short_name\":\"ST1\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play"
-    "\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1},{\"key\":\"arp_step2\",\"label\":\"Step 2\",\"short_name\":\"ST2\",\"type\":\"enum\""
-    ",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1},{\"key\":\"arp_step3\",\"label\":\"Step 3\",\"short_na"
-    "me\":\"ST3\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1},{\"key\":\"arp_step4\",\""
-    "label\":\"Step 4\",\"short_name\":\"ST4\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\""
-    ":1},{\"key\":\"arp_step5\",\"label\":\"Step 5\",\"short_name\":\"ST5\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":["
-    "\"REST\",\"PLAY\"],\"default\":1},{\"key\":\"arp_step6\",\"label\":\"Step 6\",\"short_name\":\"ST6\",\"type\":\"enum\",\"options\":[\"Rest\""
-    ",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1},{\"key\":\"arp_step7\",\"label\":\"Step 7\",\"short_name\":\"ST7\",\"type\":"
-    "\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1},{\"key\":\"arp_step8\",\"label\":\"Step 8\",\""
-    "short_name\":\"ST8\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1}],\"knobs\":[\"ar"
-    "p_step1\",\"arp_step2\",\"arp_step3\",\"arp_step4\",\"arp_step5\",\"arp_step6\",\"arp_step7\",\"arp_step8\"]},\"osc\":{\"name\":\"Osc/Timbre"
-    " [T1]\",\"label\":\"Osc/Timbre\",\"params\":[{\"key\":\"wave1\",\"label\":\"Wave 1\",\"type\":\"enum\",\"options\":[\"Saw\",\"Square\",\"Tri"
-    "angle\",\"Sine\",\"Vox\",\"DWGS\",\"Noise\"],\"short_options\":[\"SAW\",\"SQR\",\"TRI\",\"SIN\",\"VOX\",\"DWG\",\"NZ\"],\"default\":0},{\"ke"
-    "y\":\"pulse_width\",\"label\":\"Pulse Width\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"wave2\",\""
-    "label\":\"Wave 2\",\"type\":\"enum\",\"options\":[\"Saw\",\"Square\",\"Triangle\"],\"short_options\":[\"SAW\",\"SQR\",\"TRI\"],\"default\":0"
-    "},{\"key\":\"osc2_semi\",\"label\":\"Semi\",\"type\":\"int\",\"min\":-24,\"max\":24,\"default\":0,\"unit\":\"st\"},{\"key\":\"osc2_tune\",\""
-    "label\":\"Tune\",\"type\":\"int\",\"min\":-50,\"max\":50,\"default\":0,\"unit\":\"ct\"},{\"key\":\"voice_mode\",\"label\":\"Voice Mode\",\"t"
-    "ype\":\"enum\",\"options\":[\"Single (4-Voice)\",\"Layer (2-Voice)\"],\"short_options\":[\"SNGL\",\"LAYR\"],\"default\":0},{\"key\":\"timbre"
-    "_edit\",\"label\":\"Timbre Edit\",\"type\":\"enum\",\"options\":[\"Timbre 1\",\"Timbre 2\"],\"short_options\":[\"T1\",\"T2\"],\"default\":0}"
-    ",{\"key\":\"timbre_balance\",\"label\":\"Timbre Bal\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01}],\"knobs\":["
-    "\"wave1\",\"pulse_width\",\"wave2\",\"osc2_semi\",\"osc2_tune\",\"voice_mode\",\"timbre_edit\",\"timbre_balance\"]},\"env\":{\"name\":\"Enve"
-    "lopes [T1]\",\"label\":\"Envelopes\",\"params\":[{\"key\":\"attack1\",\"label\":\"Filter Atk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\""
-    "default\":0.01,\"step\":0.01},{\"key\":\"decay1\",\"label\":\"Filter Dcy\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.4,\"step"
-    "\":0.01},{\"key\":\"sustain1\",\"label\":\"Filter Sus\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\""
-    "release1\",\"label\":\"Filter Rel\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01},{\"key\":\"decay2\",\"label\":"
-    "\"Amp Dcy\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"sustain2\",\"label\":\"Amp Sus\",\"type\":\""
-    "float\",\"min\":0.0,\"max\":1.0,\"default\":0.8,\"step\":0.01},{\"key\":\"keytrack\",\"label\":\"Key Track\",\"type\":\"float\",\"min\":0.0,"
-    "\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"env_int\",\"label\":\"EG Int\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":"
-    "0.5,\"step\":0.01}],\"knobs\":[\"attack1\",\"decay1\",\"sustain1\",\"release1\",\"decay2\",\"sustain2\",\"keytrack\",\"env_int\"]},\"mix\":{"
-    "\"name\":\"Mix/Filter [T1]\",\"label\":\"Mix/Filter\",\"params\":[{\"key\":\"osc_mix\",\"label\":\"Osc Mix\",\"type\":\"float\",\"min\":0.0,"
-    "\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"noise_level\",\"label\":\"Noise\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default"
-    "\":0.0,\"step\":0.01},{\"key\":\"sync_ring\",\"label\":\"Sync / Ring\",\"type\":\"enum\",\"options\":[\"Off\",\"Ring\",\"Sync\",\"Ring Sync\""
-    "],\"short_options\":[\"OFF\",\"RING\",\"SYNC\",\"R.SNC\"],\"default\":0},{\"key\":\"filter_type\",\"label\":\"Filter Type\",\"type\":\"enum\""
-    ",\"options\":[\"LPF24\",\"LPF12\",\"BPF12\",\"HPF12\"],\"short_options\":[\"LPF24\",\"LPF12\",\"BPF12\",\"HPF12\"],\"default\":0},{\"key\":\""
-    "portamento\",\"label\":\"Portamento\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"level\",\"label\""
-    ":\"Level\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.9,\"step\":0.01},{\"key\":\"drive\",\"label\":\"Drive\",\"type\":\"float"
-    "\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01}],\"knobs\":[\"osc_mix\",\"noise_level\",\"sync_ring\",\"filter_type\",\"portamento"
-    "\",\"level\",\"drive\"]},\"fx\":{\"name\":\"Effects\",\"label\":\"Effects\",\"params\":[{\"key\":\"chorus_mix\",\"label\":\"Chorus Mix\",\"t"
-    "ype\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"delay_time\",\"label\":\"Delay Time\",\"type\":\"float\",\""
-    "min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01},{\"key\":\"delay_feedback\",\"label\":\"Delay Fdbk\",\"type\":\"float\",\"min\":0.0,\"m"
-    "ax\":1.0,\"default\":0.3,\"step\":0.01},{\"key\":\"delay_mix\",\"label\":\"Delay Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\""
-    ":0.0,\"step\":0.01},{\"key\":\"lfo1_rate\",\"label\":\"LFO1 Rate\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01,"
-    "\"short_name\":\"LFO1\"},{\"key\":\"lfo2_rate\",\"label\":\"LFO2 Rate\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":"
-    "0.01,\"short_name\":\"LFO2\"},{\"key\":\"master_vol\",\"label\":\"Master Vol\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.8,\""
-    "step\":0.01,\"short_name\":\"VOL\"},{\"key\":\"pan\",\"label\":\"Pan\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0"
-    ".01}],\"knobs\":[\"chorus_mix\",\"delay_time\",\"delay_feedback\",\"delay_mix\",\"lfo1_rate\",\"lfo2_rate\",\"master_vol\",\"pan\"]},\"bank\""
-    ":{\"name\":\"Bank\",\"label\":\"Bank\",\"params\":[{\"key\":\"bank_file\",\"label\":\"Bank\",\"type\":\"enum\",\"options\":[\"Built-in\"],\""
-    "default\":0},{\"level\":\"bank_list\",\"label\":\"Browse banks\"}],\"knobs\":[\"bank_file\"]},\"bank_list\":{\"name\":\"Banks\",\"label\":\""
-    "Select Bank\",\"items_param\":\"bank_list\",\"select_param\":\"bank_file\",\"navigate_to\":\"root\"}}}";
+    "\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\""
+    ":\"arp_step2\",\"label\":\"Step 2\",\"short_name\":\"ST2\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"P"
+    "LAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step3\",\"label\":\"Step 3\""
+    ",\"short_name\":\"ST3\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kin"
+    "d\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step4\",\"label\":\"Step 4\",\"short_name\":\"ST4\",\"type\":\""
+    "enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_k"
+    "eys\":[\"arp_playhead\"]}},{\"key\":\"arp_step5\",\"label\":\"Step 5\",\"short_name\":\"ST5\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play"
+    "\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\""
+    ":\"arp_step6\",\"label\":\"Step 6\",\"short_name\":\"ST6\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"P"
+    "LAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step7\",\"label\":\"Step 7\""
+    ",\"short_name\":\"ST7\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kin"
+    "d\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step8\",\"label\":\"Step 8\",\"short_name\":\"ST8\",\"type\":\""
+    "enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_k"
+    "eys\":[\"arp_playhead\"]}}],\"knobs\":[\"arp_step1\",\"arp_step2\",\"arp_step3\",\"arp_step4\",\"arp_step5\",\"arp_step6\",\"arp_step7\",\"a"
+    "rp_step8\"]},\"osc\":{\"name\":\"Osc/Timbre [T1]\",\"label\":\"Osc/Timbre\",\"params\":[{\"key\":\"wave1\",\"label\":\"Wave 1\",\"type\":\"e"
+    "num\",\"options\":[\"Saw\",\"Square\",\"Triangle\",\"Sine\",\"Vox\",\"DWGS\",\"Noise\"],\"short_options\":[\"SAW\",\"SQR\",\"TRI\",\"SIN\",\""
+    "VOX\",\"DWG\",\"NZ\"],\"default\":0},{\"key\":\"pulse_width\",\"label\":\"Pulse Width\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default"
+    "\":0.0,\"step\":0.01},{\"key\":\"wave2\",\"label\":\"Wave 2\",\"type\":\"enum\",\"options\":[\"Saw\",\"Square\",\"Triangle\"],\"short_option"
+    "s\":[\"SAW\",\"SQR\",\"TRI\"],\"default\":0},{\"key\":\"osc2_semi\",\"label\":\"Semi\",\"type\":\"int\",\"min\":-24,\"max\":24,\"default\":0"
+    ",\"unit\":\"st\"},{\"key\":\"osc2_tune\",\"label\":\"Tune\",\"type\":\"int\",\"min\":-50,\"max\":50,\"default\":0,\"unit\":\"ct\"},{\"key\":"
+    "\"voice_mode\",\"label\":\"Voice Mode\",\"type\":\"enum\",\"options\":[\"Single (4-Voice)\",\"Layer (2-Voice)\"],\"short_options\":[\"SNGL\""
+    ",\"LAYR\"],\"default\":0},{\"key\":\"timbre_edit\",\"label\":\"Timbre Edit\",\"type\":\"enum\",\"options\":[\"Timbre 1\",\"Timbre 2\"],\"sho"
+    "rt_options\":[\"T1\",\"T2\"],\"default\":0},{\"key\":\"timbre_balance\",\"label\":\"Timbre Bal\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,"
+    "\"default\":0.5,\"step\":0.01}],\"knobs\":[\"wave1\",\"pulse_width\",\"wave2\",\"osc2_semi\",\"osc2_tune\",\"voice_mode\",\"timbre_edit\",\""
+    "timbre_balance\"]},\"env\":{\"name\":\"Envelopes [T1]\",\"label\":\"Envelopes\",\"params\":[{\"key\":\"attack1\",\"label\":\"Filter Atk\",\""
+    "type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.01,\"step\":0.01},{\"key\":\"decay1\",\"label\":\"Filter Dcy\",\"type\":\"float\",\"m"
+    "in\":0.0,\"max\":1.0,\"default\":0.4,\"step\":0.01},{\"key\":\"sustain1\",\"label\":\"Filter Sus\",\"type\":\"float\",\"min\":0.0,\"max\":1."
+    "0,\"default\":0.5,\"step\":0.01},{\"key\":\"release1\",\"label\":\"Filter Rel\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\""
+    "step\":0.01},{\"key\":\"decay2\",\"label\":\"Amp Dcy\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\""
+    "sustain2\",\"label\":\"Amp Sus\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.8,\"step\":0.01},{\"key\":\"keytrack\",\"label\":\""
+    "Key Track\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"env_int\",\"label\":\"EG Int\",\"type\":\"f"
+    "loat\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01}],\"knobs\":[\"attack1\",\"decay1\",\"sustain1\",\"release1\",\"decay2\",\"sust"
+    "ain2\",\"keytrack\",\"env_int\"]},\"mix\":{\"name\":\"Mix/Filter [T1]\",\"label\":\"Mix/Filter\",\"params\":[{\"key\":\"osc_mix\",\"label\":"
+    "\"Osc Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"noise_level\",\"label\":\"Noise\",\"type\":"
+    "\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"sync_ring\",\"label\":\"Sync / Ring\",\"type\":\"enum\",\"option"
+    "s\":[\"Off\",\"Ring\",\"Sync\",\"Ring Sync\"],\"short_options\":[\"OFF\",\"RING\",\"SYNC\",\"R.SNC\"],\"default\":0},{\"key\":\"filter_type\""
+    ",\"label\":\"Filter Type\",\"type\":\"enum\",\"options\":[\"LPF24\",\"LPF12\",\"BPF12\",\"HPF12\"],\"short_options\":[\"LPF24\",\"LPF12\",\""
+    "BPF12\",\"HPF12\"],\"default\":0},{\"key\":\"portamento\",\"label\":\"Portamento\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0."
+    "0,\"step\":0.01},{\"key\":\"level\",\"label\":\"Level\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.9,\"step\":0.01},{\"key\":\""
+    "drive\",\"label\":\"Drive\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01}],\"knobs\":[\"osc_mix\",\"noise_level\""
+    ",\"sync_ring\",\"filter_type\",\"portamento\",\"level\",\"drive\"]},\"fx\":{\"name\":\"Effects\",\"label\":\"Effects\",\"params\":[{\"key\":"
+    "\"chorus_mix\",\"label\":\"Chorus Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"delay_time\",\""
+    "label\":\"Delay Time\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01},{\"key\":\"delay_feedback\",\"label\":\"Del"
+    "ay Fdbk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01},{\"key\":\"delay_mix\",\"label\":\"Delay Mix\",\"type\":"
+    "\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"lfo1_rate\",\"label\":\"LFO1 Rate\",\"type\":\"float\",\"min\":0"
+    ".0,\"max\":1.0,\"default\":0.3,\"step\":0.01,\"short_name\":\"LFO1\"},{\"key\":\"lfo2_rate\",\"label\":\"LFO2 Rate\",\"type\":\"float\",\"mi"
+    "n\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01,\"short_name\":\"LFO2\"},{\"key\":\"master_vol\",\"label\":\"Master Vol\",\"type\":\"float"
+    "\",\"min\":0.0,\"max\":1.0,\"default\":0.8,\"step\":0.01,\"short_name\":\"VOL\"},{\"key\":\"pan\",\"label\":\"Pan\",\"type\":\"float\",\"min"
+    "\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01}],\"knobs\":[\"chorus_mix\",\"delay_time\",\"delay_feedback\",\"delay_mix\",\"lfo1_rate\",\""
+    "lfo2_rate\",\"master_vol\",\"pan\"]},\"bank\":{\"name\":\"Bank\",\"label\":\"Bank\",\"params\":[{\"key\":\"bank_file\",\"label\":\"Bank\",\""
+    "type\":\"enum\",\"options\":[\"Built-in\"],\"default\":0},{\"level\":\"bank_list\",\"label\":\"Browse banks\"}],\"knobs\":[\"bank_file\"]},\""
+    "bank_list\":{\"name\":\"Banks\",\"label\":\"Select Bank\",\"items_param\":\"bank_list\",\"select_param\":\"bank_file\",\"navigate_to\":\"roo"
+    "t\"}}}";
 
 static int v2_get_param(void *instance, const char *key, char *buf, int buf_len) {
     synth_engine_t *synth = (synth_engine_t*)instance;
@@ -3631,6 +3672,10 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
 
     if (strncmp(key, "arp_step", 8) == 0 && key[8] >= '1' && key[8] <= '8' && key[9] == '\0') {
         return snprintf(buf, buf_len, "%d", (int)synth_get_param(synth, key));
+    }
+
+    if (strcmp(key, "arp_playhead") == 0) { /* for the Arp Steps LEDs, see format_arp_playhead */
+        return format_arp_playhead(synth, buf, buf_len);
     }
 
     if (arp_param_index(key) >= 0) {

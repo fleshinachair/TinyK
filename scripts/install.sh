@@ -31,7 +31,7 @@ ssh "$MOVE_HOST" "mkdir -p $DEST/banks"
 # its banks, then remove it so the module is not listed twice.
 ssh "$MOVE_HOST" "if [ -d $OLD ]; then for f in $OLD/banks/*; do [ -f \"\$f\" ] && [ ! -e $DEST/banks/\"\$(basename \"\$f\")\" ] && cp \"\$f\" $DEST/banks/; done; rm -rf $OLD && echo 'Migrated $OLD -> $DEST'; fi"
 scp $SRC_DIR/dsp.so $MOVE_HOST:$DEST/dsp.so.new
-scp $SRC_DIR/module.json $SRC_DIR/ui.js $SRC_DIR/presets.json $SRC_DIR/help.json $SRC_DIR/release.json $MOVE_HOST:$DEST/
+scp $SRC_DIR/module.json $SRC_DIR/ui.js $SRC_DIR/canvas.js $SRC_DIR/presets.json $SRC_DIR/help.json $SRC_DIR/release.json $MOVE_HOST:$DEST/
 ssh "$MOVE_HOST" "mv -f $DEST/dsp.so.new $DEST/dsp.so"
 
 # Banks: the compiled-in bank is the default, so nothing from the local banks/ folder is copied unless asked
