@@ -42,7 +42,7 @@ static int format_preset_name(int idx, char *buf, int buf_len) {
 
 #include "arp.c" /* the arpeggiator: one translation unit with dsp.c (see arp.h) */
 
-#define TINYK_TUNING_DEFAULTS { 37.46f, 10.61f, 20.0f, 19000.0f, 2.13f, 8.88f, 1.92f, 0.7f, 2.0f, 1.0f, 1.0f, 1.0f, 0.7f, 0.4f, 10.61f, 24.0f, 120.0f, 2.4f, 26.7f, 20000.0f, 0.6f, 10.36f, 0.56f, 2.0f, 18.0f, 360.0f, -24.5f, 15000.0f }
+#define TINYK_TUNING_DEFAULTS { 37.46f, 10.61f, 20.0f, 19000.0f, 2.13f, 8.88f, 1.92f, 0.7f, 2.0f, 1.0f, 1.0f, 1.0f, 0.7f, 0.4f, 10.61f, 24.0f, 120.0f, 2.4f, 26.7f, 20000.0f, 0.6f, 10.36f, 0.56f, 2.0f, 18.0f, 360.0f, -24.5f, 15000.0f, 0.7f, 1.0f }
 #ifdef TINYK_TUNING
 tinyk_tuning_t tinyk_tuning = TINYK_TUNING_DEFAULTS;
 #else
@@ -542,6 +542,10 @@ static void apply_timbre(float *dst, timbre_extra_t *extra, const struct TimbreP
     extra->dwgs = clamp01f(t->dwgs);
     extra->osc1_ctrl[0] = clamp01f(t->osc1_ctrl1);
     extra->osc1_ctrl[1] = clamp01f(t->osc1_ctrl2);
+    extra->assign = (int)lroundf(clamp01f(t->assign) * 2.0f);
+    extra->unison_cents = clamp01f(t->unison_detune) * 127.0f;
+    extra->pan = (clamp01f(t->pan) - 0.5f) * 2.0f;
+    extra->multi_trigger = t->trigger_multi >= 0.5f;
 
     const float lfo_wave[2] = { t->lfo1_wave, t->lfo2_wave };
     const float lfo_keysync[2] = { t->lfo1_keysync, t->lfo2_keysync };
@@ -1215,6 +1219,128 @@ float synth_get_param(const synth_engine_t *synth, const char *key) {
 
 static void voice_note_off(synth_engine_t *synth, uint8_t note, int mask);
 
+#define ASSIGN_MONO   0
+#define ASSIGN_POLY   1
+#define ASSIGN_UNISON 2
+
+/* An oscillator start phase for a voice starting from silence: random, so detuned oscillators and unison voices beat
+ * from a different point each note (xorshift, seeded by synth_init so renders repeat) */
+static float voice_rand_phase(synth_engine_t *synth) {
+    uint32_t x = synth->phase_rng ? synth->phase_rng : 0x2545F491u;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    synth->phase_rng = x;
+    return (float)(x >> 8) * (1.0f / 16777216.0f);
+}
+
+static void voice_fresh_state(synth_engine_t *synth, voice_t *v) {
+    v->filter_svf[0].s1 = v->filter_svf[0].s2 = v->filter_svf[1].s1 = v->filter_svf[1].s2 = 0.0f;
+    v->osc1_phase = voice_rand_phase(synth);
+    v->osc2_phase = voice_rand_phase(synth);
+    v->sub_phase = voice_rand_phase(synth);
+    v->amp_env.value = 0.0f;
+    v->filter_env.value = 0.0f;
+}
+
+/* A timbre's voices: in Layer mode t and t + 2 (two per timbre), in Single mode all four */
+static int timbre_voices(const synth_engine_t *synth, int t, int *idx) {
+    int is_layer = (synth->params[PARAM_VOICE_MODE] > 0.5f) || (synth->voice_mode == 1);
+    if (is_layer) {
+        idx[0] = t;
+        idx[1] = t + 2;
+        return 2;
+    }
+    for (int i = 0; i < NUM_VOICES; i++) idx[i] = i;
+    return NUM_VOICES;
+}
+
+/* Mono / Unison: starts voice v (k of n stacked) on a note, or moves it there legato (retrigger 0, the EGs run on).
+ * The n voices spread evenly over the unison detune (lowest to highest) and over the stereo field (left to right). */
+static void group_voice_start(synth_engine_t *synth, voice_t *v, int t, uint8_t note, float vel01, float target_pitch,
+                              float atk1_coef, float atk2_coef, int k, int n, int retrigger) {
+    const timbre_extra_t *x = &synth->timbre_extra[t];
+    int is_layer = (synth->params[PARAM_VOICE_MODE] > 0.5f) || (synth->voice_mode == 1);
+    bool was_active = v->active && (v->amp_env.stage != ENV_IDLE);
+    bool was_gated = was_active && v->gate;
+    float place = n > 1 ? 2.0f * (float)k / (float)(n - 1) - 1.0f : 0.0f; /* -1 .. +1 */
+    v->active = true;
+    v->gate = true;
+    v->note = note;
+    v->velocity = vel01;
+    v->age = synth->voice_counter;
+    v->timbre_index = t;
+    v->is_timbre_2 = is_layer ? t : 0;
+    v->layer_partner = -1;
+    v->unison_cents = 0.5f * place * x->unison_cents * tinyk_tuning.unison_cents_scale;
+    v->unison_pan = place * tinyk_tuning.unison_spread;
+    v->unison_gain = 1.0f / sqrtf((float)n);
+    if (!was_active || synth->timbre_params[t][PARAM_PORTAMENTO] < 0.005f) v->current_pitch = target_pitch;
+    v->target_pitch = target_pitch;
+    if (!was_active) voice_fresh_state(synth, v);
+    if (retrigger || !was_gated) {
+        adsr_gate_on(&v->filter_env, atk1_coef);
+        adsr_gate_on(&v->amp_env, atk2_coef);
+    }
+}
+
+/* Mono / Unison note on: the key goes on top of the timbre's key stack; one voice (Mono) or all the timbre's voices
+ * (Unison) play it. With single trigger, a key pressed while another is held glides there without restarting the EGs. */
+static void group_note_on(synth_engine_t *synth, int t, uint8_t note, float vel01, float target_pitch,
+                          float atk1_coef, float atk2_coef) {
+    const timbre_extra_t *x = &synth->timbre_extra[t];
+    int held_before = synth->mono_count[t] > 0;
+    int c = 0;
+    for (int i = 0; i < synth->mono_count[t]; i++) {
+        if (synth->mono_keys[t][i] == note) continue;
+        synth->mono_keys[t][c] = synth->mono_keys[t][i];
+        synth->mono_vel[t][c++] = synth->mono_vel[t][i];
+    }
+    if (c >= 16) { /* full: drop the oldest */
+        memmove(&synth->mono_keys[t][0], &synth->mono_keys[t][1], 15);
+        memmove(&synth->mono_vel[t][0], &synth->mono_vel[t][1], 15);
+        c = 15;
+    }
+    synth->mono_keys[t][c] = note;
+    synth->mono_vel[t][c++] = (uint8_t)lroundf(vel01 * 127.0f);
+    synth->mono_count[t] = c;
+
+    int idx[NUM_VOICES], n = timbre_voices(synth, t, idx);
+    int stack = (x->assign == ASSIGN_UNISON) ? n : 1;
+    int retrigger = !held_before || x->multi_trigger;
+    for (int k = 0; k < stack; k++) {
+        group_voice_start(synth, &synth->voices[idx[k]], t, note, vel01, target_pitch, atk1_coef, atk2_coef, k, stack, retrigger);
+    }
+}
+
+/* Mono / Unison note off: the key leaves the stack; if it was the sounding one, the voices go back to the key now on
+ * top (legato), or release when none is left */
+static void group_note_off(synth_engine_t *synth, int t, uint8_t note) {
+    int c = 0;
+    for (int i = 0; i < synth->mono_count[t]; i++) {
+        if (synth->mono_keys[t][i] == note) continue;
+        synth->mono_keys[t][c] = synth->mono_keys[t][i];
+        synth->mono_vel[t][c++] = synth->mono_vel[t][i];
+    }
+    synth->mono_count[t] = c;
+    int idx[NUM_VOICES], n = timbre_voices(synth, t, idx);
+    for (int k = 0; k < n; k++) {
+        voice_t *v = &synth->voices[idx[k]];
+        if (!v->active || !v->gate || v->note != note) continue;
+        if (c > 0) {
+            uint8_t top = synth->mono_keys[t][c - 1];
+            float pitch = (float)top + (float)(synth->octave_transpose * 12);
+            v->note = top;
+            v->target_pitch = pitch;
+            if (synth->timbre_params[t][PARAM_PORTAMENTO] < 0.005f) v->current_pitch = pitch;
+        } else {
+            v->gate = false;
+            adsr_gate_off(&v->filter_env);
+            adsr_gate_off(&v->amp_env);
+        }
+    }
+}
+
 /* Layer mode, one timbre: its voice for a note among its two (timbre t uses voices t and t + 2): the one already
  * playing the note, else an idle one, else the released one with the lower level, else the older */
 static int layer_voice_for(const synth_engine_t *synth, int t, uint8_t note) {
@@ -1242,13 +1368,12 @@ static void layer_voice_start(synth_engine_t *synth, int t, uint8_t note, float 
     v->timbre_index = t;
     v->is_timbre_2 = t;
     v->layer_partner = -1;
+    v->unison_cents = v->unison_pan = 0.0f;
+    v->unison_gain = 1.0f;
     if (!was_active || synth->timbre_params[t][PARAM_PORTAMENTO] < 0.005f) v->current_pitch = target_pitch;
     v->target_pitch = target_pitch;
     if (!was_active) {
-        v->filter_svf[0].s1 = v->filter_svf[0].s2 = v->filter_svf[1].s1 = v->filter_svf[1].s2 = 0.0f;
-        v->osc1_phase = v->osc2_phase = v->sub_phase = t ? 0.25f : 0.0f;
-        v->amp_env.value = 0.0f;
-        v->filter_env.value = 0.0f;
+        voice_fresh_state(synth, v);
     } else {
         v->filter_svf[0].s1 *= 0.05f;
         v->filter_svf[0].s2 *= 0.05f;
@@ -1301,11 +1426,18 @@ static void voice_note_on(synth_engine_t *synth, uint8_t note, uint8_t velocity,
     }
     int is_layer_mode = (params[PARAM_VOICE_MODE] > 0.5f);
 
-    if (is_layer_mode && (mask & 3) != 3) {
-        /* Layer mode, one timbre (the arpeggiator's target, or the keys beside it) */
-        if (mask & 1) layer_voice_start(synth, 0, note, vel01, target_pitch, t1_atk1_coef, t1_atk2_coef);
-        if (mask & 2) layer_voice_start(synth, 1, note, vel01, target_pitch, t2_atk1_coef, t2_atk2_coef);
-    } else if (!is_layer_mode) {
+    if (is_layer_mode) {
+        /* Layer mode: each timbre in its own two voices (t and t + 2), as its voice assign says */
+        for (int t = 0; t < 2; t++) {
+            if (!((mask >> t) & 1)) continue;
+            float atk1 = t ? t2_atk1_coef : t1_atk1_coef, atk2 = t ? t2_atk2_coef : t1_atk2_coef;
+            if (synth->timbre_extra[t].assign == ASSIGN_POLY) layer_voice_start(synth, t, note, vel01, target_pitch, atk1, atk2);
+            else group_note_on(synth, t, note, vel01, target_pitch, atk1, atk2);
+        }
+    } else if (synth->timbre_extra[0].assign != ASSIGN_POLY) {
+        /* Single mode, Mono or Unison: one voice, or all four stacked */
+        group_note_on(synth, 0, note, vel01, target_pitch, t1_atk1_coef, t1_atk2_coef);
+    } else {
         /* =========================================================
          * SINGLE MODE (4-Voice Polyphonic Engine)
          * ========================================================= */
@@ -1371,6 +1503,8 @@ static void voice_note_on(synth_engine_t *synth, uint8_t note, uint8_t velocity,
         v->timbre_index = 0;
         v->is_timbre_2 = 0;
         v->layer_partner = -1;
+        v->unison_cents = v->unison_pan = 0.0f;
+        v->unison_gain = 1.0f;
 
         if (!was_active || portamento < 0.005f) {
             v->current_pitch = target_pitch;
@@ -1382,11 +1516,7 @@ static void voice_note_on(synth_engine_t *synth, uint8_t note, uint8_t velocity,
             v->filter_svf[0].s2 = 0.0f;
             v->filter_svf[1].s1 = 0.0f;
             v->filter_svf[1].s2 = 0.0f;
-            v->osc1_phase = 0.0f;
-            v->osc2_phase = 0.0f;
-            v->sub_phase = 0.0f;
-            v->amp_env.value = 0.0f;
-            v->filter_env.value = 0.0f;
+            voice_fresh_state(synth, v);
         } else {
             v->filter_svf[0].s1 *= 0.05f;
             v->filter_svf[0].s2 *= 0.05f;
@@ -1397,136 +1527,6 @@ static void voice_note_on(synth_engine_t *synth, uint8_t note, uint8_t velocity,
         adsr_gate_on(&v->filter_env, t1_atk1_coef);
         adsr_gate_on(&v->amp_env, t1_atk2_coef);
 
-    } else {
-        /* =========================================================
-         * LAYER MODE (2-Voice Polyphony with 2 Linked Voice Instances each)
-         * Slot 0: Voices 0 (Voice A / Timbre 1) & 1 (Voice B / Timbre 2)
-         * Slot 1: Voices 2 (Voice A / Timbre 1) & 3 (Voice B / Timbre 2)
-         * Polyphony is strictly clamped to 2 simultaneous note triggers.
-         * ========================================================= */
-        float portamento1 = synth->timbre_params[0][PARAM_PORTAMENTO];
-        float portamento2 = synth->timbre_params[1][PARAM_PORTAMENTO];
-        int slot = -1;
-
-        /* 1. Retrigger if note is already sounding in Slot 0 or 1 */
-        if (synth->voices[0].active && synth->voices[0].note == note) {
-            slot = 0;
-        } else if (synth->voices[2].active && synth->voices[2].note == note) {
-            slot = 1;
-        }
-
-        /* 2. Find idle slot */
-        if (slot < 0) {
-            bool slot0_idle = (!synth->voices[0].active || synth->voices[0].amp_env.stage == ENV_IDLE);
-            bool slot1_idle = (!synth->voices[2].active || synth->voices[2].amp_env.stage == ENV_IDLE);
-            if (slot0_idle) {
-                slot = 0;
-            } else if (slot1_idle) {
-                slot = 1;
-            }
-        }
-
-        /* 3. Slot Stealing: strictly clamp to 2 simultaneous notes */
-        if (slot < 0) {
-            bool slot0_released = (!synth->voices[0].gate);
-            bool slot1_released = (!synth->voices[2].gate);
-
-            if (slot0_released && !slot1_released) {
-                slot = 0;
-            } else if (!slot0_released && slot1_released) {
-                slot = 1;
-            } else if (slot0_released && slot1_released) {
-                float amp0 = fmaxf(synth->voices[0].amp_env.value, synth->voices[1].amp_env.value);
-                float amp1 = fmaxf(synth->voices[2].amp_env.value, synth->voices[3].amp_env.value);
-                slot = (amp0 <= amp1) ? 0 : 1;
-            } else {
-                uint32_t age0 = synth->voices[0].age;
-                uint32_t age1 = synth->voices[2].age;
-                slot = (age0 <= age1) ? 0 : 1;
-            }
-        }
-
-        if (slot < 0 || slot > 1) slot = 0;
-
-        int i1 = slot * 2;
-        int i2 = slot * 2 + 1;
-
-        voice_t *v1 = &synth->voices[i1];
-        voice_t *v2 = &synth->voices[i2];
-
-        bool was_active1 = v1->active && (v1->amp_env.stage != ENV_IDLE);
-        bool was_active2 = v2->active && (v2->amp_env.stage != ENV_IDLE);
-
-        /* Configure Voice A (Timbre 1): base patch pitch */
-        v1->active = true;
-        v1->gate = true;
-        v1->note = note;
-        v1->velocity = vel01;
-        v1->age = synth->voice_counter;
-        v1->timbre_index = 0;
-        v1->is_timbre_2 = 0;
-        v1->layer_partner = i2;
-
-        if (!was_active1 || portamento1 < 0.005f) {
-            v1->current_pitch = target_pitch;
-        }
-        v1->target_pitch = target_pitch;
-
-        if (!was_active1) {
-            v1->filter_svf[0].s1 = 0.0f;
-            v1->filter_svf[0].s2 = 0.0f;
-            v1->filter_svf[1].s1 = 0.0f;
-            v1->filter_svf[1].s2 = 0.0f;
-            v1->osc1_phase = 0.0f;
-            v1->osc2_phase = 0.0f;
-            v1->sub_phase = 0.0f;
-            v1->amp_env.value = 0.0f;
-            v1->filter_env.value = 0.0f;
-        } else {
-            v1->filter_svf[0].s1 *= 0.05f;
-            v1->filter_svf[0].s2 *= 0.05f;
-            v1->filter_svf[1].s1 *= 0.05f;
-            v1->filter_svf[1].s2 *= 0.05f;
-        }
-
-        /* Configure Voice B (Timbre 2): authentic Timbre 2 parameters */
-        v2->active = true;
-        v2->gate = true;
-        v2->note = note;
-        v2->velocity = vel01;
-        v2->age = synth->voice_counter;
-        v2->timbre_index = 1;
-        v2->is_timbre_2 = 1;
-        v2->layer_partner = i1;
-
-        if (!was_active2 || portamento2 < 0.005f) {
-            v2->current_pitch = target_pitch;
-        }
-        v2->target_pitch = target_pitch;
-
-        if (!was_active2) {
-            v2->filter_svf[0].s1 = 0.0f;
-            v2->filter_svf[0].s2 = 0.0f;
-            v2->filter_svf[1].s1 = 0.0f;
-            v2->filter_svf[1].s2 = 0.0f;
-            /* 90-degree initial phase offset prevents comb filtering cancellation */
-            v2->osc1_phase = 0.25f;
-            v2->osc2_phase = 0.25f;
-            v2->sub_phase = 0.25f;
-            v2->amp_env.value = 0.0f;
-            v2->filter_env.value = 0.0f;
-        } else {
-            v2->filter_svf[0].s1 *= 0.05f;
-            v2->filter_svf[0].s2 *= 0.05f;
-            v2->filter_svf[1].s1 *= 0.05f;
-            v2->filter_svf[1].s2 *= 0.05f;
-        }
-
-        /* Trigger envelopes on both linked timbres with their respective timbre settings */
-        adsr_gate_on(&v1->filter_env, t1_atk1_coef);
-        adsr_gate_on(&v1->amp_env, t1_atk2_coef);
-        adsr_gate_on(&v2->filter_env, t2_atk1_coef);
-        adsr_gate_on(&v2->amp_env, t2_atk2_coef);
     }
 
     /* Patch LFOs with key sync restart on note-on, at their positive peak. The engine keeps one LFO per timbre, so the
@@ -1553,6 +1553,15 @@ void synth_note_on(synth_engine_t *synth, uint8_t note, uint8_t velocity) {
 static void voice_note_off(synth_engine_t *synth, uint8_t note, int mask) {
     if (!synth) synth = &g_synth;
     int is_layer = (synth->params[PARAM_VOICE_MODE] > 0.5f) || (synth->voice_mode == 1);
+    int poly_mask = 0;
+    for (int t = 0; t < (is_layer ? 2 : 1); t++) {
+        if (is_layer && !((mask >> t) & 1)) continue;
+        if (synth->timbre_extra[t].assign != ASSIGN_POLY) group_note_off(synth, t, note);
+        else poly_mask |= 1 << t;
+    }
+    if (!is_layer && poly_mask) poly_mask = 3;
+    mask = poly_mask;
+    if (!mask) return;
     for (int i = 0; i < NUM_VOICES; i++) {
         voice_t *v = &synth->voices[i];
         if (!v->active || v->note != note || !v->gate) continue;
@@ -1749,6 +1758,7 @@ static void set_arp_on(synth_engine_t *synth, int on) {
 void synth_all_notes_off(synth_engine_t *synth) {
     if (!synth) synth = &g_synth;
     arp_reset(&synth->arp);
+    synth->mono_count[0] = synth->mono_count[1] = 0;
     for (int i = 0; i < NUM_VOICES; i++) {
         synth->voices[i].gate = false;
         synth->voices[i].active = false;
@@ -1888,13 +1898,6 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
     float tA_vol = fminf(1.0f, 2.0f * (1.0f - bal));
     float tB_vol = fminf(1.0f, 2.0f * bal);
 
-    /* Stereo panning for Layer mode: Voice A (Timbre 1) at -0.3 (left), Voice B (Timbre 2)
-     * at +0.3 (right). Constant-power pan law scaled so a centered voice has unity gain. */
-    const float layer_pan = 0.3f;
-    float pan_a_l = cosf((1.0f - layer_pan) * 0.25f * (float)M_PI) * 1.4142f;
-    float pan_a_r = sinf((1.0f - layer_pan) * 0.25f * (float)M_PI) * 1.4142f;
-    float pan_b_l = cosf((1.0f + layer_pan) * 0.25f * (float)M_PI) * 1.4142f;
-    float pan_b_r = sinf((1.0f + layer_pan) * 0.25f * (float)M_PI) * 1.4142f;
 
     /* Precompute per-timbre render configurations (Zero heap allocation) */
     typedef struct {
@@ -1910,6 +1913,7 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
         float transpose_semi;
         float noise_level;
         float level;
+        float pan;              /* timbre pan, -1..+1 */
         const float *wavetable;
 
         float cutoff_pitch;   /* knob position in octaves above cutoff_base_hz */
@@ -1974,6 +1978,7 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
         t_cfg[t].transpose_semi = extra->transpose_semi;
         t_cfg[t].noise_level = extra->noise_level;
         t_cfg[t].level = extra->level;
+        t_cfg[t].pan = extra->pan;
 
         /* Vox / DWGS wavetable: rebuild only when the selection changes */
         t_cfg[t].wavetable = synth->wavetable[t];
@@ -2199,7 +2204,7 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
 
             /* LFO1 pitch mod (vibrato) + Pitch Bend + patch -> pitch */
             float pitch_mod = lfo1_val * (cfg->mod_int * 0.5f) + synth->pitch_bend_semi
-                            + pmod[PATCH_DST_PITCH] * tinyk_tuning.patch_pitch_scale;
+                            + pmod[PATCH_DST_PITCH] * tinyk_tuning.patch_pitch_scale + v->unison_cents * 0.01f;
 
             float final_note1 = v->current_pitch + cfg->transpose_semi + pitch_mod;
             float freq1 = note_to_freq(final_note1);
@@ -2368,7 +2373,7 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
             if (voice_vel <= 0.01f) voice_vel = 0.8f;
 
             /* Amp Envelope & Velocity Scaling */
-            float voice_audio = filtered * a_env * voice_vel * amp_gain;
+            float voice_audio = filtered * a_env * voice_vel * amp_gain * v->unison_gain;
             DIAG_CHECK(voice_audio);
             if (isnan(voice_audio) || isinf(voice_audio)) voice_audio = 0.0f;
 
@@ -2377,20 +2382,13 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
             float v_gain_l = 1.0f;
             float v_gain_r = 1.0f;
 
-            if (is_layer_mode) {
-                if (v->is_timbre_2 == 0) {
-                    /* Voice A: Timbre 1, panned left */
-                    v_gain_l = tA_vol * pan_a_l;
-                    v_gain_r = tA_vol * pan_a_r;
-                } else {
-                    /* Voice B: Timbre 2, panned right */
-                    v_gain_l = tB_vol * pan_b_l;
-                    v_gain_r = tB_vol * pan_b_r;
-                }
-            } else {
-                /* Single mode: centered at unity; the soft clip below handles 4-voice overs */
-                v_gain_l = 1.0f;
-                v_gain_r = 1.0f;
+            /* Level and place: the timbre balance (Layer mode), then the timbre's pan (byte +26) plus the voice's
+             * place in a unison stack, constant power with unity at the centre (the soft clip below handles overs) */
+            {
+                float vol = is_layer_mode ? (v->is_timbre_2 ? tB_vol : tA_vol) : 1.0f;
+                float place = fmaxf(-1.0f, fminf(1.0f, cfg->pan + v->unison_pan));
+                v_gain_l = vol * cosf((1.0f + place) * 0.25f * (float)M_PI) * 1.4142f;
+                v_gain_r = vol * sinf((1.0f + place) * 0.25f * (float)M_PI) * 1.4142f;
             }
 
             if (pmod[PATCH_DST_PAN] != 0.0f) { /* patch -> pan: constant-power, -1 = left, +1 = right */
@@ -2444,6 +2442,12 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
         float chorus_l = voice_sum_l;
         float chorus_r = voice_sum_r;
 
+        /* The chorus line is written always, so turning the chorus up never replays stale audio */
+        uint32_t wpos = synth->chorus_write_pos;
+        synth->chorus_buf_l[wpos] = voice_sum_l;
+        synth->chorus_buf_r[wpos] = voice_sum_r;
+        synth->chorus_write_pos = (wpos + 1) % CHORUS_BUFFER_SIZE;
+
         if (chorus_mix_p > 0.01f) {
             synth->chorus_lfo_phase += 0.8f / fs;
             if (synth->chorus_lfo_phase >= 1.0f) synth->chorus_lfo_phase -= 1.0f;
@@ -2453,11 +2457,6 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
 
             float delay_mod_l = 441.0f + lfo_c1 * 220.0f;
             float delay_mod_r = 441.0f + lfo_c2 * 220.0f;
-
-            uint32_t wpos = synth->chorus_write_pos;
-            synth->chorus_buf_l[wpos] = voice_sum_l;
-            synth->chorus_buf_r[wpos] = voice_sum_r;
-            synth->chorus_write_pos = (wpos + 1) % CHORUS_BUFFER_SIZE;
 
             float rpos_l = (float)wpos - delay_mod_l;
             while (rpos_l < 0.0f) rpos_l += (float)CHORUS_BUFFER_SIZE;
@@ -2727,7 +2726,7 @@ static void v2_on_midi(void *instance, const uint8_t *msg, int len, int source) 
  * and everything a knob can have changed since it loaded: params, both timbres' parameter sets and extras, voice
  * mode, timbre edit / balance, octave and the delay time base. */
 #define STATE_VERSION 1
-#define STATE_EXTRA_COUNT 26     /* extras saved before Osc 1 Ctrl 1 / 2 were decoded have only the first 24 */
+#define STATE_EXTRA_COUNT 30     /* older states have the first 24 (before Osc 1 Ctrl 1 / 2) or 26 (before assign / pan) */
 #define STATE_EXTRA_MIN 24
 
 static void extra_to_floats(const timbre_extra_t *x, float *f) {
@@ -2741,6 +2740,7 @@ static void extra_to_floats(const timbre_extra_t *x, float *f) {
         f[n++] = (float)x->patch_src[i]; f[n++] = (float)x->patch_dst[i]; f[n++] = x->patch_int[i];
     }
     f[n++] = x->osc1_ctrl[0]; f[n++] = x->osc1_ctrl[1];
+    f[n++] = (float)x->assign; f[n++] = x->unison_cents; f[n++] = x->pan; f[n++] = (float)x->multi_trigger;
 }
 
 static int clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
@@ -2762,6 +2762,10 @@ static void extra_from_floats(timbre_extra_t *x, const float *f, int count) {
         x->patch_int[i] = fmaxf(-1.0f, fminf(1.0f, f[n++]));
     }
     for (int i = 0; i < 2 && n < count; i++) x->osc1_ctrl[i] = clamp01f(f[n++]);
+    if (n < count) x->assign = clampi((int)lroundf(f[n++]), 0, 2);
+    if (n < count) x->unison_cents = fmaxf(0.0f, fminf(127.0f, f[n++]));
+    if (n < count) x->pan = fmaxf(-1.0f, fminf(1.0f, f[n++]));
+    if (n < count) x->multi_trigger = f[n++] >= 0.5f;
 }
 
 /* The value after "key": in a JSON object, or NULL */

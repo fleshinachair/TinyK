@@ -59,6 +59,7 @@ static const struct TimbreParams SYX_VOCODER_CARRIER = {
     .lfo2_wave = 0.0f, .lfo2_rate = 0.5f, .lfo2_keysync = 0.0f, .lfo2_sync_note = 0.0f,
     .patch1_int = 0.5f, .patch2_int = 0.5f, .patch3_int = 0.5f, .patch4_int = 0.5f,
     .osc1_ctrl1 = 0.0f, .osc1_ctrl2 = 0.0f,
+    .assign = 0.5f, .unison_detune = 0.0f, .pan = 0.5f, .trigger_multi = 0.0f,
 };
 
 /* Korg 7-to-8 decode: each 8-byte group is [MSB bits][7 data bytes]. Returns bytes written. */
@@ -95,6 +96,11 @@ static void syx_parse_timbre(const uint8_t *p, int t, struct TimbreParams *o) {
     o->pulse_width = (float)syx_unit(p[t + 8]);
     o->osc1_ctrl1 = (float)syx_unit(p[t + 8]);  /* Osc 1 Control 1 / 2: what they drive depends on the wave */
     o->osc1_ctrl2 = (float)syx_unit(p[t + 9]);
+    int assign = (p[t + 1] >> 6) & 0x03;                 /* 0 mono, 1 poly, 2 unison */
+    o->assign = (float)((assign > 2 ? 2 : assign) / 2.0);
+    o->unison_detune = (float)syx_unit(p[t + 2]);        /* cents */
+    o->pan = (float)syx_bipolar(p[t + 26]);
+    o->trigger_multi = (p[t + 1] & 0x08) ? 1.0f : 0.0f;
     o->wave2 = (float)(osc2_wave / 2.0);
     o->detune = (float)syx_clamp01(0.5 + osc2_semis / 48.0);
     o->sync_ring = (float)(mod_select / 3.0);

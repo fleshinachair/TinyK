@@ -20,6 +20,7 @@ Program layout (offsets into the 254-byte unpacked program):
     146..253  Timbre 2 (108 bytes)
 
 Timbre layout (offset from timbre start):
+    1 voice assign (bits 6-7: mono, poly, unison) / trigger mode (bit 3), 2 unison detune (cents), 26 pan,
     3 tune, 5 transpose, 7 osc1 wave, 8 / 9 osc1 ctrl1 / ctrl2 (what they control depends on the wave:
     pulse width for Pulse; for Sine, cross-modulation depth by Osc 2 / LFO1 modulation of it), 10 DWGS wave,
     12 osc2 (bits 4-5 mod select, bits 0-1 wave), 13 osc2 semitone, 14 osc2 tune,
@@ -72,6 +73,7 @@ TIMBRE_FIELDS = [
     "patch1_src", "patch1_dst", "patch1_int", "patch2_src", "patch2_dst", "patch2_int",
     "patch3_src", "patch3_dst", "patch3_int", "patch4_src", "patch4_dst", "patch4_int",
     "osc1_ctrl1", "osc1_ctrl2",
+    "assign", "unison_detune", "pan", "trigger_multi",
 ]
 # LFO / virtual patch encoding (all [0, 1]):
 #   lfoN_wave      wave index / 3     (LFO1: saw, square, triangle, S&H; LFO2: saw, square, sine, S&H)
@@ -81,6 +83,8 @@ TIMBRE_FIELDS = [
 #   patchN_dst     destination / 7    (pitch, osc2 pitch, osc1 ctrl1, noise level, cutoff, amp, pan, LFO2 freq)
 #   patchN_int     bipolar, 0.5 = no modulation
 #   osc1_ctrlN     Osc 1 Control 1 / 2, raw 0..127 / 127 (pulse_width repeats ctrl1 for the Pulse wave)
+#   assign         voice assign (byte +1 bits 6-7) / 2: 0 Mono, 0.5 Poly, 1 Unison
+#   unison_detune  byte +2 (cents) / 127; pan byte +26, bipolar (0.5 = centre); trigger_multi byte +1 bit 3
 # delay_sync: 0 = free (delay_time is a time), else (time base index + 1) / 15 of the tempo-sync note table
 FX_FIELDS = ["chorus_mix", "delay_time", "delay_feedback", "delay_mix", "delay_sync"]
 # Arpeggiator (struct ArpParams), all [0, 1]: on / latch / key_sync 0 or 1; target index / 2 (both, timbre 1,
@@ -110,6 +114,7 @@ VOCODER_CARRIER = {
     "lfo2_wave": 0.0, "lfo2_rate": 0.5, "lfo2_keysync": 0.0, "lfo2_sync_note": 0.0,
     **{f"patch{n}_{k}": (0.5 if k == "int" else 0.0) for n in range(1, 5) for k in ("src", "dst", "int")},
     "osc1_ctrl1": 0.0, "osc1_ctrl2": 0.0,
+    "assign": 0.5, "unison_detune": 0.0, "pan": 0.5, "trigger_multi": 0.0,
 }
 
 
@@ -205,6 +210,10 @@ def parse_timbre(prog, t):
         "pulse_width": unit(prog[t + 8]),  # engine maps 0..1 -> 50%..95% duty
         "osc1_ctrl1": unit(prog[t + 8]),
         "osc1_ctrl2": unit(prog[t + 9]),
+        "assign": min((prog[t + 1] >> 6) & 0x03, 2) / 2.0,
+        "unison_detune": unit(prog[t + 2]),
+        "pan": bipolar(prog[t + 26]),
+        "trigger_multi": 1.0 if prog[t + 1] & 0x08 else 0.0,
         "wave2": osc2_wave / 2.0,
         "detune": clamp01(0.5 + osc2_semis / 48.0),
         "sync_ring": mod_select / 3.0,
@@ -303,6 +312,7 @@ def render_header(presets):
     out.append("    float patch1_src, patch1_dst, patch1_int, patch2_src, patch2_dst, patch2_int;\n")
     out.append("    float patch3_src, patch3_dst, patch3_int, patch4_src, patch4_dst, patch4_int;\n")
     out.append("    float osc1_ctrl1, osc1_ctrl2; /* Osc 1 Control 1 / 2 (raw / 127): for Sine, cross-mod depth / LFO1 mod of it */\n")
+    out.append("    float assign, unison_detune, pan, trigger_multi; /* voice assign / 2 (mono, poly, unison), cents / 127, bipolar, bit */\n")
     out.append("};\n\n")
     out.append("/* Arpeggiator, normalized as ARP_FIELDS in tools/extracts_presets.py */\n")
     out.append("struct ArpParams {\n")
