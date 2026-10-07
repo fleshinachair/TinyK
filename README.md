@@ -28,7 +28,7 @@ If TinyK is listed in the Schwung module catalog, install it from there; updates
    cd /data/UserData/schwung/modules/sound_generators/
    tar -xzf TinyK.tar.gz && rm TinyK.tar.gz
    ```
-   This creates `sound_generators/TinyK/`.
+   This creates `sound_generators/tinyk/`. Upgrading from a build that installed `sound_generators/TinyK/` (upper case, which slots could not restore after a reboot): move any `.syx` files from `TinyK/banks/` to `tinyk/banks/`, then delete `TinyK/` (`./scripts/install.sh` does this for you).
 3. Reload a track slot with TinyK (or restart Schwung).
 
 ## Playing
@@ -41,7 +41,7 @@ TinyK reads microKORG bank dumps: SysEx files holding all 128 programs, either a
 
 1. Copy the `.syx` files into the module's `banks/` folder on the Move:
    ```bash
-   scp MyBank.syx ableton@move.local:/data/UserData/schwung/modules/sound_generators/TinyK/banks/
+   scp MyBank.syx ableton@move.local:/data/UserData/schwung/modules/sound_generators/tinyk/banks/
    ```
 2. Reload the TinyK slot. The banks appear on the Bank page in alphabetical order (up to 16), named after their files.
 
@@ -60,7 +60,7 @@ The module is cross-compiled for the Move's ARM64 (Cortex-A72) Linux. `./scripts
    ```bash
    ./scripts/build.sh
    ```
-   This runs `zig cc -target aarch64-linux-gnu.2.35 -mcpu=cortex_a72 -O3 -fPIC -shared ...` and writes `build/dsp.so`, `dist/TinyK/` and `TinyK.tar.gz`. On Windows, run it from Git Bash.
+   This runs `zig cc -target aarch64-linux-gnu.2.35 -mcpu=cortex_a72 -O3 -fPIC -shared ...` and writes `build/dsp.so`, `dist/tinyk/` and `TinyK.tar.gz`. On Windows, run it from Git Bash.
 3. Install to the Move over SSH:
    ```bash
    ./scripts/install.sh

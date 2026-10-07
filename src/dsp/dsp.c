@@ -1,3 +1,6 @@
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE /* RTLD_DEFAULT */
+#endif
 #include "dsp.h"
 #include "presets.h"
 #include "syx_bank.h"
@@ -29,12 +32,15 @@ static int format_preset_name(int idx, char *buf, int buf_len) {
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#if defined(__linux__)
+#include <dlfcn.h>
+#endif
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
 
-#define TINYK_TUNING_DEFAULTS { 37.46f, 10.61f, 20.0f, 19000.0f, 2.13f, 8.88f, 1.92f, 0.7f, 2.0f, 1.0f, 1.0f, 1.0f, 0.7f, 0.4f, 10.61f, 24.0f, 120.0f, 2.4f, 26.7f, 20000.0f, 0.6f, 10.36f, 0.56f, 2.0f }
+#define TINYK_TUNING_DEFAULTS { 37.46f, 10.61f, 20.0f, 19000.0f, 2.13f, 8.88f, 1.92f, 0.7f, 2.0f, 1.0f, 1.0f, 1.0f, 0.7f, 0.4f, 10.61f, 24.0f, 120.0f, 2.4f, 26.7f, 20000.0f, 0.6f, 10.36f, 0.56f, 2.0f, 13.8f }
 #ifdef TINYK_TUNING
 tinyk_tuning_t tinyk_tuning = TINYK_TUNING_DEFAULTS;
 #else
@@ -118,9 +124,34 @@ _Static_assert(offsetof(host_api_v1_t, get_bpm) == 88, "host_api_v1_t layout dif
 _Static_assert(offsetof(host_api_v1_t, get_beat_position) == 112, "host_api_v1_t layout differs from Schwung's");
 #endif
 
-/* Session tempo from the host (MIDI clock -> Set tempo -> settings), else lfo_tempo_bpm; called once per
- * block on the audio thread, as the host intends. Out-of-range answers are ignored. */
-static float host_tempo_bpm(void) {
+/* Schwung's move-info reader (see move_info_t in dsp.h), looked up once at init, off the audio thread. NULL on
+ * hosts without it and in the native tools. */
+#if defined(__linux__) && UINTPTR_MAX == 0xFFFFFFFFFFFFFFFFu
+_Static_assert(offsetof(move_info_t, tempo) == 24, "move_info_t layout differs from Schwung's");
+_Static_assert(offsetof(move_info_t, song_beats) == 88, "move_info_t layout differs from Schwung's");
+_Static_assert(sizeof(move_info_t) == 272, "move_info_t layout differs from Schwung's");
+#endif
+static move_info_fn g_move_info = NULL;
+
+static void find_move_info(void) {
+#if defined(__linux__)
+    g_move_info = (move_info_fn)dlsym(RTLD_DEFAULT, "schwung_move_info");
+#endif
+}
+
+/* Session tempo, called once per block on the audio thread: the Set tempo from move-info (the tempo knob,
+ * playing or stopped) unless Move follows external clock or the document is not being read; then the host's
+ * get_bpm (MIDI clock -> last measured -> Set file -> settings), else lfo_tempo_bpm. Out-of-range answers are
+ * ignored. *exact is 1 when the value is the Set tempo itself, which needs no jitter smoothing. */
+static float host_tempo_bpm(int *exact) {
+    *exact = 0;
+    if (g_move_info) {
+        move_info_t mi;
+        if (g_move_info(&mi, sizeof mi) && mi.valid && !mi.midi_clock_sync && mi.tempo >= 20.0f && mi.tempo <= 400.0f) {
+            *exact = 1;
+            return mi.tempo;
+        }
+    }
     if (g_host && g_host->get_bpm) {
         float bpm = g_host->get_bpm();
         if (bpm >= 20.0f && bpm <= 400.0f) return bpm;
@@ -1434,14 +1465,16 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
 
     /* Session tempo and transport position, once per block: tempo-synced LFOs and delays follow the Move */
     {
-        /* The host tempo, smoothed: while playing it is measured from MIDI clock and jitters by about
-         * +-0.3 BPM block to block (seen on the Move), which wobbled synced delay times. Real changes (> 2 BPM
-         * away) are followed within ~50 ms, small wobble over ~1 s; the first block takes the value as is. */
-        float bpm = host_tempo_bpm();
+        /* The tempo, smoothed: the Set tempo glides over ~50 ms (a tempo knob step moves synced delays without
+         * a jump); a get_bpm measured from MIDI clock jitters by about +-0.3 BPM block to block (seen on the
+         * Move), which wobbled synced delay times, so then only real changes (> 2 BPM away) are followed within
+         * ~50 ms and small wobble over ~1 s. The first block takes the value as is. */
+        int exact;
+        float bpm = host_tempo_bpm(&exact);
         if (synth->tempo_bpm <= 0.0f) {
             synth->tempo_bpm = bpm;
         } else {
-            float tau = (fabsf(bpm - synth->tempo_bpm) > 2.0f) ? 0.05f : 1.0f;
+            float tau = (exact || fabsf(bpm - synth->tempo_bpm) > 2.0f) ? 0.05f : 1.0f;
             synth->tempo_bpm += (bpm - synth->tempo_bpm) * (1.0f - expf(-(float)frames / (tau * fs)));
         }
     }
@@ -1455,17 +1488,24 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
     {
         static int logged = 0, last_running = -2, last_clock = -9;
         static float last_raw = -1.0f;
+        static float last_set = -1.0f;
         float raw = (g_host && g_host->get_bpm) ? g_host->get_bpm() : -1.0f;
+        move_info_t mi;
+        int mi_ok = g_move_info && g_move_info(&mi, sizeof mi) && mi.valid;
+        float set_tempo = mi_ok ? mi.tempo : -1.0f;
         int running = beat >= 0.0;
         int clock = (g_host && g_host->get_clock_status) ? g_host->get_clock_status() : -1;
         if (g_host && g_host->log &&
-            (!logged || fabsf(raw - last_raw) > 0.5f || running != last_running || clock != last_clock)) {
-            char msg[200];
-            snprintf(msg, sizeof msg, "TinyK tempo: api %u get_bpm %s -> %.2f (using %.2f) | beat_position %s -> %.3f | clock status %d",
-                     (unsigned)g_host->api_version, g_host->get_bpm ? "set" : "NULL", raw, synth->tempo_bpm,
-                     g_host->get_beat_position ? "set" : "NULL", beat, clock);
+            (!logged || fabsf(raw - last_raw) > 0.5f || fabsf(set_tempo - last_set) > 0.05f ||
+             running != last_running || clock != last_clock)) {
+            char msg[240];
+            snprintf(msg, sizeof msg, "TinyK tempo: api %u get_bpm %s -> %.2f | move_info %s -> %.2f (ext sync %d) | using %.2f"
+                     " | beat_position %s -> %.3f | clock status %d",
+                     (unsigned)g_host->api_version, g_host->get_bpm ? "set" : "NULL", raw,
+                     g_move_info ? (mi_ok ? "valid" : "invalid") : "NULL", set_tempo, mi_ok ? mi.midi_clock_sync : -1,
+                     synth->tempo_bpm, g_host->get_beat_position ? "set" : "NULL", beat, clock);
             g_host->log(msg);
-            logged = 1; last_raw = raw; last_running = running; last_clock = clock;
+            logged = 1; last_raw = raw; last_set = set_tempo; last_running = running; last_clock = clock;
         }
     }
 #endif
@@ -1686,6 +1726,15 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
         tilt_b1 = (K - G) / (1.0f + K);
         tilt_a1 = (K - 1.0f) / (1.0f + K);
     }
+    /* The audible noise's pre-shaping: the inverse of the same shelf at noise_tilt_db (see heard_noise below) */
+    float noise_b0, noise_b1, noise_a1;
+    {
+        float G = powf(10.0f, tinyk_tuning.noise_tilt_db / 20.0f);
+        float K = tanf((float)M_PI * fminf(tinyk_tuning.tilt_hz, 0.49f * fs) / fs);
+        noise_b0 = (G + K) / (1.0f + K);
+        noise_b1 = (K - G) / (1.0f + K);
+        noise_a1 = (K - 1.0f) / (1.0f + K);
+    }
 
     /* Pan: Left / Right gains */
     float pan_l = cosf(pan_p * (float)(M_PI * 0.5)) * 1.4142f;
@@ -1713,11 +1762,13 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
         noise_state ^= noise_state >> 17;
         noise_state ^= noise_state << 5;
         float white_noise = (float)(int32_t)noise_state * (1.0f / 2147483648.0f);
-        /* The noise you hear is white after the brightness tilt: the tilt models the VST oscillators' extra top
-         * end, and on noise it added ~18 dB around 17 kHz (A.21's off-beat hat came out as loud, thin hiss). So
-         * the audible noise is pre-shaped by the tilt's inverse, (1 + a1 z^-1) / (b0 + b1 z^-1), stable since the
-         * tilt's zero is inside the unit circle. S&H keeps the raw source. */
-        float heard_noise = (white_noise + tilt_a1 * synth->noise_x1) / tilt_b0 - (tilt_b1 / tilt_b0) * synth->noise_y1;
+        /* The noise you hear keeps part of the brightness tilt: the tilt models the VST oscillators' extra top end
+         * and on raw noise added ~18 dB around 17 kHz (A.21's off-beat hat came out level with the kick, thin
+         * hiss), while fully whitened noise left the hat 21 dB under the kick, against 8.7 dB on the VST
+         * (ref_a21_timbre2_drum_c3). So the audible noise is pre-shaped by the inverse of a lower shelf,
+         * noise_tilt_db (1 + a1 z^-1) / (b0 + b1 z^-1), stable since the shelf's zero is inside the unit circle.
+         * S&H keeps the raw source. */
+        float heard_noise = (white_noise + noise_a1 * synth->noise_x1) / noise_b0 - (noise_b1 / noise_b0) * synth->noise_y1;
         synth->noise_x1 = white_noise;
         synth->noise_y1 = heard_noise;
 
@@ -1764,9 +1815,15 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
             int t_idx = is_layer_mode ? v->is_timbre_2 : 0;
             const timbre_render_cfg_t *cfg = &t_cfg[t_idx];
 
-            /* Virtual patch matrix: per-destination sum of intensity x source. EG sources use the
-             * envelope value from the previous sample (the envelopes are advanced further down). */
+            /* Virtual patch matrix: per-destination sum of intensity x source, except amp: each amp route is
+             * its own gain stage, 1 + intensity x source (floored at 0), and their product is squared, then capped
+             * at full level (1 / the timbre's level). That is A.21's off-beat hat on the VST (two LFO1 saw -> amp
+             * routes, +48 and +63): it decays as the squared product (3.9 dB rms over the hat, the sum was
+             * 11.5: it went silent at 2/3 of the cycle), reaches silence exactly at the cycle's end, and the
+             * kick half stays level (ref_a21_timbre2_drum_c3). EG sources use the envelope value from the
+             * previous sample (the envelopes are advanced further down). */
             float pmod[PATCH_DST_COUNT] = { 0.0f };
+            float amp_gain = 1.0f;
             for (int p = 0; p < 4; p++) {
                 float amt = cfg->patch_amt[p];
                 if (amt == 0.0f) continue;
@@ -1782,8 +1839,10 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
                     case PATCH_SRC_MOD_WHEEL:  sv = synth->modwheel_src; break;
                     default:                 sv = 0.0f; break;
                 }
-                pmod[cfg->extra->patch_dst[p]] += amt * sv;
+                if (cfg->extra->patch_dst[p] == PATCH_DST_AMP) amp_gain *= fmaxf(0.0f, 1.0f + amt * sv);
+                else pmod[cfg->extra->patch_dst[p]] += amt * sv;
             }
+            amp_gain = fminf(amp_gain * amp_gain, 1.0f / fmaxf(cfg->level, 0.05f));
 
             /* Portamento Pitch Glide */
             v->current_pitch += (v->target_pitch - v->current_pitch) * cfg->glide_coeff;
@@ -1956,7 +2015,7 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
             if (voice_vel <= 0.01f) voice_vel = 0.8f;
 
             /* Amp Envelope & Velocity Scaling */
-            float voice_audio = filtered * a_env * voice_vel * fmaxf(0.0f, 1.0f + pmod[PATCH_DST_AMP]);
+            float voice_audio = filtered * a_env * voice_vel * amp_gain;
             DIAG_CHECK(voice_audio);
             if (isnan(voice_audio) || isinf(voice_audio)) voice_audio = 0.0f;
 
@@ -2144,6 +2203,8 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
  * Move Plugin API v2 Implementation
  * ===================================================================== */
 
+static void apply_state(synth_engine_t *synth, const char *json);
+
 static void* v2_create_instance(const char *module_dir, const char *json_defaults) {
     /* Decode any .syx banks once, here, so bank switching later never touches the file system */
     if (module_dir && g_syx_bank_count == 0) {
@@ -2165,6 +2226,7 @@ static void* v2_create_instance(const char *module_dir, const char *json_default
             }
         }
     }
+    apply_state(&g_synth, json_defaults); /* a slot restored with its saved "state" in the defaults */
     g_labels_reported = label_context(&g_synth);
     return &g_synth;
 }
@@ -2305,9 +2367,149 @@ static void v2_on_midi(void *instance, const uint8_t *msg, int len, int source) 
     parse_midi_buffer(synth, msg, len);
 }
 
+/* --- Slot state for the host's autosave / boot restore -----------------------------------------------------
+ * Schwung saves get_param("state") into the Set's slot file every few seconds and hands it back through
+ * set_param("state") when the slot is restored (boot, Set change). A read the host cannot complete makes it keep
+ * the old file, so TinyK always answers. The state is the bank (by name: the file list can change), the program
+ * and everything a knob can have changed since it loaded: params, both timbres' parameter sets and extras, voice
+ * mode, timbre edit / balance, octave and the delay time base. */
+#define STATE_VERSION 1
+#define STATE_EXTRA_COUNT 24
+
+static void extra_to_floats(const timbre_extra_t *x, float *f) {
+    int n = 0;
+    f[n++] = x->transpose_semi; f[n++] = x->noise_level; f[n++] = x->level; f[n++] = x->dwgs;
+    for (int i = 0; i < 2; i++) {
+        f[n++] = (float)x->lfo_wave[i]; f[n++] = (float)x->lfo_keysync[i];
+        f[n++] = x->lfo_rate[i]; f[n++] = (float)x->lfo_sync_note[i];
+    }
+    for (int i = 0; i < 4; i++) {
+        f[n++] = (float)x->patch_src[i]; f[n++] = (float)x->patch_dst[i]; f[n++] = x->patch_int[i];
+    }
+}
+
+static int clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+static void extra_from_floats(timbre_extra_t *x, const float *f) {
+    int n = 0;
+    x->transpose_semi = fmaxf(-24.0f, fminf(24.0f, f[n++]));
+    x->noise_level = clamp01f(f[n++]); x->level = clamp01f(f[n++]); x->dwgs = clamp01f(f[n++]);
+    for (int i = 0; i < 2; i++) {
+        x->lfo_wave[i] = clampi((int)lroundf(f[n++]), 0, 3);
+        x->lfo_keysync[i] = clampi((int)lroundf(f[n++]), 0, 2);
+        x->lfo_rate[i] = clamp01f(f[n++]);
+        x->lfo_sync_note[i] = clampi((int)lroundf(f[n++]), -1, 14);
+    }
+    for (int i = 0; i < 4; i++) {
+        x->patch_src[i] = clampi((int)lroundf(f[n++]), 0, PATCH_SRC_COUNT - 1);
+        x->patch_dst[i] = clampi((int)lroundf(f[n++]), 0, PATCH_DST_COUNT - 1);
+        x->patch_int[i] = fmaxf(-1.0f, fminf(1.0f, f[n++]));
+    }
+}
+
+/* The value after "key": in a JSON object, or NULL */
+static const char *state_find(const char *json, const char *key) {
+    char pat[40];
+    snprintf(pat, sizeof pat, "\"%s\"", key);
+    const char *p = strstr(json, pat);
+    if (!p) return NULL;
+    p += strlen(pat);
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+    if (*p != ':') return NULL;
+    p++;
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+    return p;
+}
+
+static int state_number(const char *json, const char *key, float *out) {
+    const char *p = state_find(json, key);
+    char *end;
+    if (!p) return 0;
+    float v = strtof(p, &end);
+    if (end == p || !isfinite(v)) return 0;
+    *out = v;
+    return 1;
+}
+
+/* Reads exactly n numbers of the array at key; 0 (and out untouched) on any mismatch */
+static int state_array(const char *json, const char *key, float *out, int n) {
+    float tmp[NUM_PARAMS > STATE_EXTRA_COUNT ? NUM_PARAMS : STATE_EXTRA_COUNT];
+    const char *p = state_find(json, key);
+    if (!p || *p != '[' || n > (int)(sizeof tmp / sizeof tmp[0])) return 0;
+    p++;
+    for (int i = 0; i < n; i++) {
+        char *end;
+        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' || (i > 0 && *p == ',')) p++;
+        tmp[i] = strtof(p, &end);
+        if (end == p || !isfinite(tmp[i])) return 0;
+        p = end;
+    }
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+    if (*p != ']') return 0;
+    memcpy(out, tmp, (size_t)n * sizeof(float));
+    return 1;
+}
+
+/* The JSON string at key, unescaped into out; 0 when absent */
+static int state_string(const char *json, const char *key, char *out, int out_len) {
+    const char *p = state_find(json, key);
+    int n = 0;
+    if (!p || *p != '"' || out_len <= 0) return 0;
+    for (p++; *p && *p != '"'; p++) {
+        if (*p == '\\' && p[1]) p++;
+        if (n < out_len - 1) out[n++] = *p;
+    }
+    out[n] = '\0';
+    return *p == '"';
+}
+
+/* Restores a get_param("state") document. Anything missing or malformed keeps the program's loaded value. */
+static void apply_state(synth_engine_t *synth, const char *json) {
+    char bank[SYX_BANK_NAME_LEN + 8];
+    float f, arr[NUM_PARAMS], ex[STATE_EXTRA_COUNT];
+    if (!json || !strstr(json, "\"tinyk_state\"")) return;
+
+    int b = 0;
+    if (state_string(json, "bank", bank, sizeof bank)) {
+        for (int i = 0; i < g_syx_bank_count; i++) {
+            if (strcmp(bank, g_syx_banks[i].name) == 0) b = i + 1;
+        }
+    }
+    g_bank_file = b; /* a bank no longer on the Move falls back to Built-in; the saved values below still apply */
+    int preset = state_number(json, "preset", &f) ? clampi((int)lroundf(f), 0, NUM_PRESETS - 1) : 0;
+    synth_all_notes_off(synth);
+    load_preset(preset);
+    sync_from_global(synth);
+
+    if (state_array(json, "params", arr, NUM_PARAMS)) {
+        for (int i = 0; i < NUM_PARAMS; i++) synth->params[i] = clamp01f(arr[i]);
+    }
+    if (state_array(json, "timbre1", arr, NUM_PARAMS)) {
+        for (int i = 0; i < NUM_PARAMS; i++) synth->timbre_params[0][i] = clamp01f(arr[i]);
+    }
+    if (state_array(json, "timbre2", arr, NUM_PARAMS)) {
+        for (int i = 0; i < NUM_PARAMS; i++) synth->timbre_params[1][i] = clamp01f(arr[i]);
+    }
+    if (state_array(json, "extra1", ex, STATE_EXTRA_COUNT)) extra_from_floats(&synth->timbre_extra[0], ex);
+    if (state_array(json, "extra2", ex, STATE_EXTRA_COUNT)) extra_from_floats(&synth->timbre_extra[1], ex);
+    if (state_number(json, "voice_mode", &f)) synth->voice_mode = f >= 0.5f ? 1 : 0;
+    if (state_number(json, "timbre_edit", &f)) synth->timbre_edit = f >= 0.5f ? 1 : 0;
+    if (state_number(json, "timbre_balance", &f)) synth->timbre_balance = clamp01f(f);
+    if (state_number(json, "octave", &f)) synth->octave_transpose = clampi((int)lroundf(f), -4, 4);
+    if (state_number(json, "delay_sync", &f)) synth->delay_sync_note = clampi((int)lroundf(f), -1, 14);
+    synth->params[PARAM_VOICE_MODE] = synth->voice_mode ? 1.0f : 0.0f;
+    synth->params[PARAM_TIMBRE_EDIT] = synth->timbre_edit ? 1.0f : 0.0f;
+    synth->params[PARAM_TIMBRE_BALANCE] = synth->timbre_balance;
+}
+
 static void v2_set_param(void *instance, const char *key, const char *val) {
     synth_engine_t *synth = (synth_engine_t*)instance;
     if (!synth || !key || !val) return;
+
+    if (strcmp(key, "state") == 0) {
+        apply_state(synth, val);
+        return;
+    }
 
     if (strcmp(key, "all_notes_off") == 0) {
         synth_all_notes_off(synth);
@@ -2655,6 +2857,43 @@ static const char *build_chain_params_json(const synth_engine_t *synth) {
     return buf;
 }
 
+static void json_put_floats(json_out_t *o, const char *key, const float *v, int n) {
+    char num[32];
+    json_put(o, ",\"");
+    json_put(o, key);
+    json_put(o, "\":[");
+    for (int i = 0; i < n; i++) {
+        snprintf(num, sizeof num, i ? ",%.6g" : "%.6g", v[i]);
+        json_put(o, num);
+    }
+    json_put(o, "]");
+}
+
+/* get_param("state"), see apply_state. The length it would need, like snprintf. */
+static int build_state_json(const synth_engine_t *synth, char *buf, int buf_len) {
+    static char tmp[8192];
+    json_out_t o = { tmp, sizeof tmp, 0 };
+    char num[200];
+    float ex[STATE_EXTRA_COUNT];
+    tmp[0] = '\0';
+    snprintf(num, sizeof num, "{\"tinyk_state\":%d,\"bank\":", STATE_VERSION);
+    json_put(&o, num);
+    json_put_string(&o, active_bank_name());
+    snprintf(num, sizeof num, ",\"preset\":%d,\"voice_mode\":%d,\"timbre_edit\":%d,\"timbre_balance\":%.6g,"
+             "\"octave\":%d,\"delay_sync\":%d", synth->current_preset, synth->voice_mode, synth->timbre_edit,
+             synth->timbre_balance, synth->octave_transpose, synth->delay_sync_note);
+    json_put(&o, num);
+    json_put_floats(&o, "params", synth->params, NUM_PARAMS);
+    json_put_floats(&o, "timbre1", synth->timbre_params[0], NUM_PARAMS);
+    json_put_floats(&o, "timbre2", synth->timbre_params[1], NUM_PARAMS);
+    extra_to_floats(&synth->timbre_extra[0], ex);
+    json_put_floats(&o, "extra1", ex, STATE_EXTRA_COUNT);
+    extra_to_floats(&synth->timbre_extra[1], ex);
+    json_put_floats(&o, "extra2", ex, STATE_EXTRA_COUNT);
+    json_put(&o, "}");
+    return snprintf(buf, buf_len, "%s", tmp);
+}
+
 /* UI hierarchy served to the host: GENERATED from src/module.json's ui_hierarchy (keep them identical) */
 static const char MK_UI_HIERARCHY[] =
     "{\"levels\":{\"root\":{\"name\":\"TinyK\",\"label\":\"TinyK\",\"list_param\":\"preset\",\"count_param\":\"preset_count\",\"name_param\":\"prese"
@@ -2718,6 +2957,10 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
             for (char *p = strstr(buf, "[T1]"); p; p = strstr(p + 4, "[T1]")) p[2] = '2';
         }
         return n;
+    }
+
+    if (strcmp(key, "state") == 0) {
+        return build_state_json(synth, buf, buf_len);
     }
 
     if (strcmp(key, "name") == 0) {
@@ -2897,6 +3140,7 @@ static plugin_api_v2_t g_plugin_api_v2;
 
 plugin_api_v2_t* move_plugin_init_v2(const host_api_v1_t *host) {
     g_host = host;
+    find_move_info();
     memset(&g_plugin_api_v2, 0, sizeof(g_plugin_api_v2));
     g_plugin_api_v2.api_version = MOVE_PLUGIN_API_VERSION_2;
     g_plugin_api_v2.create_instance = v2_create_instance;
@@ -2913,6 +3157,7 @@ static audio_fx_api_v2_t g_audio_fx_api_v2;
 
 audio_fx_api_v2_t* move_audio_fx_init_v2(const host_api_v1_t *host) {
     g_host = host;
+    find_move_info();
     memset(&g_audio_fx_api_v2, 0, sizeof(g_audio_fx_api_v2));
     g_audio_fx_api_v2.api_version = 2;
     g_audio_fx_api_v2.create_instance = v2_create_instance;

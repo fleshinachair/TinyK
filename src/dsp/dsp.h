@@ -1,6 +1,7 @@
 #ifndef DSP_H
 #define DSP_H
 
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -301,6 +302,44 @@ typedef struct host_api_v1 {
     void *reserved[8];
 } host_api_v1_t;
 
+/* Schwung's public move_info.h (src/host/move_info.h): Move's own set settings, read live from its song document,
+ * so `tempo` is the Set tempo as the tempo knob leaves it, playing or stopped (get_bpm is measured from MIDI
+ * clock, which only runs while playing). The shim exports schwung_move_info(out, cap): a seqlocked copy out of
+ * an already-mapped page, no syscalls, safe on the audio thread; it returns 1 on a consistent copy. Field for
+ * field the header's move_info_t, checked by _Static_assert in dsp.c; extend it only as the header grows. */
+#define MOVE_INFO_TRACKS 4
+typedef struct {
+    char    name[32];
+    int16_t color_id;
+    int8_t  type;
+    uint8_t muted, soloed, selected;
+    uint8_t _pad[2];
+    float   volume_db;
+} move_info_track_t;
+typedef struct {
+    uint32_t size;
+    uint32_t version;
+    uint32_t changes;
+    uint8_t  valid;            /* 0: Move's document is not being read (set load, unknown firmware): all unknown */
+    uint8_t  playing;
+    uint8_t  metronome_on;
+    uint8_t  midi_clock_sync;  /* Move follows external MIDI clock */
+    uint8_t  input_monitoring;
+    int8_t   root_note;
+    int8_t   selected_track;
+    int8_t   global_quant;
+    uint8_t  ts_upper, ts_lower;
+    uint8_t  _pad[2];
+    float    tempo;            /* BPM; <= 0 unknown */
+    float    groove;
+    float    master_db;
+    char     scale[24];
+    char     global_quant_name[24];
+    double   song_beats;
+    move_info_track_t track[MOVE_INFO_TRACKS];
+} move_info_t;
+typedef int (*move_info_fn)(move_info_t *out, size_t cap);
+
 /* Move Plugin API v2 (sound_generator) */
 typedef struct plugin_api_v2 {
     uint32_t api_version;
@@ -363,6 +402,9 @@ typedef struct {
     float bpf_cutoff_octaves; /* BPF12 centre = base * 2^(knob * bpf_cutoff_octaves + bpf_cutoff_offset) */
     float bpf_cutoff_offset;  /* octaves */
     float dist_ceiling;       /* distortion soft-clip level (output = ceiling * tanh(gain * x / ceiling)) */
+    float noise_tilt_db;      /* audible noise is pre-shaped by the inverse of a shelf this high (tilt_hz corner), so it
+                               * keeps tilt_db - noise_tilt_db of the tilt's top: 13.8 fits A.21's off-beat hat to the
+                               * VST (ref_a21_timbre2_drum_c3: hat 8.7 dB under the kick; 26.7 = white left it 21 under) */
 } tinyk_tuning_t;
 
 #ifdef TINYK_TUNING

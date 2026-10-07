@@ -73,6 +73,7 @@ static const struct { const char *name; float *value; } TUNING_TABLE[] = {
     { "bpf_cutoff_octaves", &tinyk_tuning.bpf_cutoff_octaves },
     { "bpf_cutoff_offset",  &tinyk_tuning.bpf_cutoff_offset },
     { "dist_ceiling",       &tinyk_tuning.dist_ceiling },
+    { "noise_tilt_db",      &tinyk_tuning.noise_tilt_db },
 };
 #define TUNING_COUNT ((int)(sizeof TUNING_TABLE / sizeof TUNING_TABLE[0]))
 
