@@ -69,7 +69,7 @@ TIMBRE_FIELDS = [
 #   lfoN_wave      wave index / 3     (LFO1: saw, square, triangle, S&H; LFO2: saw, square, sine, S&H)
 #   lfoN_keysync   mode / 2           (off, timbre, voice)
 #   lfoN_sync_note 0 = free running (lfoN_rate), else (note index + 1) / 15 of the tempo-sync note table
-#   patchN_src     source / 7         (EG1, EG2, LFO1, LFO2, velocity, keyboard track, MIDI1, MIDI2)
+#   patchN_src     source / 7         (EG1, EG2, LFO1, LFO2, velocity, keyboard track, pitch bend, mod wheel)
 #   patchN_dst     destination / 7    (pitch, osc2 pitch, osc1 ctrl1, noise level, cutoff, amp, pan, LFO2 freq)
 #   patchN_int     bipolar, 0.5 = no modulation
 FX_FIELDS = ["chorus_mix", "delay_time", "delay_feedback", "delay_mix"]
@@ -319,7 +319,7 @@ def write_text(path, text):
 
 def main():
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    syx_file = sys.argv[1] if len(sys.argv) > 1 else os.path.join(repo_root, "tools", "FactoryBackUpDoResetAfter.syx")
+    syx_file = sys.argv[1] if len(sys.argv) > 1 else os.path.join(repo_root, "banks", "TinyK_Default.syx")
 
     print(f"=== Parsing microKORG presets from {syx_file} ===")
     presets = [parse_program(i, prog) for i, prog in enumerate(load_programs(syx_file))]

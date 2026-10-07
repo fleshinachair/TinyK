@@ -101,7 +101,7 @@ PARAMS = [
 LINEAR_PARAMS = {"env_octaves"}
 # Constants measured directly on the VST (fit_filter_sweep.py and the BPF sweep), so `tune` keeps them fixed
 # unless --no-freeze; delay_send_scale has no effect on the dry references.
-MEASURED = ("cutoff_base_hz", "cutoff_octaves", "bpf_k0", "env_octaves", "delay_send_scale")
+MEASURED = ("cutoff_base_hz", "cutoff_octaves", "bpf_k0", "env_octaves", "delay_send_scale", "drive_gain")
 DEFAULTS = {"cutoff_base_hz": 37.46, "cutoff_octaves": 10.61, "bpf_k0": 3.06, "env_octaves": 8.88,
             "res_damping_range": 1.92,
             "lp24_res_scale": 0.7, "drive_gain": 3.5, "attack_scale": 1.0, "decay_scale": 1.0,
@@ -522,7 +522,7 @@ def print_table(title, patches, results, gain_db):
 TUNING_ORDER = ["cutoff_base_hz", "cutoff_octaves", "cutoff_floor_hz", "cutoff_ceil_hz", "bpf_k0", "env_octaves",
                 "res_damping_range", "lp24_res_scale", "drive_gain", "attack_scale", "decay_scale", "release_scale",
                 "mixer_trim", "delay_send_scale", "patch_cutoff_octaves", "patch_pitch_scale", "lfo_tempo_bpm",
-                "patch_int_curve", "tilt_db", "tilt_hz"]
+                "patch_int_curve", "tilt_db", "tilt_hz", "patch_pan_curve", "bpf_cutoff_octaves", "bpf_cutoff_offset", "dist_ceiling"]
 DSP_C = os.path.join(ROOT, "src", "dsp", "dsp.c")
 DEFAULTS_RE = r"#define TINYK_TUNING_DEFAULTS \{([^}]*)\}"
 

@@ -33,7 +33,7 @@ sys.path.insert(0, HERE)
 import calibrate_dsp as cal  # noqa: E402
 from extracts_presets import FX_FIELDS, TIMBRE_FIELDS, load_programs, parse_program, unpack_7to8  # noqa: E402
 
-FACTORY = os.path.join(HERE, "FactoryBackUpDoResetAfter.syx")
+FACTORY = os.path.join(os.path.dirname(HERE), "banks", "TinyK_Default.syx")  # the source of presets.h (tools/make_default_bank.py)
 USER_BANKS = os.path.join(cal.ROOT, "banks")
 FAILS = []
 
@@ -139,24 +139,122 @@ def host_api():
         check(ok and len(cp) >= 30, f"chain_params is valid JSON ({len(cp)} params)")
         check(meta.get("bank_file", {}).get("options") == ["Built-in", "MicroKorgFactory", "Odd 'Name' & Co"],
               f"Bank options are the file names (with JSON escaping): {meta.get('bank_file', {}).get('options')}")
-        check(meta.get("category", {}).get("options", [None])[0] == "Trance" and len(meta.get("patch", {}).get("options", [])) == 16,
-              "Category has 8 named options, Program 16 (A1..B8)")
+        codes = [f"{s}{c}" for s in "AB" for c in range(1, 9)]
+        prog = meta.get("patch", {})
+        check(meta.get("category", {}).get("options", [None])[0] == "Trance" and len(prog.get("options", [])) == 16
+              and prog.get("short_options") == codes,
+              "Category has 8 named options, Program 16 (short_options A1..B8)")
+        check(prog.get("options") == [get(f"preset_name:{(i // 8) * 64 + i % 8}") for i in range(16)],
+              f"Program options are the category's patch names: {prog.get('options', [])[:2]} ... {prog.get('options', [])[-1:]}")
         items = json.loads(get("bank_list") or "[]")
         check([i["label"] for i in items] == ["Built-in", "MicroKorgFactory", "Odd 'Name' & Co"] and [i["index"] for i in items] == [0, 1, 2],
               f"Banks page items: {items}")
         hier = json.loads(get("ui_hierarchy"))
         manifest = json.load(open(os.path.join(cal.ROOT, "src", "module.json"), encoding="utf-8"))
         check(hier == manifest["capabilities"]["ui_hierarchy"], "engine ui_hierarchy == module.json ui_hierarchy")
-        root_knobs = hier["levels"]["root"]["knobs"]
-        check(root_knobs[:2] == ["category", "patch"] and not {"bank_side", "program", "bank_file"} & set(root_knobs),
-              f"main page knobs start Category, Program; no A/B or Bank knob there: {root_knobs[:4]}")
+        levels = hier["levels"]
+        pages = {"perf": ("Perf [T1]", ["category", "patch", "cutoff", "resonance", "attack2", "release2", "drive", "mod_wheel"]),
+                 "osc": ("Osc/Timbre [T1]", ["wave1", "pulse_width", "wave2", "osc2_semi", "osc2_tune", "voice_mode",
+                                             "timbre_edit", "timbre_balance"]),
+                 "env": ("Envelopes [T1]", ["attack1", "decay1", "sustain1", "release1", "decay2", "sustain2", "keytrack", "env_int"]),
+                 "fx": ("Effects", ["chorus_mix", "delay_time", "delay_feedback", "delay_mix", "lfo1_rate", "lfo2_rate",
+                                    "master_vol", "pan"]),
+                 "mix": ("Mix/Filter [T1]", ["osc_mix", "noise_level", "sync_ring", "filter_type", "portamento", "level"])}
+        check([p.get("level") for p in levels["root"]["params"]] == list(pages) + ["bank"] and levels["root"]["knobs"] == [],
+              f"root is the preset browser with the page levels in order: {[p.get('level') for p in levels['root']['params']]}")
+        check(all(levels[k]["name"] == name and levels[k]["knobs"] == knobs for k, (name, knobs) in pages.items()),
+              "Perf / Osc/Timbre / Envelopes / Effects / Mix/Filter pages hold their knobs (per-timbre pages badged [T1])")
+        every = [k for _, knobs in pages.values() for k in knobs]
+        check(len(every) == len(set(every)) and not {"bank_side", "program", "bank_file", "detune", "sub_level"} & set(every),
+              "each control on one page; no A/B, Bank, Detune or Sub Level knob")
+        check(meta["wave1"].get("options") == ["Saw", "Square", "Triangle", "Sine", "Vox", "DWGS", "Noise"]
+              and meta["wave1"].get("short_options") == ["SAW", "SQR", "TRI", "SIN", "VOX", "DWG", "NZ"]
+              and meta["wave2"].get("short_options") == ["SAW", "SQR", "TRI"] and "short_name" not in meta["cutoff"],
+              "Wave 1/2 are enums named for the waveform; Timbre 1 labels are the plain ones")
+        missing = [k for k in every if k not in meta]
+        check(not missing, f"chain_params describes every page knob (missing: {missing})")
 
+        # Wave enums travel as indices (or names); Semi / Tune split detune; Level / Noise are per-timbre extras
+        put("wave1", "3")
+        put("wave2", "Square")
+        w = [get("wave1"), get("wave2")]
+        put("wave1", "0.0")           # a normalized value from a generic control
+        check(w == ["3", "1"] and get("wave1") == "0", f"wave1 index 3 -> {w[0]}, wave2 'Square' -> {w[1]}, '0.0' -> {get('wave1')}")
+        put("osc2_semi", "-7")
+        put("osc2_tune", "25")
+        st = [get("osc2_semi"), get("osc2_tune")]
+        put("osc2_semi", "40")
+        check(st == ["-7", "25"] and get("osc2_semi") == "24" and get("osc2_tune") == "0",
+              f"Semi -7 / Tune +25 read back {st}; Semi clamps to {get('osc2_semi')} (the +-24 st range, so no tune above it)")
+        put("level", "0.25")
+        put("noise_level", "0.5")
+        check(get("level") == "0.2500" and get("noise_level") == "0.5000", f"Level / Noise: {get('level')}, {get('noise_level')}")
+        mw0 = get("mod_wheel")
+        put("mod_wheel", "100")
+        check(mw0 == "0" and get("mod_wheel") == "100" and meta["mod_wheel"].get("max") == 127
+              and meta["mod_wheel"].get("short_name") == "MOD",
+              f"Mod Wheel knob (MOD, 0..127): starts {mw0}, set 100 -> {get('mod_wheel')}")
+        put("mod_wheel", "0")
+
+        # Timbre 2 in Layer mode: the per-timbre page names and labels say T2, global ones stay plain
+        check(get("is_loading") == "0", "no label change pending")
+        put("voice_mode", "1")
+        put("timbre_edit", "1")
+        loading = [get("is_loading"), get("is_loading")]
+        hier2 = json.loads(get("ui_hierarchy"))
+        meta2 = {e["key"]: e for e in json.loads(get("chain_params"))}
+        check(loading == ["1", "0"] and hier2["levels"]["perf"]["name"] == "Perf [T2]" and hier2["levels"]["fx"]["name"] == "Effects"
+              and meta2["cutoff"].get("short_name") == "T2.CUT" and meta2["cutoff"].get("label") == "T2 Cutoff"
+              and meta2["attack2"].get("short_name") == "T2.ATK" and "short_name" not in meta2["delay_mix"]
+              and "short_name" not in meta2["patch"],
+              f"Timbre 2 edit: is_loading {loading}, page {hier2['levels']['perf']['name']!r}, "
+              f"cutoff cell {meta2['cutoff'].get('short_name')!r}")
+        put("level", "0.75")
+        put("timbre_edit", "0")
+        check(get("level") == "0.2500", f"Level edits the selected timbre only (Timbre 1 kept {get('level')})")
+        put("voice_mode", "0")
+        get("is_loading")             # the host takes the change back to Timbre 1
+        # Filter Type and Sync / Ring are option boxes; Sync / Ring in the hardware's order (off, ring, sync,
+        # ring sync), which the engine remaps to its own (off, sync, ring, both)
+        check(meta["filter_type"].get("short_options") == ["LPF24", "LPF12", "BPF12", "HPF12"]
+              and meta["sync_ring"].get("short_options") == ["OFF", "RING", "SYNC", "R.SNC"]
+              and meta["voice_mode"].get("short_options") == ["SNGL", "LAYR"]
+              and meta["timbre_edit"].get("short_options") == ["T1", "T2"],
+              "Filter Type / Sync-Ring / Voice Mode / Timbre Edit option-box texts")
+        put("filter_type", "BPF12")
+        ft = get("filter_type")
+        put("sync_ring", "R.SNC")
+        sr = [get("sync_ring")]
+        put("sync_ring", "1")
+        sr.append(get("sync_ring"))
+        check(ft == "2" and sr == ["3", "1"], f"by name / index: BPF12 -> {ft}, R.SNC -> {sr[0]}, Ring (1) -> {sr[1]}")
+        put("bank_file", "1")
+        seen = {}
+        for idx in (9, 2, 23, 0, 17):   # factory programs with hardware ring, sync, ring sync; BPF12, HPF12
+            put("preset", str(idx))
+            seen[idx] = (get("sync_ring"), get("filter_type"))
+        check([seen[i][0] for i in (9, 2, 23)] == ["1", "2", "3"] and seen[0][1] == "2" and seen[17][1] == "3",
+              f"decoded programs report the hardware's mode: {seen}")
+        put("bank_file", "0")
+        get("is_loading")             # the host takes the bank / category change
+
+        # Program labels follow Category and Bank; is_loading answers "1" once per unreported change so the
+        # host re-reads chain_params on the 1 -> 0 edge
+        loading0 = get("is_loading")
         put("bank_file", "1")
         put("category", "Retro")      # by name
+        loading = [get("is_loading"), get("is_loading")]
+        check(loading0 == "0" and loading == ["1", "0"], f"is_loading after Bank/Category change: {loading0} then {loading}")
+        prog = {e["key"]: e for e in json.loads(get("chain_params"))}["patch"]
+        check(prog["options"][11] == "B.64 Name 107" and get("is_loading") == "0",
+              f"re-read Program options name the new category and bank: {prog['options'][11]!r}")
         put("patch", "11")            # by index: B4
-        check(get("preset") == str(64 + 5 * 8 + 3) and get("category") == "5" and get("patch") == "11",
-              f"Category Retro + Program B4 -> preset {get('preset')} (expected {64 + 5 * 8 + 3})")
+        check(get("preset") == str(64 + 5 * 8 + 3) and get("category") == "5" and get("patch") == "11"
+              and get("is_loading") == "0",
+              f"Category Retro + Program B4 -> preset {get('preset')} (expected {64 + 5 * 8 + 3}); no label change")
         check(get("preset_name") == "B.64 Name 107", f"name from the selected bank: {get('preset_name')!r}")
+        put("patch", "A.62 Name 041")
+        check(get("preset") == str(5 * 8 + 1), f"Program by its label -> preset {get('preset')}")
         put("patch", "A1")
         check(get("preset") == str(5 * 8), f"Program A1 by name -> preset {get('preset')}")
         put("preset", "1")
@@ -174,6 +272,7 @@ def main():
     if not os.path.exists(FACTORY):
         sys.exit(f"missing {FACTORY}")
     dump = open(FACTORY, "rb").read()
+    dump = with_names(dump, {i: "" for i in range(128)})  # the scan / label checks start from an unnamed bank
     tmp = tempfile.mkdtemp(prefix="tinyk_banks_")
     try:
         lib = ctypes.CDLL(cal.build_library(tmp))
