@@ -16,7 +16,8 @@ extern "C" {
 #define NUM_PRESETS               128
 
 /* Max buffer sizes for static allocation */
-#define DELAY_BUFFER_SIZE         44100  /* 1.0 second @ 44.1 kHz */
+#define DELAY_BUFFER_SIZE         88200  /* 2.0 seconds @ 44.1 kHz: tempo-synced delays up to 1/1 at 120 BPM */
+#define DELAY_FREE_MAX_SAMPLES    44100  /* the free (unsynced) delay time range: up to 1 s */
 #define CHORUS_BUFFER_SIZE        2048   /* ~46 ms @ 44.1 kHz */
 #define WAVETABLE_SIZE            1024   /* Single-cycle table for Vox / DWGS oscillators */
 
@@ -260,9 +261,22 @@ typedef struct {
     lfo_t patch_lfo[2][2];
     float bend_src;
     float modwheel_src;
+
+    /* Session tempo (host get_bpm, else lfo_tempo_bpm), read once per block, and the program's delay
+     * tempo sync: -1 = free, else the time base index (DELAY_SYNC_NOTES) the Delay Time knob starts on */
+    float tempo_bpm;
+    int delay_sync_note;
 } synth_engine_t;
 
-/* Move Plugin Host API v1 */
+/* Move Plugin Host API v1: field for field Schwung's src/host/plugin_api_v1.h (the order is the ABI). Every
+ * callback may be NULL on an older host, so each use is guarded. Never append a field here: a module cannot
+ * extend this struct, and reading one the host lacks reads someone else's memory. */
+#define MOVE_CLOCK_STATUS_UNAVAILABLE 0
+#define MOVE_CLOCK_STATUS_STOPPED 1
+#define MOVE_CLOCK_STATUS_RUNNING 2
+typedef int (*move_mod_emit_value_fn)(void *ctx, const char *source_id, const char *target, const char *param,
+                                      float signal, float depth, float offset, int bipolar, int enabled);
+typedef void (*move_mod_clear_source_fn)(void *ctx, const char *source_id);
 typedef struct host_api_v1 {
     uint32_t api_version;
     int sample_rate;
@@ -273,6 +287,15 @@ typedef struct host_api_v1 {
     void (*log)(const char *msg);
     int (*midi_send_internal)(const uint8_t *msg, int len);
     int (*midi_send_external)(const uint8_t *msg, int len);
+    int (*get_clock_status)(void);
+    move_mod_emit_value_fn mod_emit_value;
+    move_mod_clear_source_fn mod_clear_source;
+    void *mod_host_ctx;
+    float (*get_bpm)(void);              /* session tempo: MIDI clock -> Set tempo -> settings -> 120 */
+    int (*midi_inject_to_move)(const uint8_t *msg, int len);
+    int (*slot_recv_channel)(void *instance);
+    double (*get_beat_position)(void);   /* beats since transport start; < 0 when stopped */
+    void *reserved[8];
 } host_api_v1_t;
 
 /* Move Plugin API v2 (sound_generator) */
@@ -328,7 +351,7 @@ typedef struct {
     float delay_send_scale;   /* delay repeats added = depth * scale */
     float patch_cutoff_octaves; /* virtual patch -> cutoff at intensity 63, full source, in octaves (VST: >= ~10, set to the knob span) */
     float patch_pitch_scale;  /* virtual patch -> pitch / osc2 pitch at intensity 63, in semitones (VST: 24.1 measured) */
-    float lfo_tempo_bpm;      /* tempo for tempo-synced LFOs (no host tempo is read) */
+    float lfo_tempo_bpm;      /* tempo when the host gives none (renders, tests, hosts without get_bpm) */
     float patch_int_curve;    /* patch depth = full scale * (|int|/63)^curve (VST: 2.4 measured at +20 / +63) */
     float tilt_db;            /* high-shelf gain on the voice mix, dB (VST open saw vs ideal: 26.7) */
     float tilt_hz;            /* high-shelf corner, Hz (20000): ~+2 dB at 3 kHz, +7 at 8 kHz, +18 at 17 kHz */

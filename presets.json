@@ -56,6 +56,7 @@
       "delay_time": 0.614173,
       "delay_feedback": 0.590551,
       "delay_mix": 0.590551,
+      "delay_sync": 0.533333,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -161,6 +162,7 @@
       "delay_time": 0.188976,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -266,6 +268,7 @@
       "delay_time": 0.472441,
       "delay_feedback": 0.606299,
       "delay_mix": 0.606299,
+      "delay_sync": 0.4,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -371,6 +374,7 @@
       "delay_time": 0.551181,
       "delay_feedback": 0.503937,
       "delay_mix": 0.503937,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -476,6 +480,7 @@
       "delay_time": 0.669291,
       "delay_feedback": 0.535433,
       "delay_mix": 0.535433,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -581,6 +586,7 @@
       "delay_time": 0.559055,
       "delay_feedback": 0.771654,
       "delay_mix": 0.771654,
+      "delay_sync": 0.533333,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -686,6 +692,7 @@
       "delay_time": 0.685039,
       "delay_feedback": 0.440945,
       "delay_mix": 0.440945,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -791,6 +798,7 @@
       "delay_time": 0.622047,
       "delay_feedback": 0.551181,
       "delay_mix": 0.551181,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -896,6 +904,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.488189,
       "delay_mix": 0.488189,
+      "delay_sync": 0.533333,
       "timbre2": {
         "wave1": 0.5,
         "pulse_width": 0.007874,
@@ -1001,6 +1010,7 @@
       "delay_time": 0.393701,
       "delay_feedback": 0.456693,
       "delay_mix": 0.456693,
+      "delay_sync": 0.666667,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -1106,6 +1116,7 @@
       "delay_time": 0.015748,
       "delay_feedback": 0.84252,
       "delay_mix": 0.84252,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -1211,6 +1222,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -1316,6 +1328,7 @@
       "delay_time": 0.598425,
       "delay_feedback": 0.149606,
       "delay_mix": 0.149606,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -1421,6 +1434,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -1526,6 +1540,7 @@
       "delay_time": 0.543307,
       "delay_feedback": 0.275591,
       "delay_mix": 0.275591,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -1631,6 +1646,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -1736,6 +1752,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.724409,
       "delay_mix": 0.724409,
+      "delay_sync": 0.4,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -1841,6 +1858,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.527559,
       "delay_mix": 0.527559,
+      "delay_sync": 0.4,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -1946,6 +1964,7 @@
       "delay_time": 0.685039,
       "delay_feedback": 0.188976,
       "delay_mix": 0.188976,
+      "delay_sync": 0.333333,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -2051,6 +2070,7 @@
       "delay_time": 0.212598,
       "delay_feedback": 0.307087,
       "delay_mix": 0.307087,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -2156,6 +2176,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.637795,
       "delay_mix": 0.637795,
+      "delay_sync": 0.4,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -2261,6 +2282,7 @@
       "delay_time": 0.771654,
       "delay_feedback": 0.724409,
       "delay_mix": 0.724409,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -2366,6 +2388,7 @@
       "delay_time": 0.811024,
       "delay_feedback": 0.653543,
       "delay_mix": 0.653543,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -2471,6 +2494,7 @@
       "delay_time": 0.637795,
       "delay_feedback": 0.23622,
       "delay_mix": 0.23622,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -2576,6 +2600,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.5,
         "pulse_width": 0.0,
@@ -2681,6 +2706,7 @@
       "delay_time": 0.433071,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -2786,6 +2812,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.031496,
       "delay_mix": 0.031496,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.166667,
         "pulse_width": 0.0,
@@ -2891,6 +2918,7 @@
       "delay_time": 0.480315,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -2996,6 +3024,7 @@
       "delay_time": 0.669291,
       "delay_feedback": 0.244094,
       "delay_mix": 0.244094,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.566929,
@@ -3101,6 +3130,7 @@
       "delay_time": 0.811024,
       "delay_feedback": 0.15748,
       "delay_mix": 0.15748,
+      "delay_sync": 0.6,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.23622,
@@ -3206,6 +3236,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -3311,6 +3342,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.393701,
       "delay_mix": 0.393701,
+      "delay_sync": 0.4,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -3416,6 +3448,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.5,
         "pulse_width": 0.0,
@@ -3521,6 +3554,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -3626,6 +3660,7 @@
       "delay_time": 0.614173,
       "delay_feedback": 0.212598,
       "delay_mix": 0.212598,
+      "delay_sync": 0.6,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -3731,6 +3766,7 @@
       "delay_time": 0.622047,
       "delay_feedback": 0.551181,
       "delay_mix": 0.551181,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -3836,6 +3872,7 @@
       "delay_time": 0.755906,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -3941,6 +3978,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -4046,6 +4084,7 @@
       "delay_time": 0.401575,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -4151,6 +4190,7 @@
       "delay_time": 0.582677,
       "delay_feedback": 0.582677,
       "delay_mix": 0.582677,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -4256,6 +4296,7 @@
       "delay_time": 0.795276,
       "delay_feedback": 0.692913,
       "delay_mix": 0.692913,
+      "delay_sync": 0.533333,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -4361,6 +4402,7 @@
       "delay_time": 0.84252,
       "delay_feedback": 0.787402,
       "delay_mix": 0.787402,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.5,
         "pulse_width": 0.0,
@@ -4466,6 +4508,7 @@
       "delay_time": 0.527559,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.4,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -4571,6 +4614,7 @@
       "delay_time": 0.629921,
       "delay_feedback": 0.291339,
       "delay_mix": 0.291339,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -4676,6 +4720,7 @@
       "delay_time": 0.629921,
       "delay_feedback": 0.314961,
       "delay_mix": 0.314961,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -4781,6 +4826,7 @@
       "delay_time": 0.527559,
       "delay_feedback": 0.188976,
       "delay_mix": 0.188976,
+      "delay_sync": 0.533333,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -4886,6 +4932,7 @@
       "delay_time": 0.535433,
       "delay_feedback": 0.708661,
       "delay_mix": 0.708661,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -4991,6 +5038,7 @@
       "delay_time": 0.622047,
       "delay_feedback": 0.551181,
       "delay_mix": 0.551181,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -5096,6 +5144,7 @@
       "delay_time": 0.653543,
       "delay_feedback": 0.543307,
       "delay_mix": 0.543307,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -5201,6 +5250,7 @@
       "delay_time": 0.818898,
       "delay_feedback": 0.629921,
       "delay_mix": 0.629921,
+      "delay_sync": 0.8,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -5306,6 +5356,7 @@
       "delay_time": 0.03937,
       "delay_feedback": 0.228346,
       "delay_mix": 0.228346,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -5411,6 +5462,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -5516,6 +5568,7 @@
       "delay_time": 0.543307,
       "delay_feedback": 0.409449,
       "delay_mix": 0.409449,
+      "delay_sync": 0.533333,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -5621,6 +5674,7 @@
       "delay_time": 0.543307,
       "delay_feedback": 0.409449,
       "delay_mix": 0.409449,
+      "delay_sync": 0.533333,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -5726,6 +5780,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.480315,
       "delay_mix": 0.480315,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.833333,
         "pulse_width": 0.0,
@@ -5831,6 +5886,7 @@
       "delay_time": 0.582677,
       "delay_feedback": 0.212598,
       "delay_mix": 0.212598,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.666667,
         "pulse_width": 0.370079,
@@ -5936,6 +5992,7 @@
       "delay_time": 0.433071,
       "delay_feedback": 0.488189,
       "delay_mix": 0.488189,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -6041,6 +6098,7 @@
       "delay_time": 0.433071,
       "delay_feedback": 0.488189,
       "delay_mix": 0.488189,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -6146,6 +6204,7 @@
       "delay_time": 0.433071,
       "delay_feedback": 0.488189,
       "delay_mix": 0.488189,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -6251,6 +6310,7 @@
       "delay_time": 0.433071,
       "delay_feedback": 0.251969,
       "delay_mix": 0.251969,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -6356,6 +6416,7 @@
       "delay_time": 0.614173,
       "delay_feedback": 0.291339,
       "delay_mix": 0.291339,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -6461,6 +6522,7 @@
       "delay_time": 0.433071,
       "delay_feedback": 0.488189,
       "delay_mix": 0.488189,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -6566,6 +6628,7 @@
       "delay_time": 0.377953,
       "delay_feedback": 0.267717,
       "delay_mix": 0.267717,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -6671,6 +6734,7 @@
       "delay_time": 0.614173,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -6776,6 +6840,7 @@
       "delay_time": 0.614173,
       "delay_feedback": 0.669291,
       "delay_mix": 0.669291,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -6881,6 +6946,7 @@
       "delay_time": 0.188976,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -6986,6 +7052,7 @@
       "delay_time": 0.472441,
       "delay_feedback": 0.480315,
       "delay_mix": 0.480315,
+      "delay_sync": 0.4,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -7091,6 +7158,7 @@
       "delay_time": 0.535433,
       "delay_feedback": 0.433071,
       "delay_mix": 0.433071,
+      "delay_sync": 0.8,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -7196,6 +7264,7 @@
       "delay_time": 0.614173,
       "delay_feedback": 0.551181,
       "delay_mix": 0.551181,
+      "delay_sync": 0.533333,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -7301,6 +7370,7 @@
       "delay_time": 0.669291,
       "delay_feedback": 0.692913,
       "delay_mix": 0.692913,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -7406,6 +7476,7 @@
       "delay_time": 0.338583,
       "delay_feedback": 0.724409,
       "delay_mix": 0.724409,
+      "delay_sync": 0.533333,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -7511,6 +7582,7 @@
       "delay_time": 0.622047,
       "delay_feedback": 0.551181,
       "delay_mix": 0.551181,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -7616,6 +7688,7 @@
       "delay_time": 0.787402,
       "delay_feedback": 0.645669,
       "delay_mix": 0.645669,
+      "delay_sync": 0.733333,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -7721,6 +7794,7 @@
       "delay_time": 0.559055,
       "delay_feedback": 0.370079,
       "delay_mix": 0.370079,
+      "delay_sync": 0.533333,
       "timbre2": {
         "wave1": 0.166667,
         "pulse_width": 0.566929,
@@ -7826,6 +7900,7 @@
       "delay_time": 0.503937,
       "delay_feedback": 0.629921,
       "delay_mix": 0.629921,
+      "delay_sync": 0.6,
       "timbre2": {
         "wave1": 0.5,
         "pulse_width": 0.0,
@@ -7931,6 +8006,7 @@
       "delay_time": 0.417323,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -8036,6 +8112,7 @@
       "delay_time": 0.598425,
       "delay_feedback": 0.03937,
       "delay_mix": 0.03937,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.166667,
         "pulse_width": 0.19685,
@@ -8141,6 +8218,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -8246,6 +8324,7 @@
       "delay_time": 0.543307,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.2,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -8351,6 +8430,7 @@
       "delay_time": 0.519685,
       "delay_feedback": 0.188976,
       "delay_mix": 0.188976,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -8456,6 +8536,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.566929,
       "delay_mix": 0.566929,
+      "delay_sync": 0.2,
       "timbre2": {
         "wave1": 0.333333,
         "pulse_width": 0.0,
@@ -8561,6 +8642,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.448819,
       "delay_mix": 0.448819,
+      "delay_sync": 0.4,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -8666,6 +8748,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.637795,
       "delay_mix": 0.637795,
+      "delay_sync": 0.6,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -8771,6 +8854,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.299213,
       "delay_mix": 0.299213,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -8876,6 +8960,7 @@
       "delay_time": 0.606299,
       "delay_feedback": 0.692913,
       "delay_mix": 0.692913,
+      "delay_sync": 0.6,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -8981,6 +9066,7 @@
       "delay_time": 0.677165,
       "delay_feedback": 0.456693,
       "delay_mix": 0.456693,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -9086,6 +9172,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.748031,
       "delay_mix": 0.748031,
+      "delay_sync": 0.333333,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -9191,6 +9278,7 @@
       "delay_time": 0.614173,
       "delay_feedback": 0.685039,
       "delay_mix": 0.685039,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -9296,6 +9384,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.5,
         "pulse_width": 0.0,
@@ -9401,6 +9490,7 @@
       "delay_time": 0.259843,
       "delay_feedback": 0.047244,
       "delay_mix": 0.047244,
+      "delay_sync": 0.4,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -9506,6 +9596,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -9611,6 +9702,7 @@
       "delay_time": 0.0,
       "delay_feedback": 0.031496,
       "delay_mix": 0.031496,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -9716,6 +9808,7 @@
       "delay_time": 0.724409,
       "delay_feedback": 0.330709,
       "delay_mix": 0.330709,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -9821,6 +9914,7 @@
       "delay_time": 0.566929,
       "delay_feedback": 0.212598,
       "delay_mix": 0.212598,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -9926,6 +10020,7 @@
       "delay_time": 0.629921,
       "delay_feedback": 0.23622,
       "delay_mix": 0.23622,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -10031,6 +10126,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -10136,6 +10232,7 @@
       "delay_time": 0.614173,
       "delay_feedback": 0.165354,
       "delay_mix": 0.165354,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -10241,6 +10338,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -10346,6 +10444,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -10451,6 +10550,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -10556,6 +10656,7 @@
       "delay_time": 0.275591,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -10661,6 +10762,7 @@
       "delay_time": 0.417323,
       "delay_feedback": 0.015748,
       "delay_mix": 0.015748,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -10766,6 +10868,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.614173,
@@ -10871,6 +10974,7 @@
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
       "delay_mix": 0.0,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -10976,6 +11080,7 @@
       "delay_time": 0.488189,
       "delay_feedback": 0.716535,
       "delay_mix": 0.716535,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -11081,6 +11186,7 @@
       "delay_time": 0.503937,
       "delay_feedback": 0.629921,
       "delay_mix": 0.629921,
+      "delay_sync": 0.533333,
       "timbre2": {
         "wave1": 0.166667,
         "pulse_width": 0.0,
@@ -11186,6 +11292,7 @@
       "delay_time": 0.629921,
       "delay_feedback": 0.188976,
       "delay_mix": 0.188976,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.166667,
         "pulse_width": 0.19685,
@@ -11291,6 +11398,7 @@
       "delay_time": 0.574803,
       "delay_feedback": 0.11811,
       "delay_mix": 0.11811,
+      "delay_sync": 0.533333,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -11396,6 +11504,7 @@
       "delay_time": 0.535433,
       "delay_feedback": 0.173228,
       "delay_mix": 0.173228,
+      "delay_sync": 0.533333,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -11501,6 +11610,7 @@
       "delay_time": 0.566929,
       "delay_feedback": 0.15748,
       "delay_mix": 0.15748,
+      "delay_sync": 0.533333,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -11606,6 +11716,7 @@
       "delay_time": 0.614173,
       "delay_feedback": 0.464567,
       "delay_mix": 0.464567,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -11711,6 +11822,7 @@
       "delay_time": 0.551181,
       "delay_feedback": 0.740157,
       "delay_mix": 0.740157,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -11816,6 +11928,7 @@
       "delay_time": 0.622047,
       "delay_feedback": 0.551181,
       "delay_mix": 0.551181,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -11921,6 +12034,7 @@
       "delay_time": 0.598425,
       "delay_feedback": 0.275591,
       "delay_mix": 0.275591,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -12026,6 +12140,7 @@
       "delay_time": 0.181102,
       "delay_feedback": 0.314961,
       "delay_mix": 0.314961,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 1.0,
         "pulse_width": 0.23622,
@@ -12131,6 +12246,7 @@
       "delay_time": 0.472441,
       "delay_feedback": 0.472441,
       "delay_mix": 0.472441,
+      "delay_sync": 0.4,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -12236,6 +12352,7 @@
       "delay_time": 0.244094,
       "delay_feedback": 0.511811,
       "delay_mix": 0.511811,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -12341,6 +12458,7 @@
       "delay_time": 0.527559,
       "delay_feedback": 0.244094,
       "delay_mix": 0.244094,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -12446,6 +12564,7 @@
       "delay_time": 0.496063,
       "delay_feedback": 0.574803,
       "delay_mix": 0.574803,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.166667,
         "pulse_width": 0.440945,
@@ -12551,6 +12670,7 @@
       "delay_time": 0.582677,
       "delay_feedback": 0.212598,
       "delay_mix": 0.212598,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.370079,
@@ -12656,6 +12776,7 @@
       "delay_time": 0.433071,
       "delay_feedback": 0.488189,
       "delay_mix": 0.488189,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -12761,6 +12882,7 @@
       "delay_time": 0.433071,
       "delay_feedback": 0.488189,
       "delay_mix": 0.488189,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -12866,6 +12988,7 @@
       "delay_time": 0.433071,
       "delay_feedback": 0.488189,
       "delay_mix": 0.488189,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -12971,6 +13094,7 @@
       "delay_time": 0.433071,
       "delay_feedback": 0.488189,
       "delay_mix": 0.488189,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -13076,6 +13200,7 @@
       "delay_time": 0.433071,
       "delay_feedback": 0.488189,
       "delay_mix": 0.488189,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -13181,6 +13306,7 @@
       "delay_time": 0.433071,
       "delay_feedback": 0.165354,
       "delay_mix": 0.165354,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -13286,6 +13412,7 @@
       "delay_time": 0.543307,
       "delay_feedback": 0.307087,
       "delay_mix": 0.307087,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
@@ -13391,6 +13518,7 @@
       "delay_time": 0.19685,
       "delay_feedback": 0.385827,
       "delay_mix": 0.385827,
+      "delay_sync": 0.0,
       "timbre2": {
         "wave1": 0.0,
         "pulse_width": 0.0,
