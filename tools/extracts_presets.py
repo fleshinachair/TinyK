@@ -11,7 +11,7 @@ Program layout (offsets into the 254-byte unpacked program):
     14        arpeggiator trigger length - 1 (0..7 = 1..8 steps)
     15        arpeggiator trigger pattern: bit n = step n + 1, SET = rest (most factory arps store 0: all steps)
     16        bits 4-5: voice mode (0 = Single, 2 = Layer, 3 = Vocoder)
-    19..25    delay / mod-FX
+    19..25    delay (19 sync / time base, 20 time, 21 depth) / mod-FX (23 LFO speed, 24 depth, 25 type)
     30..31    arpeggiator tempo (MSB, LSB; the engine follows the session tempo instead)
     32        arpeggiator: bit 7 on, bit 6 latch, bits 4-5 target (both, timbre 1, timbre 2), bit 0 key sync
     33        arpeggiator: bits 0-3 type (up, down, alt1, alt2, random, trigger), bits 4-7 range - 1 octaves
@@ -86,7 +86,7 @@ TIMBRE_FIELDS = [
 #   assign         voice assign (byte +1 bits 6-7) / 2: 0 Mono, 0.5 Poly, 1 Unison
 #   unison_detune  byte +2 (cents) / 127; pan byte +26, bipolar (0.5 = centre); trigger_multi byte +1 bit 3
 # delay_sync: 0 = free (delay_time is a time), else (time base index + 1) / 15 of the tempo-sync note table
-FX_FIELDS = ["chorus_mix", "delay_time", "delay_feedback", "delay_mix", "delay_sync"]
+FX_FIELDS = ["chorus_mix", "delay_time", "delay_feedback", "delay_mix", "delay_sync", "modfx_speed", "modfx_type"]
 # Arpeggiator (struct ArpParams), all [0, 1]: on / latch / key_sync 0 or 1; target index / 2 (both, timbre 1,
 # timbre 2); type index / 5; range (octaves - 1) / 3; gate percent / 100; resolution index / 5; swing 0.5 + %/200;
 # length (steps - 1) / 7; pattern the raw byte / 255 (bit n set = step n + 1 rests).
@@ -257,6 +257,9 @@ def parse_program(idx, prog):
         "delay_mix": delay_fb,
         # byte 19: bit 7 = delay tempo sync, bits 0-3 = time base (1/32 .. 1/1)
         "delay_sync": (min(prog[19] & 0x0F, 14) + 1) / 15.0 if prog[19] & 0x80 else 0.0,
+        # Mod FX: byte 23 LFO speed, 24 depth (chorus_mix above), 25 type (0 Chorus/Flanger, 1 Ensemble, 2 Phaser)
+        "modfx_speed": unit(prog[23]),
+        "modfx_type": min(prog[25], 2) / 2.0,
     }
 
     swing = prog[36] - 256 if prog[36] >= 128 else prog[36]
@@ -322,7 +325,7 @@ def render_header(presets):
     out.append("    const char *label;\n")
     out.append("    int voice_mode; /* 0 = Single, 1 = Layer */\n")
     out.append("    struct TimbreParams t1, t2;\n")
-    out.append("    float chorus_mix, delay_time, delay_feedback, delay_mix, delay_sync;\n")
+    out.append("    float chorus_mix, delay_time, delay_feedback, delay_mix, delay_sync, modfx_speed, modfx_type;\n")
     out.append("    struct ArpParams arp;\n")
     out.append("};\n\n")
     out.append(f"static const struct Preset FACTORY_PRESETS[{len(presets)}] = {{\n")

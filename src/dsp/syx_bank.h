@@ -181,6 +181,9 @@ static void syx_parse_program(const uint8_t *p, int idx, struct Preset *out, cha
     out->delay_mix = (float)delay_fb;
     /* byte 19: bit 7 = delay tempo sync, bits 0-3 = time base (1/32 .. 1/1); stored as (index + 1) / 15 */
     out->delay_sync = (p[19] & 0x80) ? (float)(((p[19] & 0x0F) > 14 ? 14 : (p[19] & 0x0F)) + 1) / 15.0f : 0.0f;
+    /* Mod FX: 23 LFO speed, 24 depth (chorus_mix), 25 type (0 Chorus/Flanger, 1 Ensemble, 2 Phaser) */
+    out->modfx_speed = (float)syx_unit(p[23]);
+    out->modfx_type = (float)((p[25] > 2 ? 2 : p[25]) / 2.0);
     /* arpeggiator: 14 length - 1, 15 pattern (bit set = rest), 32 on / latch / target / key sync, 33 type / range,
      * 34 gate, 35 resolution, 36 swing (signed); normalized as extracts_presets.ARP_FIELDS */
     int target = (p[32] >> 4) & 0x03, type = p[33] & 0x0F, range = p[33] >> 4, swing = p[36] >= 128 ? p[36] - 256 : p[36];

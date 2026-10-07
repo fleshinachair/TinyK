@@ -79,6 +79,11 @@ static const struct { const char *name; float *value; } TUNING_TABLE[] = {
     { "hpf_ceil_hz",        &tinyk_tuning.hpf_ceil_hz },
     { "unison_spread",      &tinyk_tuning.unison_spread },
     { "unison_cents_scale", &tinyk_tuning.unison_cents_scale },
+    { "modfx_rate_lo_hz",   &tinyk_tuning.modfx_rate_lo_hz },
+    { "modfx_rate_span",    &tinyk_tuning.modfx_rate_span },
+    { "chorus_center_ms",   &tinyk_tuning.chorus_center_ms },
+    { "chorus_depth_ms",    &tinyk_tuning.chorus_depth_ms },
+    { "chorus_wet",         &tinyk_tuning.chorus_wet },
 };
 #define TUNING_COUNT ((int)(sizeof TUNING_TABLE / sizeof TUNING_TABLE[0]))
 
@@ -152,7 +157,7 @@ TK_EXPORT int tinyk_render(int preset, int note, double gate_s, double total_s, 
 }
 
 /* As tinyk_render, but plays an external patch: t1/t2 hold the 26 struct TimbreParams floats in
- * declaration order, fx the 5 FX floats (chorus_mix, delay_time, delay_feedback, delay_mix, delay_sync). */
+ * declaration order, fx the 7 FX floats (chorus_mix, delay_time, delay_feedback, delay_mix, delay_sync, modfx_speed, modfx_type). */
 TK_EXPORT int tinyk_render_patch(int slot, int voice_mode, const float *t1, const float *t2, const float *fx,
                                  int note, double gate_s, double total_s, float *out_lr, int max_frames) {
 #ifdef TINYK_TUNING
@@ -167,6 +172,8 @@ TK_EXPORT int tinyk_render_patch(int slot, int voice_mode, const float *t1, cons
     p.delay_feedback = fx[2];
     p.delay_mix = fx[3];
     p.delay_sync = fx[4];
+    p.modfx_speed = fx[5];
+    p.modfx_type = fx[6];
     return render_float(slot, &p, note, gate_s, total_s, out_lr, max_frames);
 #else
     (void)slot; (void)voice_mode; (void)t1; (void)t2; (void)fx; (void)note; (void)gate_s; (void)total_s;
@@ -234,6 +241,8 @@ TK_EXPORT int tinyk_render_patch_events(int slot, int voice_mode, const float *t
     p.delay_feedback = fx[2];
     p.delay_mix = fx[3];
     p.delay_sync = fx[4];
+    p.modfx_speed = fx[5];
+    p.modfx_type = fx[6];
 
     int16_t *tmp = calloc((size_t)frames * 2, sizeof(int16_t));
     if (!tmp) return -1;

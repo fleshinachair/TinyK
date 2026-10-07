@@ -42,7 +42,7 @@ static int format_preset_name(int idx, char *buf, int buf_len) {
 
 #include "arp.c" /* the arpeggiator: one translation unit with dsp.c (see arp.h) */
 
-#define TINYK_TUNING_DEFAULTS { 37.46f, 10.61f, 20.0f, 19000.0f, 2.13f, 8.88f, 1.92f, 0.7f, 2.0f, 1.0f, 1.0f, 1.0f, 0.7f, 0.4f, 10.61f, 24.0f, 120.0f, 2.4f, 26.7f, 20000.0f, 0.6f, 10.36f, 0.56f, 2.0f, 18.0f, 360.0f, -24.5f, 15000.0f, 0.7f, 1.0f }
+#define TINYK_TUNING_DEFAULTS { 37.46f, 10.61f, 20.0f, 19000.0f, 2.13f, 8.88f, 1.92f, 0.7f, 2.0f, 1.0f, 1.0f, 1.0f, 0.7f, 0.4f, 10.61f, 24.0f, 120.0f, 2.4f, 26.7f, 20000.0f, 0.6f, 10.36f, 0.56f, 2.0f, 18.0f, 360.0f, -24.5f, 15000.0f, 0.7f, 1.0f, 0.05f, 600.0f, 5.0f, 3.7f, 1.0f }
 #ifdef TINYK_TUNING
 tinyk_tuning_t tinyk_tuning = TINYK_TUNING_DEFAULTS;
 #else
@@ -591,6 +591,8 @@ static void load_preset_from(const struct Preset *p, int index) {
     /* Timbre 1 into the active parameter set, then the shared FX section */
     apply_timbre(g_synth.params, &g_synth.timbre_extra[0], &p->t1);
     g_synth.params[PARAM_CHORUS_MIX] = clamp01f(p->chorus_mix);
+    g_synth.modfx_speed = clamp01f(p->modfx_speed);
+    g_synth.modfx_type = (int)lroundf(clamp01f(p->modfx_type) * 2.0f);
     g_synth.params[PARAM_DELAY_TIME] = clamp01f(p->delay_time);
     g_synth.params[PARAM_DELAY_FEEDBACK] = clamp01f(p->delay_feedback);
     g_synth.params[PARAM_DELAY_MIX] = clamp01f(p->delay_mix);
@@ -695,6 +697,8 @@ static void sync_from_global(synth_engine_t *synth) {
         synth->timbre_balance = g_synth.timbre_balance;
         synth->voice_mode = g_synth.voice_mode;
         synth->delay_sync_note = g_synth.delay_sync_note;
+        synth->modfx_speed = g_synth.modfx_speed;
+        synth->modfx_type = g_synth.modfx_type;
         synth->arp.set = g_synth.arp.set;
         synth->params[PARAM_VOICE_MODE] = g_synth.params[PARAM_VOICE_MODE];
         synth->params[PARAM_TIMBRE_BALANCE] = g_synth.params[PARAM_TIMBRE_BALANCE];
@@ -727,6 +731,7 @@ int tinyk_dsp_bank_preset(int b, int idx, float *t1, float *t2, float *fx, char 
     memcpy(t1, &p->t1, sizeof p->t1);
     memcpy(t2, &p->t2, sizeof p->t2);
     fx[0] = p->chorus_mix; fx[1] = p->delay_time; fx[2] = p->delay_feedback; fx[3] = p->delay_mix; fx[4] = p->delay_sync;
+    fx[5] = p->modfx_speed; fx[6] = p->modfx_type;
     snprintf(label, (size_t)label_len, "%s", p->label);
     return p->voice_mode;
 }
@@ -1012,6 +1017,16 @@ void synth_set_param(synth_engine_t *synth, const char *key, float val) {
         synth->modwheel_src = clamp01f(val / 127.0f);
         return;
     }
+    if (strcmp(key, "modfx_speed") == 0) { /* Mod FX LFO speed, 0..1 (program byte 23 / 127) */
+        synth->modfx_speed = clamp01f(val);
+        if (synth != &g_synth) g_synth.modfx_speed = synth->modfx_speed;
+        return;
+    }
+    if (strcmp(key, "modfx_type") == 0) { /* 0 Chorus/Flanger, 1 Ensemble, 2 Phaser */
+        synth->modfx_type = arp_clampi((int)lroundf(val), 0, 2);
+        if (synth != &g_synth) g_synth.modfx_type = synth->modfx_type;
+        return;
+    }
     if (strcmp(key, "arp_on") == 0) { /* the Arp knob: 0 off, 1 on (the program's setting until changed) */
         set_arp_on(synth, val >= 0.5f);
         return;
@@ -1193,6 +1208,8 @@ float synth_get_param(const synth_engine_t *synth, const char *key) {
     if (strcmp(key, "arp_on") == 0) {
         return (float)synth->arp.set.on;
     }
+    if (strcmp(key, "modfx_speed") == 0) return synth->modfx_speed;
+    if (strcmp(key, "modfx_type") == 0) return (float)synth->modfx_type;
     if (strncmp(key, "arp_step", 8) == 0 && key[8] >= '1' && key[8] <= '8' && key[9] == '\0') {
         return ((synth->arp.set.pattern >> (key[8] - '1')) & 1) ? 0.0f : 1.0f;
     }
@@ -1787,6 +1804,76 @@ static inline float soft_knee_limiter(float x) {
 
 /* Audio Render Loop (No dynamic allocations!) */
 static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, double beat);
+
+/* --- Mod FX ---------------------------------------------------------------------------------------------------------
+ * Program byte 25 picks the effect, 23 its LFO speed (rate = modfx_rate_lo_hz * modfx_rate_span^speed), 24 its depth
+ * (PARAM_CHORUS_MIX; 0 = off, as on the VST). The chorus line (chorus_buf_*) is written every sample.
+ *   Chorus/Flanger: one tap per channel on a triangle LFO, left and right in anti-phase, the delay sweeping
+ *     chorus_center_ms +- depth * chorus_depth_ms; the wet copy is added to the dry signal (chorus_wet). Fitted on the
+ *     VST's A.11 at speed 44 / 80 (ref_a11_modfx_speed44 / 80): a triangle sweep of about 2..8 ms, the wet takes 2-4 dB
+ *     above the dry one, L/R correlation 0.19 / 0.07 (dry 0.47).
+ *   Ensemble: three sine-modulated taps 120 degrees apart, the middle one shared, ENS_* (chosen, not measured).
+ *   Phaser: six first-order all-pass stages per channel swept exponentially by a triangle LFO (right channel a
+ *     quarter cycle on), with feedback, summed with the dry signal at 0.707 each, PHASER_* (chosen, not measured). */
+#define ENS_CENTER_MS   7.0f
+#define ENS_DEPTH_MS    1.6f
+#define PHASER_LO_HZ    250.0f
+#define PHASER_OCTAVES  4.0f
+#define PHASER_FEEDBACK 0.55f
+
+static inline float modfx_tri(float ph) { /* phase 0..1 -> triangle -1 (0) .. +1 (0.5) */
+    ph -= floorf(ph);
+    return 1.0f - 4.0f * fabsf(ph - 0.5f);
+}
+
+static inline float chorus_tap(const float *buf, uint32_t wpos, float delay) {
+    float rpos = (float)wpos - delay;
+    while (rpos < 0.0f) rpos += (float)CHORUS_BUFFER_SIZE;
+    int i0 = (int)rpos % CHORUS_BUFFER_SIZE, i1 = (i0 + 1) % CHORUS_BUFFER_SIZE;
+    float fr = rpos - floorf(rpos);
+    return buf[i0] * (1.0f - fr) + buf[i1] * fr;
+}
+
+/* One sample of the program's Mod FX on (l, r); wpos is where this sample was written into the chorus line */
+static inline void modfx_process(synth_engine_t *s, float *l, float *r, uint32_t wpos, float depth, float fs) {
+    float hz = tinyk_tuning.modfx_rate_lo_hz * powf(tinyk_tuning.modfx_rate_span, s->modfx_speed);
+    s->chorus_lfo_phase += hz / fs;
+    if (s->chorus_lfo_phase >= 1.0f) s->chorus_lfo_phase -= 1.0f;
+    float ph = s->chorus_lfo_phase, ms = fs * 0.001f, maxd = (float)(CHORUS_BUFFER_SIZE - 4);
+    if (s->modfx_type == 2) { /* Phaser */
+        float in[2] = { *l, *r };
+        for (int c = 0; c < 2; c++) {
+            float sweep = 0.5f + 0.5f * modfx_tri(ph + 0.25f * (float)c);
+            float fc = fminf(PHASER_LO_HZ * exp2f(PHASER_OCTAVES * depth * sweep), 0.45f * fs);
+            float t = tanf((float)M_PI * fc / fs), a = (t - 1.0f) / (t + 1.0f);
+            float x = in[c] + PHASER_FEEDBACK * depth * s->phaser_fb[c];
+            for (int k = 0; k < 6; k++) { /* y = a x + x[n-1] - a y[n-1], as one state */
+                float y = a * x + s->phaser_ap[c][k];
+                s->phaser_ap[c][k] = x - a * y;
+                x = y;
+            }
+            s->phaser_fb[c] = fast_tanh(x);
+            in[c] = 0.7071f * (in[c] + x); /* full-depth notches, about the dry level on average */
+        }
+        *l = in[0];
+        *r = in[1];
+        return;
+    }
+    if (s->modfx_type == 1) { /* Ensemble */
+        float t0 = chorus_tap(s->chorus_buf_l, wpos, fminf(maxd, (ENS_CENTER_MS + depth * ENS_DEPTH_MS * sinf(2.0f * (float)M_PI * ph)) * ms));
+        float t1 = 0.5f * (chorus_tap(s->chorus_buf_l, wpos, fminf(maxd, (ENS_CENTER_MS + depth * ENS_DEPTH_MS * sinf(2.0f * (float)M_PI * (ph + 1.0f / 3.0f))) * ms))
+                         + chorus_tap(s->chorus_buf_r, wpos, fminf(maxd, (ENS_CENTER_MS + depth * ENS_DEPTH_MS * sinf(2.0f * (float)M_PI * (ph + 1.0f / 3.0f))) * ms)));
+        float t2 = chorus_tap(s->chorus_buf_r, wpos, fminf(maxd, (ENS_CENTER_MS + depth * ENS_DEPTH_MS * sinf(2.0f * (float)M_PI * (ph + 2.0f / 3.0f))) * ms));
+        *l += tinyk_tuning.chorus_wet * 0.8f * (t0 + 0.5f * t1);
+        *r += tinyk_tuning.chorus_wet * 0.8f * (t2 + 0.5f * t1);
+        return;
+    }
+    /* Chorus/Flanger */
+    float dl = (tinyk_tuning.chorus_center_ms + depth * tinyk_tuning.chorus_depth_ms * modfx_tri(ph)) * ms;
+    float dr = (tinyk_tuning.chorus_center_ms + depth * tinyk_tuning.chorus_depth_ms * modfx_tri(ph + 0.5f)) * ms;
+    *l += tinyk_tuning.chorus_wet * chorus_tap(s->chorus_buf_l, wpos, fmaxf(1.0f, fminf(maxd, dl)));
+    *r += tinyk_tuning.chorus_wet * chorus_tap(s->chorus_buf_r, wpos, fmaxf(1.0f, fminf(maxd, dr)));
+}
 
 /* One block: the session tempo once, then the audio in segments that end where an arpeggiator step or gate end
  * falls, so its notes start on the sample (one segment per block while it is off or idle). */
@@ -2438,7 +2525,7 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
         voice_sum_l = soft_clip(voice_sum_l);
         voice_sum_r = soft_clip(voice_sum_r);
 
-        /* 4. Stereo Chorus / Ensemble */
+        /* 4. Mod FX (Chorus/Flanger, Ensemble or Phaser: modfx_process) */
         float chorus_l = voice_sum_l;
         float chorus_r = voice_sum_r;
 
@@ -2448,34 +2535,7 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
         synth->chorus_buf_r[wpos] = voice_sum_r;
         synth->chorus_write_pos = (wpos + 1) % CHORUS_BUFFER_SIZE;
 
-        if (chorus_mix_p > 0.01f) {
-            synth->chorus_lfo_phase += 0.8f / fs;
-            if (synth->chorus_lfo_phase >= 1.0f) synth->chorus_lfo_phase -= 1.0f;
-
-            float lfo_c1 = sinf(2.0f * (float)M_PI * synth->chorus_lfo_phase);
-            float lfo_c2 = cosf(2.0f * (float)M_PI * synth->chorus_lfo_phase);
-
-            float delay_mod_l = 441.0f + lfo_c1 * 220.0f;
-            float delay_mod_r = 441.0f + lfo_c2 * 220.0f;
-
-            float rpos_l = (float)wpos - delay_mod_l;
-            while (rpos_l < 0.0f) rpos_l += (float)CHORUS_BUFFER_SIZE;
-            int idx_l0 = (int)rpos_l % CHORUS_BUFFER_SIZE;
-            int idx_l1 = (idx_l0 + 1) % CHORUS_BUFFER_SIZE;
-            float frac_l = rpos_l - (int)rpos_l;
-            float tap_l = synth->chorus_buf_l[idx_l0] * (1.0f - frac_l) + synth->chorus_buf_l[idx_l1] * frac_l;
-
-            float rpos_r = (float)wpos - delay_mod_r;
-            while (rpos_r < 0.0f) rpos_r += (float)CHORUS_BUFFER_SIZE;
-            int idx_r0 = (int)rpos_r % CHORUS_BUFFER_SIZE;
-            int idx_r1 = (idx_r0 + 1) % CHORUS_BUFFER_SIZE;
-            float frac_r = rpos_r - (int)rpos_r;
-            float tap_r = synth->chorus_buf_r[idx_r0] * (1.0f - frac_r) + synth->chorus_buf_r[idx_r1] * frac_r;
-
-            /* Proper dry/wet crossfading */
-            chorus_l = voice_sum_l * (1.0f - chorus_mix_p * 0.7f) + tap_l * chorus_mix_p;
-            chorus_r = voice_sum_r * (1.0f - chorus_mix_p * 0.7f) + tap_r * chorus_mix_p;
-        }
+        if (chorus_mix_p > 0.01f) modfx_process(synth, &chorus_l, &chorus_r, wpos, chorus_mix_p, fs);
 
         /* 5. Digital Delay with Feedback */
         float out_l = chorus_l;
@@ -2529,6 +2589,22 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
 
         /* 6. Master Volume, Pan, Soft-Knee Limiter & Convert to int16 */
         if (master_vol_p <= 0.01f) master_vol_p = 0.8f;
+
+        /* Output DC blocker (~3.5 Hz, as on the voice mix): subsonic content the Mod FX and delay lift (the Phaser's
+         * feedback passes DC above unity) never reaches the output as an offset (B.35 SlowBend's 0.07) */
+        {
+            const float dc_r = 0.9995f;
+            float yl = out_l - synth->out_dc_x[0] + dc_r * synth->out_dc_y[0];
+            float yr = out_r - synth->out_dc_x[1] + dc_r * synth->out_dc_y[1];
+            synth->out_dc_x[0] = out_l;
+            synth->out_dc_x[1] = out_r;
+            if (fabsf(yl) < 1e-15f) yl = 0.0f;
+            if (fabsf(yr) < 1e-15f) yr = 0.0f;
+            synth->out_dc_y[0] = yl;
+            synth->out_dc_y[1] = yr;
+            out_l = yl;
+            out_r = yr;
+        }
 
         DIAG_CHECK(out_l);
         DIAG_CHECK(out_r);
@@ -3322,9 +3398,9 @@ static int build_state_json(const synth_engine_t *synth, char *buf, int buf_len)
 /* UI hierarchy served to the host: GENERATED from src/module.json's ui_hierarchy (keep them identical) */
 static const char MK_UI_HIERARCHY[] =
     "{\"levels\":{\"root\":{\"name\":\"TinyK\",\"label\":\"TinyK\",\"list_param\":\"preset\",\"count_param\":\"preset_count\",\"name_param\":\"pr"
-    "eset_name\",\"params\":[{\"level\":\"perf\",\"label\":\"Perf\"},{\"level\":\"osc\",\"label\":\"Osc/Timbre\"},{\"level\":\"env\",\"label\":\""
-    "Envelopes\"},{\"level\":\"fx\",\"label\":\"Effects\"},{\"level\":\"mix\",\"label\":\"Mix/Filter\"},{\"level\":\"bank\",\"label\":\"Bank\"},{"
-    "\"level\":\"arpset\",\"label\":\"Arp Settings\"},{\"level\":\"steps\",\"label\":\"Arp Steps\"}],\"knobs\":[]},\"perf\":{\"name\":\"Perf [T1]"
+    "eset_name\",\"params\":[{\"level\":\"perf\",\"label\":\"Perf\"},{\"level\":\"arpset\",\"label\":\"Arp Settings\"},{\"level\":\"steps\",\"lab"
+    "el\":\"Arp Steps\"},{\"level\":\"osc\",\"label\":\"Osc/Timbre\"},{\"level\":\"env\",\"label\":\"Envelopes\"},{\"level\":\"mix\",\"label\":\""
+    "Mix/Filter\"},{\"level\":\"fx\",\"label\":\"Effects\"},{\"level\":\"bank\",\"label\":\"Bank\"}],\"knobs\":[]},\"perf\":{\"name\":\"Perf [T1]"
     "\",\"label\":\"Perf\",\"params\":[{\"key\":\"category\",\"label\":\"Category\",\"type\":\"enum\",\"options\":[\"Trance\",\"Techno/House\",\""
     "Electronica\",\"DnB/Breaks\",\"Hiphop/Vintage\",\"Retro\",\"SE/Hit\",\"Vocoder\"],\"default\":0},{\"key\":\"patch\",\"label\":\"Program\",\""
     "short_name\":\"PROG\",\"type\":\"enum\",\"options\":[\"A1\",\"A2\",\"A3\",\"A4\",\"A5\",\"A6\",\"A7\",\"A8\",\"B1\",\"B2\",\"B3\",\"B4\",\"B"
@@ -3334,68 +3410,68 @@ static const char MK_UI_HIERARCHY[] =
     "abel\":\"Amp Rel\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01},{\"key\":\"arp_on\",\"label\":\"Arp\",\"short_n"
     "ame\":\"ARP\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"short_options\":[\"OFF\",\"ON\"],\"default\":0},{\"key\":\"mod_wheel\",\"labe"
     "l\":\"Mod Wheel\",\"short_name\":\"MOD\",\"type\":\"int\",\"min\":0,\"max\":127,\"default\":0}],\"knobs\":[\"category\",\"patch\",\"cutoff\""
-    ",\"resonance\",\"attack2\",\"release2\",\"arp_on\",\"mod_wheel\"]},\"osc\":{\"name\":\"Osc/Timbre [T1]\",\"label\":\"Osc/Timbre\",\"params\""
-    ":[{\"key\":\"wave1\",\"label\":\"Wave 1\",\"type\":\"enum\",\"options\":[\"Saw\",\"Square\",\"Triangle\",\"Sine\",\"Vox\",\"DWGS\",\"Noise\""
-    "],\"short_options\":[\"SAW\",\"SQR\",\"TRI\",\"SIN\",\"VOX\",\"DWG\",\"NZ\"],\"default\":0},{\"key\":\"pulse_width\",\"label\":\"Pulse Width"
-    "\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"wave2\",\"label\":\"Wave 2\",\"type\":\"enum\",\"opt"
-    "ions\":[\"Saw\",\"Square\",\"Triangle\"],\"short_options\":[\"SAW\",\"SQR\",\"TRI\"],\"default\":0},{\"key\":\"osc2_semi\",\"label\":\"Semi\""
-    ",\"type\":\"int\",\"min\":-24,\"max\":24,\"default\":0,\"unit\":\"st\"},{\"key\":\"osc2_tune\",\"label\":\"Tune\",\"type\":\"int\",\"min\":-"
-    "50,\"max\":50,\"default\":0,\"unit\":\"ct\"},{\"key\":\"voice_mode\",\"label\":\"Voice Mode\",\"type\":\"enum\",\"options\":[\"Single (4-Voi"
-    "ce)\",\"Layer (2-Voice)\"],\"short_options\":[\"SNGL\",\"LAYR\"],\"default\":0},{\"key\":\"timbre_edit\",\"label\":\"Timbre Edit\",\"type\":"
-    "\"enum\",\"options\":[\"Timbre 1\",\"Timbre 2\"],\"short_options\":[\"T1\",\"T2\"],\"default\":0},{\"key\":\"timbre_balance\",\"label\":\"Ti"
-    "mbre Bal\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01}],\"knobs\":[\"wave1\",\"pulse_width\",\"wave2\",\"osc2_"
-    "semi\",\"osc2_tune\",\"voice_mode\",\"timbre_edit\",\"timbre_balance\"]},\"env\":{\"name\":\"Envelopes [T1]\",\"label\":\"Envelopes\",\"para"
-    "ms\":[{\"key\":\"attack1\",\"label\":\"Filter Atk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.01,\"step\":0.01},{\"key\":\"de"
-    "cay1\",\"label\":\"Filter Dcy\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.4,\"step\":0.01},{\"key\":\"sustain1\",\"label\":\""
-    "Filter Sus\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"release1\",\"label\":\"Filter Rel\",\"type"
-    "\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01},{\"key\":\"decay2\",\"label\":\"Amp Dcy\",\"type\":\"float\",\"min\":0.0"
-    ",\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"sustain2\",\"label\":\"Amp Sus\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default"
-    "\":0.8,\"step\":0.01},{\"key\":\"keytrack\",\"label\":\"Key Track\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01"
-    "},{\"key\":\"env_int\",\"label\":\"EG Int\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01}],\"knobs\":[\"attack1\""
-    ",\"decay1\",\"sustain1\",\"release1\",\"decay2\",\"sustain2\",\"keytrack\",\"env_int\"]},\"fx\":{\"name\":\"Effects\",\"label\":\"Effects\","
-    "\"params\":[{\"key\":\"chorus_mix\",\"label\":\"Chorus Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"ke"
-    "y\":\"delay_time\",\"label\":\"Delay Time\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01},{\"key\":\"delay_feedb"
-    "ack\",\"label\":\"Delay Fdbk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01},{\"key\":\"delay_mix\",\"label\":\""
-    "Delay Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"lfo1_rate\",\"label\":\"LFO1 Rate\",\"type\""
-    ":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01,\"short_name\":\"LFO1\"},{\"key\":\"lfo2_rate\",\"label\":\"LFO2 Rate\",\"t"
-    "ype\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01,\"short_name\":\"LFO2\"},{\"key\":\"master_vol\",\"label\":\"Master Vo"
-    "l\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.8,\"step\":0.01,\"short_name\":\"VOL\"},{\"key\":\"pan\",\"label\":\"Pan\",\"ty"
-    "pe\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01}],\"knobs\":[\"chorus_mix\",\"delay_time\",\"delay_feedback\",\"delay_m"
-    "ix\",\"lfo1_rate\",\"lfo2_rate\",\"master_vol\",\"pan\"]},\"mix\":{\"name\":\"Mix/Filter [T1]\",\"label\":\"Mix/Filter\",\"params\":[{\"key\""
-    ":\"osc_mix\",\"label\":\"Osc Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"noise_level\",\"labe"
-    "l\":\"Noise\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"sync_ring\",\"label\":\"Sync / Ring\",\"t"
-    "ype\":\"enum\",\"options\":[\"Off\",\"Ring\",\"Sync\",\"Ring Sync\"],\"short_options\":[\"OFF\",\"RING\",\"SYNC\",\"R.SNC\"],\"default\":0},"
-    "{\"key\":\"filter_type\",\"label\":\"Filter Type\",\"type\":\"enum\",\"options\":[\"LPF24\",\"LPF12\",\"BPF12\",\"HPF12\"],\"short_options\""
-    ":[\"LPF24\",\"LPF12\",\"BPF12\",\"HPF12\"],\"default\":0},{\"key\":\"portamento\",\"label\":\"Portamento\",\"type\":\"float\",\"min\":0.0,\""
-    "max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"level\",\"label\":\"Level\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.9,\""
-    "step\":0.01},{\"key\":\"drive\",\"label\":\"Drive\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01}],\"knobs\":[\""
-    "osc_mix\",\"noise_level\",\"sync_ring\",\"filter_type\",\"portamento\",\"level\",\"drive\"]},\"bank\":{\"name\":\"Bank\",\"label\":\"Bank\","
-    "\"params\":[{\"key\":\"bank_file\",\"label\":\"Bank\",\"type\":\"enum\",\"options\":[\"Built-in\"],\"default\":0},{\"level\":\"bank_list\",\""
-    "label\":\"Browse banks\"}],\"knobs\":[\"bank_file\"]},\"bank_list\":{\"name\":\"Banks\",\"label\":\"Select Bank\",\"items_param\":\"bank_lis"
-    "t\",\"select_param\":\"bank_file\",\"navigate_to\":\"root\"},\"arpset\":{\"name\":\"Arp Settings\",\"label\":\"Arp Settings\",\"params\":[{\""
-    "key\":\"arp_type\",\"label\":\"Type\",\"short_name\":\"TYPE\",\"type\":\"enum\",\"options\":[\"UP\",\"DOWN\",\"ALT1\",\"ALT2\",\"RANDOM\",\""
-    "TRIGGER\"],\"short_options\":[\"UP\",\"DOWN\",\"ALT1\",\"ALT2\",\"RND\",\"TRIG\"],\"default\":0},{\"key\":\"arp_range\",\"label\":\"Range\","
-    "\"short_name\":\"RANGE\",\"type\":\"enum\",\"options\":[\"1 Oct\",\"2 Oct\",\"3 Oct\",\"4 Oct\"],\"short_options\":[\"1OCT\",\"2OCT\",\"3OCT"
-    "\",\"4OCT\"],\"default\":0},{\"key\":\"arp_resolution\",\"label\":\"Resolution\",\"short_name\":\"RESO\",\"type\":\"enum\",\"options\":[\"1/"
-    "24\",\"1/16\",\"1/12\",\"1/8\",\"1/6\",\"1/4\"],\"short_options\":[\"1/24\",\"1/16\",\"1/12\",\"1/8\",\"1/6\",\"1/4\"],\"default\":1},{\"key"
-    "\":\"arp_gate\",\"label\":\"Gate\",\"short_name\":\"GATE\",\"type\":\"int\",\"min\":0,\"max\":100,\"default\":80,\"unit\":\"%\"},{\"key\":\""
-    "arp_swing\",\"label\":\"Swing\",\"short_name\":\"SWING\",\"type\":\"int\",\"min\":-100,\"max\":100,\"default\":0,\"unit\":\"%\"},{\"key\":\""
-    "arp_latch\",\"label\":\"Latch\",\"short_name\":\"LATCH\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"short_options\":[\"OFF\",\"ON\"],\""
-    "default\":0},{\"key\":\"arp_key_sync\",\"label\":\"Key Sync\",\"short_name\":\"KSYNC\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"shor"
-    "t_options\":[\"OFF\",\"ON\"],\"default\":0},{\"key\":\"arp_target\",\"label\":\"Target\",\"short_name\":\"TARGT\",\"type\":\"enum\",\"option"
-    "s\":[\"Both\",\"Timbre 1\",\"Timbre 2\"],\"short_options\":[\"BOTH\",\"T1\",\"T2\"],\"default\":0}],\"knobs\":[\"arp_type\",\"arp_range\",\""
-    "arp_resolution\",\"arp_gate\",\"arp_swing\",\"arp_latch\",\"arp_key_sync\",\"arp_target\"]},\"steps\":{\"name\":\"Arp Steps\",\"label\":\"Ar"
-    "p Steps\",\"params\":[{\"key\":\"arp_step1\",\"label\":\"Step 1\",\"short_name\":\"ST1\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\""
-    "short_options\":[\"REST\",\"PLAY\"],\"default\":1},{\"key\":\"arp_step2\",\"label\":\"Step 2\",\"short_name\":\"ST2\",\"type\":\"enum\",\"op"
-    "tions\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1},{\"key\":\"arp_step3\",\"label\":\"Step 3\",\"short_name\":"
-    "\"ST3\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1},{\"key\":\"arp_step4\",\"labe"
-    "l\":\"Step 4\",\"short_name\":\"ST4\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1}"
-    ",{\"key\":\"arp_step5\",\"label\":\"Step 5\",\"short_name\":\"ST5\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"R"
-    "EST\",\"PLAY\"],\"default\":1},{\"key\":\"arp_step6\",\"label\":\"Step 6\",\"short_name\":\"ST6\",\"type\":\"enum\",\"options\":[\"Rest\",\""
-    "Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1},{\"key\":\"arp_step7\",\"label\":\"Step 7\",\"short_name\":\"ST7\",\"type\":\"e"
-    "num\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1},{\"key\":\"arp_step8\",\"label\":\"Step 8\",\"sho"
-    "rt_name\":\"ST8\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1}],\"knobs\":[\"arp_s"
-    "tep1\",\"arp_step2\",\"arp_step3\",\"arp_step4\",\"arp_step5\",\"arp_step6\",\"arp_step7\",\"arp_step8\"]}}}";
+    ",\"resonance\",\"attack2\",\"release2\",\"arp_on\",\"mod_wheel\"]},\"arpset\":{\"name\":\"Arp Settings\",\"label\":\"Arp Settings\",\"params"
+    "\":[{\"key\":\"arp_type\",\"label\":\"Type\",\"short_name\":\"TYPE\",\"type\":\"enum\",\"options\":[\"UP\",\"DOWN\",\"ALT1\",\"ALT2\",\"RAND"
+    "OM\",\"TRIGGER\"],\"short_options\":[\"UP\",\"DOWN\",\"ALT1\",\"ALT2\",\"RND\",\"TRIG\"],\"default\":0},{\"key\":\"arp_range\",\"label\":\"R"
+    "ange\",\"short_name\":\"RANGE\",\"type\":\"enum\",\"options\":[\"1 Oct\",\"2 Oct\",\"3 Oct\",\"4 Oct\"],\"short_options\":[\"1OCT\",\"2OCT\""
+    ",\"3OCT\",\"4OCT\"],\"default\":0},{\"key\":\"arp_resolution\",\"label\":\"Resolution\",\"short_name\":\"RESO\",\"type\":\"enum\",\"options\""
+    ":[\"1/24\",\"1/16\",\"1/12\",\"1/8\",\"1/6\",\"1/4\"],\"short_options\":[\"1/24\",\"1/16\",\"1/12\",\"1/8\",\"1/6\",\"1/4\"],\"default\":1},"
+    "{\"key\":\"arp_gate\",\"label\":\"Gate\",\"short_name\":\"GATE\",\"type\":\"int\",\"min\":0,\"max\":100,\"default\":80,\"unit\":\"%\"},{\"ke"
+    "y\":\"arp_swing\",\"label\":\"Swing\",\"short_name\":\"SWING\",\"type\":\"int\",\"min\":-100,\"max\":100,\"default\":0,\"unit\":\"%\"},{\"ke"
+    "y\":\"arp_latch\",\"label\":\"Latch\",\"short_name\":\"LATCH\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"short_options\":[\"OFF\",\"O"
+    "N\"],\"default\":0},{\"key\":\"arp_key_sync\",\"label\":\"Key Sync\",\"short_name\":\"KSYNC\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"]"
+    ",\"short_options\":[\"OFF\",\"ON\"],\"default\":0},{\"key\":\"arp_target\",\"label\":\"Target\",\"short_name\":\"TARGT\",\"type\":\"enum\",\""
+    "options\":[\"Both\",\"Timbre 1\",\"Timbre 2\"],\"short_options\":[\"BOTH\",\"T1\",\"T2\"],\"default\":0}],\"knobs\":[\"arp_type\",\"arp_rang"
+    "e\",\"arp_resolution\",\"arp_gate\",\"arp_swing\",\"arp_latch\",\"arp_key_sync\",\"arp_target\"]},\"steps\":{\"name\":\"Arp Steps\",\"label\""
+    ":\"Arp Steps\",\"params\":[{\"key\":\"arp_step1\",\"label\":\"Step 1\",\"short_name\":\"ST1\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play"
+    "\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1},{\"key\":\"arp_step2\",\"label\":\"Step 2\",\"short_name\":\"ST2\",\"type\":\"enum\""
+    ",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1},{\"key\":\"arp_step3\",\"label\":\"Step 3\",\"short_na"
+    "me\":\"ST3\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1},{\"key\":\"arp_step4\",\""
+    "label\":\"Step 4\",\"short_name\":\"ST4\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\""
+    ":1},{\"key\":\"arp_step5\",\"label\":\"Step 5\",\"short_name\":\"ST5\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":["
+    "\"REST\",\"PLAY\"],\"default\":1},{\"key\":\"arp_step6\",\"label\":\"Step 6\",\"short_name\":\"ST6\",\"type\":\"enum\",\"options\":[\"Rest\""
+    ",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1},{\"key\":\"arp_step7\",\"label\":\"Step 7\",\"short_name\":\"ST7\",\"type\":"
+    "\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1},{\"key\":\"arp_step8\",\"label\":\"Step 8\",\""
+    "short_name\":\"ST8\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1}],\"knobs\":[\"ar"
+    "p_step1\",\"arp_step2\",\"arp_step3\",\"arp_step4\",\"arp_step5\",\"arp_step6\",\"arp_step7\",\"arp_step8\"]},\"osc\":{\"name\":\"Osc/Timbre"
+    " [T1]\",\"label\":\"Osc/Timbre\",\"params\":[{\"key\":\"wave1\",\"label\":\"Wave 1\",\"type\":\"enum\",\"options\":[\"Saw\",\"Square\",\"Tri"
+    "angle\",\"Sine\",\"Vox\",\"DWGS\",\"Noise\"],\"short_options\":[\"SAW\",\"SQR\",\"TRI\",\"SIN\",\"VOX\",\"DWG\",\"NZ\"],\"default\":0},{\"ke"
+    "y\":\"pulse_width\",\"label\":\"Pulse Width\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"wave2\",\""
+    "label\":\"Wave 2\",\"type\":\"enum\",\"options\":[\"Saw\",\"Square\",\"Triangle\"],\"short_options\":[\"SAW\",\"SQR\",\"TRI\"],\"default\":0"
+    "},{\"key\":\"osc2_semi\",\"label\":\"Semi\",\"type\":\"int\",\"min\":-24,\"max\":24,\"default\":0,\"unit\":\"st\"},{\"key\":\"osc2_tune\",\""
+    "label\":\"Tune\",\"type\":\"int\",\"min\":-50,\"max\":50,\"default\":0,\"unit\":\"ct\"},{\"key\":\"voice_mode\",\"label\":\"Voice Mode\",\"t"
+    "ype\":\"enum\",\"options\":[\"Single (4-Voice)\",\"Layer (2-Voice)\"],\"short_options\":[\"SNGL\",\"LAYR\"],\"default\":0},{\"key\":\"timbre"
+    "_edit\",\"label\":\"Timbre Edit\",\"type\":\"enum\",\"options\":[\"Timbre 1\",\"Timbre 2\"],\"short_options\":[\"T1\",\"T2\"],\"default\":0}"
+    ",{\"key\":\"timbre_balance\",\"label\":\"Timbre Bal\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01}],\"knobs\":["
+    "\"wave1\",\"pulse_width\",\"wave2\",\"osc2_semi\",\"osc2_tune\",\"voice_mode\",\"timbre_edit\",\"timbre_balance\"]},\"env\":{\"name\":\"Enve"
+    "lopes [T1]\",\"label\":\"Envelopes\",\"params\":[{\"key\":\"attack1\",\"label\":\"Filter Atk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\""
+    "default\":0.01,\"step\":0.01},{\"key\":\"decay1\",\"label\":\"Filter Dcy\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.4,\"step"
+    "\":0.01},{\"key\":\"sustain1\",\"label\":\"Filter Sus\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\""
+    "release1\",\"label\":\"Filter Rel\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01},{\"key\":\"decay2\",\"label\":"
+    "\"Amp Dcy\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"sustain2\",\"label\":\"Amp Sus\",\"type\":\""
+    "float\",\"min\":0.0,\"max\":1.0,\"default\":0.8,\"step\":0.01},{\"key\":\"keytrack\",\"label\":\"Key Track\",\"type\":\"float\",\"min\":0.0,"
+    "\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"env_int\",\"label\":\"EG Int\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":"
+    "0.5,\"step\":0.01}],\"knobs\":[\"attack1\",\"decay1\",\"sustain1\",\"release1\",\"decay2\",\"sustain2\",\"keytrack\",\"env_int\"]},\"mix\":{"
+    "\"name\":\"Mix/Filter [T1]\",\"label\":\"Mix/Filter\",\"params\":[{\"key\":\"osc_mix\",\"label\":\"Osc Mix\",\"type\":\"float\",\"min\":0.0,"
+    "\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"noise_level\",\"label\":\"Noise\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default"
+    "\":0.0,\"step\":0.01},{\"key\":\"sync_ring\",\"label\":\"Sync / Ring\",\"type\":\"enum\",\"options\":[\"Off\",\"Ring\",\"Sync\",\"Ring Sync\""
+    "],\"short_options\":[\"OFF\",\"RING\",\"SYNC\",\"R.SNC\"],\"default\":0},{\"key\":\"filter_type\",\"label\":\"Filter Type\",\"type\":\"enum\""
+    ",\"options\":[\"LPF24\",\"LPF12\",\"BPF12\",\"HPF12\"],\"short_options\":[\"LPF24\",\"LPF12\",\"BPF12\",\"HPF12\"],\"default\":0},{\"key\":\""
+    "portamento\",\"label\":\"Portamento\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"level\",\"label\""
+    ":\"Level\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.9,\"step\":0.01},{\"key\":\"drive\",\"label\":\"Drive\",\"type\":\"float"
+    "\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01}],\"knobs\":[\"osc_mix\",\"noise_level\",\"sync_ring\",\"filter_type\",\"portamento"
+    "\",\"level\",\"drive\"]},\"fx\":{\"name\":\"Effects\",\"label\":\"Effects\",\"params\":[{\"key\":\"chorus_mix\",\"label\":\"Chorus Mix\",\"t"
+    "ype\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"delay_time\",\"label\":\"Delay Time\",\"type\":\"float\",\""
+    "min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01},{\"key\":\"delay_feedback\",\"label\":\"Delay Fdbk\",\"type\":\"float\",\"min\":0.0,\"m"
+    "ax\":1.0,\"default\":0.3,\"step\":0.01},{\"key\":\"delay_mix\",\"label\":\"Delay Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\""
+    ":0.0,\"step\":0.01},{\"key\":\"lfo1_rate\",\"label\":\"LFO1 Rate\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01,"
+    "\"short_name\":\"LFO1\"},{\"key\":\"lfo2_rate\",\"label\":\"LFO2 Rate\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":"
+    "0.01,\"short_name\":\"LFO2\"},{\"key\":\"master_vol\",\"label\":\"Master Vol\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.8,\""
+    "step\":0.01,\"short_name\":\"VOL\"},{\"key\":\"pan\",\"label\":\"Pan\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0"
+    ".01}],\"knobs\":[\"chorus_mix\",\"delay_time\",\"delay_feedback\",\"delay_mix\",\"lfo1_rate\",\"lfo2_rate\",\"master_vol\",\"pan\"]},\"bank\""
+    ":{\"name\":\"Bank\",\"label\":\"Bank\",\"params\":[{\"key\":\"bank_file\",\"label\":\"Bank\",\"type\":\"enum\",\"options\":[\"Built-in\"],\""
+    "default\":0},{\"level\":\"bank_list\",\"label\":\"Browse banks\"}],\"knobs\":[\"bank_file\"]},\"bank_list\":{\"name\":\"Banks\",\"label\":\""
+    "Select Bank\",\"items_param\":\"bank_list\",\"select_param\":\"bank_file\",\"navigate_to\":\"root\"}}}";
 
 static int v2_get_param(void *instance, const char *key, char *buf, int buf_len) {
     synth_engine_t *synth = (synth_engine_t*)instance;
