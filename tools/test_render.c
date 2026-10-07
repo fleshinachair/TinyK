@@ -69,6 +69,10 @@ static const struct { const char *name; float *value; } TUNING_TABLE[] = {
     { "patch_int_curve",    &tinyk_tuning.patch_int_curve },
     { "tilt_db",            &tinyk_tuning.tilt_db },
     { "tilt_hz",            &tinyk_tuning.tilt_hz },
+    { "patch_pan_curve",    &tinyk_tuning.patch_pan_curve },
+    { "bpf_cutoff_octaves", &tinyk_tuning.bpf_cutoff_octaves },
+    { "bpf_cutoff_offset",  &tinyk_tuning.bpf_cutoff_offset },
+    { "dist_ceiling",       &tinyk_tuning.dist_ceiling },
 };
 #define TUNING_COUNT ((int)(sizeof TUNING_TABLE / sizeof TUNING_TABLE[0]))
 

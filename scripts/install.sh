@@ -29,12 +29,17 @@ scp $SRC_DIR/dsp.so $MOVE_HOST:$DEST/dsp.so.new
 scp $SRC_DIR/module.json $SRC_DIR/ui.js $SRC_DIR/presets.json $SRC_DIR/help.json $SRC_DIR/release.json $MOVE_HOST:$DEST/
 ssh "$MOVE_HOST" "mv -f $DEST/dsp.so.new $DEST/dsp.so"
 
-# Optional .syx banks from your local banks/ folder (never part of the release package). Banks already on
-# the Move are left in place.
+# Banks: the compiled-in bank is the default, so nothing from the local banks/ folder is copied unless asked
+# (INSTALL_BANKS=1). TinyK_Default.syx is never copied: it is the source of the built-in bank and would show
+# as a duplicate. Banks already on the Move are left in place.
 ssh "$MOVE_HOST" "mkdir -p $DEST/banks"
-if ls banks/*.syx >/dev/null 2>&1 || ls banks/*.SYX >/dev/null 2>&1; then
-    echo "Copying local .syx banks..."
-    scp banks/*.[sS][yY][xX] "$MOVE_HOST:$DEST/banks/"
+if [ "${INSTALL_BANKS:-0}" = "1" ]; then
+    for f in banks/*.[sS][yY][xX]; do
+        [ -e "$f" ] || continue
+        case "$(basename "$f")" in [Tt]iny[Kk]_[Dd]efault.[sS][yY][xX]) continue ;; esac
+        echo "Copying bank $(basename "$f")..."
+        scp "$f" "$MOVE_HOST:$DEST/banks/"
+    done
 fi
 
 # Set permissions

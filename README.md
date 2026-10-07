@@ -4,11 +4,11 @@ A lightweight, microKORG-inspired virtual analog synth engine for Ableton Move, 
 
 ## Features
 - **4-voice polyphonic / 2-voice dual-timbre** virtual analog engine (Single and Layer modes).
-- **TPT zero-delay-feedback state-variable filter** (LPF24, LPF12, BPF12, HPF12) with a pre-filter drive stage, stable from low cutoffs up to 19 kHz at any resonance.
+- **TPT zero-delay-feedback state-variable filter** (LPF24, LPF12, BPF12, HPF12) with an amp-stage drive circuit, stable from low cutoffs up to 19 kHz at any resonance.
 - **Virtual Patch matrix and two LFOs per timbre**, decoded from the patch data.
 - **microKORG category navigation:** pick one of 8 categories, then scroll its 16 programs (A1–A8, B1–B8) on a single knob, with the patch name in the header. No separate A/B toggle.
 - **Dynamic SysEx bank loader:** drop microKORG/MS2000 `.syx` bank dumps into the module's `banks/` folder and switch between them by name. Banks are decoded once at start-up, so switching never allocates memory or touches files while audio runs.
-- **Built-in bank:** plays out of the box with no external files.
+- **Built-in factory bank:** 128 production-ready performance presets covering classic leads, pads, basses, and arpeggios, playable immediately without external files.
 
 ## Requirements
 - An Ableton Move with Schwung installed and on your network (`move.local`).
@@ -32,7 +32,8 @@ If TinyK is listed in the Schwung module catalog, install it from there; updates
 3. Reload a track slot with TinyK (or restart Schwung).
 
 ## Playing
-- **Main page:** the first two knobs are **Category** (Trance, Techno/House, Electronica, DnB/Breaks, Hiphop/Vintage, Retro, SE/Hit, Vocoder) and **Program** (A1–A8, B1–B8 within that category). The header shows the current patch name; the jog wheel steps through all 128 programs. The remaining knobs edit the voice: mode, timbre, oscillators, filter, envelopes and effects.
+- **Pages:** **Perf** (Category, Program, Cutoff, Resonance, Amp Attack, Amp Release, Drive, Mod Wheel), **Osc/Timbre** (Wave 1, Pulse Width, Wave 2, Semi, Tune, Voice Mode, Timbre Edit, Timbre Balance), **Envelopes** (filter EG, amp decay/sustain, Key Track, EG Int), **Effects** (Chorus, Delay, LFO rates, Master Vol, Pan) and **Mix/Filter** (Osc Mix, Noise, Sync/Ring, Filter Type, Portamento, Level). The Move has no mod wheel, so **Mod Wheel** (0–127) on Perf plays its part for patches that route it; a wheel on an external controller (CC1) works too, and whichever moved last wins. Category picks one of the 8 categories (Trance, Techno/House, Electronica, DnB/Breaks, Hiphop/Vintage, Retro, SE/Hit, Vocoder) and Program its 16 programs (A1–A8, B1–B8); touching or turning Program shows the full code and name, e.g. "B.17 Flashin'Pad". The header shows the current patch name; the jog wheel steps through all 128 programs. The wave knobs show the waveform.
+- **Layer mode:** Timbre Edit chooses which timbre the per-timbre pages edit. Their header shows [T1] or [T2], and with Timbre 2 their knob labels read T2.CUT, T2.RES, and so on.
 - **Bank page:** open **Bank** from the main page. The **Bank** knob shows "Built-in" and the file name of each bank found in `banks/`; **Browse banks** lists them, and picking one returns to the main page. Changing bank keeps the selected category and program.
 
 ## Adding your own banks
@@ -48,7 +49,7 @@ Notes:
 - Program names stored in the dump are shown; otherwise programs are labelled by position (A.11–B.88).
 - Single-program dumps and any file that is not a 128-program microKORG bank are skipped.
 - Vocoder programs play with a generic carrier sound: TinyK has no vocoder.
-- When building from source, `.syx` files in the repository's `banks/` folder are copied to the Move by `./scripts/install.sh`. They are never committed or included in a release package.
+- `.syx` files in the repository's `banks/` folder are never committed, packaged or installed: `./scripts/install.sh` leaves the Move's `banks/` folder alone, so a clean install shows only "Built-in". To send your local banks too, run `INSTALL_BANKS=1 ./scripts/install.sh` (it skips `TinyK_Default.syx`, which is the built-in bank).
 
 ## Building from source
 The module is cross-compiled for the Move's ARM64 (Cortex-A72) Linux. `./scripts/build.sh` uses the first toolchain it finds: Docker (`scripts/Dockerfile`), CMake with `CROSS_PREFIX`, `aarch64-linux-gnu-gcc`, or Zig.
@@ -82,6 +83,6 @@ TinyK is an independent, unofficial project. It is not affiliated with, endorsed
 - Schwung is a separate open-source project by its own authors.
 - All other product names are the property of their respective owners and are used only to describe compatibility.
 
-TinyK contains no KORG firmware, samples or audio. It does not include third-party `.syx` banks; you are responsible for having the right to use any bank files you load.
+TinyK contains no Korg code, firmware, samples, or audio recordings, and ships no third-party `.syx` files. Its DSP engine is independently developed. Users are responsible for ensuring they possess the appropriate rights to any third-party `.syx` bank dumps loaded into the device.
 
 The software is provided "as is", without warranty of any kind.

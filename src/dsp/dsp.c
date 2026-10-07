@@ -33,7 +33,7 @@ static int format_preset_name(int idx, char *buf, int buf_len) {
 #define M_PI 3.14159265358979323846
 #endif
 
-#define TINYK_TUNING_DEFAULTS { 37.46f, 10.61f, 20.0f, 19000.0f, 3.06f, 8.88f, 1.92f, 0.7f, 3.5f, 1.0f, 1.0f, 1.0f, 0.7f, 0.4f, 10.61f, 24.0f, 120.0f, 2.4f, 26.7f, 20000.0f }
+#define TINYK_TUNING_DEFAULTS { 37.46f, 10.61f, 20.0f, 19000.0f, 2.13f, 8.88f, 1.92f, 0.7f, 2.0f, 1.0f, 1.0f, 1.0f, 0.7f, 0.4f, 10.61f, 24.0f, 120.0f, 2.4f, 26.7f, 20000.0f, 0.6f, 10.36f, 0.56f, 2.0f }
 #ifdef TINYK_TUNING
 tinyk_tuning_t tinyk_tuning = TINYK_TUNING_DEFAULTS;
 #else
@@ -268,7 +268,7 @@ static inline float adsr_process(adsr_t *env, float decay_coeff, float sustain_l
 
 /* Process single 2-pole TPT State Variable Filter with soft non-linear saturation
  * in the resonance feedback path and pre-filter drive stage, preserving low-end weight */
-static inline float svf_process_2pole(svf_t *svf, float in, float fc, float res, float drive, filter_type_t type, float fs) {
+static inline float svf_process_2pole(svf_t *svf, float in, float fc, float res, filter_type_t type, float fs) {
     /* 1. NaN/Infinity sanitization on existing filter states */
     if (isnan(svf->s1) || isinf(svf->s1)) svf->s1 = 0.0f;
     if (isnan(svf->s2) || isinf(svf->s2)) svf->s2 = 0.0f;
@@ -308,8 +308,9 @@ static inline float svf_process_2pole(svf_t *svf, float in, float fc, float res,
     if (isnan(in) || isinf(in)) in = 0.0f;
     in = fmaxf(-3.0f, fminf(3.0f, in));
 
-    /* Pre-filter drive stage with resonance gain compensation (compensating passband volume drop) */
-    float input_gain = (1.0f + drive * tinyk_tuning.drive_gain) * (1.0f + res * 0.5f);
+    /* Input soft clip with resonance gain compensation (compensating passband volume drop). Distortion is
+     * not here: it is in the amp section, after the filter (see the voice loop). */
+    float input_gain = 1.0f + res * 0.5f;
     float v0 = fast_tanh(in * input_gain);
 
     /* Zero-delay-feedback (TPT) SVF high-pass node: hp = (x - (k + g) s1 - s2) / (1 + g (g + k)).
@@ -704,12 +705,93 @@ static int current_patch(const synth_engine_t *synth) {
     return synth->program_num - 1;
 }
 
+/* Preset index of Program `patch` (0..15) in Category `category` (0..7) */
+static int patch_preset(int category, int patch) {
+    return (patch / 8) * 64 + category * 8 + patch % 8;
+}
+
 /* Index of `val` in names[], or -1 */
 static int name_index(const char *val, const char *const *names, int n) {
     for (int i = 0; i < n; i++) {
         if (strcmp(val, names[i]) == 0) return i;
     }
     return -1;
+}
+
+/* Index of `val` among the current category's Program labels ("B.12 ARPEJMATR"), or -1 */
+static int patch_label_index(const synth_engine_t *synth, const char *val) {
+    char label[48];
+    for (int i = 0; i < 16; i++) {
+        format_preset_name(patch_preset(synth->genre_category, i), label, sizeof label);
+        if (strcmp(val, label) == 0) return i;
+    }
+    return -1;
+}
+
+/* Some served labels follow the engine state: the Program options are the current category's patch names
+ * (Category, Bank), and the per-timbre page names and cell labels show the edited timbre (Timbre Edit,
+ * Voice Mode). The host re-reads chain_params and ui_hierarchy on a preset jog or a list pick, but not on a
+ * knob turn; it does re-read on is_loading's 1 -> 0 edge. So is_loading answers "1" once for each label
+ * change it has not reported yet: a turn reads "1" on the next poll and "0" on the one after, and a knob
+ * still turning keeps answering "1", so the labels are re-read once, when it stops. */
+static int g_labels_reported = -1;
+
+/* The timbre the per-timbre controls edit: Timbre 2 only when it is selected in Layer mode */
+static int edit_timbre(const synth_engine_t *synth) {
+    int is_layer = (synth->params[PARAM_VOICE_MODE] > 0.5f) || (synth->voice_mode == 1);
+    return (is_layer && synth->timbre_edit == 1) ? 1 : 0;
+}
+
+/* Everything the served labels depend on: the Program names (bank, category) and the timbre badge */
+static int label_context(const synth_engine_t *synth) {
+    return (g_bank_file * 8 + synth->genre_category) * 2 + edit_timbre(synth);
+}
+
+/* Selector params served to the host as enum knobs over a 0..1 engine value: options are the names the
+ * overlay shows, short_options what the knob's option square shows (<= 4 characters fit on one line;
+ * the host draws a waveform icon for the wave enums). They travel as option indices; `to_engine` maps an
+ * option index to the engine's mode (NULL = the same), and the engine value is mode / (count - 1). */
+static const char *const WAVE1_NAMES[7] = { "Saw", "Square", "Triangle", "Sine", "Vox", "DWGS", "Noise" };
+static const char *const WAVE1_SHORT[7] = { "SAW", "SQR", "TRI", "SIN", "VOX", "DWG", "NZ" };
+static const char *const WAVE2_NAMES[3] = { "Saw", "Square", "Triangle" };
+static const char *const WAVE2_SHORT[3] = { "SAW", "SQR", "TRI" };
+static const char *const FILTER_NAMES[4] = { "LPF24", "LPF12", "BPF12", "HPF12" };
+/* Osc 2 mod in the hardware's order (off, ring, sync, ring sync); the engine's is off, sync, ring, both */
+static const char *const SYNC_RING_NAMES[4] = { "Off", "Ring", "Sync", "Ring Sync" };
+static const char *const SYNC_RING_SHORT[4] = { "OFF", "RING", "SYNC", "R.SNC" };
+static const int SYNC_RING_TO_ENGINE[4] = { SYNC_RING_OFF, SYNC_RING_RING, SYNC_RING_SYNC, SYNC_RING_BOTH };
+
+typedef struct {
+    const char *key, *name;
+    const char *const *options, *const *shorts;
+    int count;
+    const int *to_engine; /* an involution here, so it also maps engine mode -> option index */
+} selector_t;
+
+static const selector_t SELECTORS[] = {
+    { "wave1", "Wave 1", WAVE1_NAMES, WAVE1_SHORT, 7, NULL },
+    { "wave2", "Wave 2", WAVE2_NAMES, WAVE2_SHORT, 3, NULL },
+    { "sync_ring", "Sync / Ring", SYNC_RING_NAMES, SYNC_RING_SHORT, 4, SYNC_RING_TO_ENGINE },
+    { "filter_type", "Filter Type", FILTER_NAMES, FILTER_NAMES, 4, NULL },
+};
+
+static const selector_t *find_selector(const char *key) {
+    for (size_t i = 0; i < sizeof SELECTORS / sizeof SELECTORS[0]; i++) {
+        if (strcmp(key, SELECTORS[i].key) == 0) return &SELECTORS[i];
+    }
+    return NULL;
+}
+
+/* Osc 2 pitch is one value (detune: +-24 semitones over 0..1); Semi and Tune split it into whole
+ * semitones and cents, the way the hardware stores it (semitone +-24, tune +-50 cents) */
+static void osc2_semi_tune(float detune, int *semi, int *cents) {
+    float d = (detune - 0.5f) * 48.0f;
+    *semi = (int)lroundf(d);
+    *cents = (int)lroundf((d - (float)*semi) * 100.0f);
+}
+
+static float osc2_detune(int semi, int cents) {
+    return clamp01f(0.5f + ((float)semi + (float)cents / 100.0f) / 48.0f);
 }
 
 /* An index control's value: integers are indices; a value strictly between 0 and 1 is a normalized
@@ -763,6 +845,32 @@ void synth_set_param(synth_engine_t *synth, const char *key, float val) {
         if (val > 1.0f) val = 1.0f;
         synth->timbre_balance = val;
         synth->params[PARAM_TIMBRE_BALANCE] = val;
+        return;
+    }
+
+    /* Per-timbre controls kept outside params[]: amp level and noise level (timbre extras), and Osc 2
+     * Semi (-24..24) / Tune (-50..50 cents), which both edit detune */
+    if (strcmp(key, "level") == 0) {
+        synth->timbre_extra[edit_timbre(synth)].level = clamp01f(val);
+        return;
+    }
+    if (strcmp(key, "noise_level") == 0) {
+        synth->timbre_extra[edit_timbre(synth)].noise_level = clamp01f(val);
+        return;
+    }
+    /* Mod Wheel knob (0..127) for a Move without a wheel: it sets the same patch source (7) as CC1, so
+     * whichever moved last wins and an external wheel takes over as soon as it sends */
+    if (strcmp(key, "mod_wheel") == 0) {
+        synth->modwheel_src = clamp01f(val / 127.0f);
+        return;
+    }
+    if (strcmp(key, "osc2_semi") == 0 || strcmp(key, "osc2_tune") == 0) {
+        int semi, cents;
+        osc2_semi_tune(synth_get_param(synth, "detune"), &semi, &cents);
+        int v = (int)lroundf(val);
+        if (key[5] == 's') semi = v < -24 ? -24 : (v > 24 ? 24 : v);
+        else cents = v < -50 ? -50 : (v > 50 ? 50 : v);
+        synth_set_param(synth, "detune", osc2_detune(semi, cents));
         return;
     }
 
@@ -909,6 +1017,20 @@ float synth_get_param(const synth_engine_t *synth, const char *key) {
     }
     if (strcmp(key, "preset") == 0) {
         return (float)synth->current_preset / (float)(NUM_PRESETS - 1);
+    }
+    if (strcmp(key, "level") == 0) {
+        return synth->timbre_extra[edit_timbre(synth)].level;
+    }
+    if (strcmp(key, "noise_level") == 0) {
+        return synth->timbre_extra[edit_timbre(synth)].noise_level;
+    }
+    if (strcmp(key, "mod_wheel") == 0) { /* follows CC1 too */
+        return synth->modwheel_src * 127.0f;
+    }
+    if (strcmp(key, "osc2_semi") == 0 || strcmp(key, "osc2_tune") == 0) {
+        int semi, cents;
+        osc2_semi_tune(synth_get_param(synth, "detune"), &semi, &cents);
+        return (float)(key[5] == 's' ? semi : cents);
     }
     for (int i = 0; i < NUM_PARAMS; i++) {
         if (strcmp(PARAM_METAS[i].id, key) == 0) {
@@ -1396,9 +1518,13 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
             t_cfg[t].glide_coeff = 1.0f - expf(-1.0f / (glide_time * fs));
         }
 
-        t_cfg[t].cutoff_pitch = clamp01f(cutoff_p) * tinyk_tuning.cutoff_octaves;
         t_cfg[t].resonance = resonance_p;
         t_cfg[t].filter_type = (filter_type_t)(int)(filter_type_p * (float)(FILTER_TYPE_COUNT - 1) + 0.5f);
+        /* BPF12's centre follows the knob on its own curve (fitted on VST takes at cutoff 32/64/96, res 63) */
+        if (t_cfg[t].filter_type == FILTER_BP_12)
+            t_cfg[t].cutoff_pitch = clamp01f(cutoff_p) * tinyk_tuning.bpf_cutoff_octaves + tinyk_tuning.bpf_cutoff_offset;
+        else
+            t_cfg[t].cutoff_pitch = clamp01f(cutoff_p) * tinyk_tuning.cutoff_octaves;
         t_cfg[t].keytrack = keytrack_p;
         t_cfg[t].env_int = env_int_p;
         t_cfg[t].drive = drive_p;
@@ -1414,8 +1540,10 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
 
         t_cfg[t].extra = extra;
         for (int p = 0; p < 4; p++) {
+            /* Pan has its own depth curve: the measured 2.4 (pitch / cutoff) left +20 at a +-0.7 dB swing */
             float a = extra->patch_int[p];
-            t_cfg[t].patch_amt[p] = copysignf(powf(fabsf(a), tinyk_tuning.patch_int_curve), a);
+            float curve = (extra->patch_dst[p] == PATCH_DST_PAN) ? tinyk_tuning.patch_pan_curve : tinyk_tuning.patch_int_curve;
+            t_cfg[t].patch_amt[p] = copysignf(powf(fabsf(a), curve), a);
         }
         for (int l = 0; l < 2; l++) {
             float hz;
@@ -1482,7 +1610,7 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
         float white_noise = (float)(int32_t)noise_state * (1.0f / 2147483648.0f);
 
         /* Patch-matrix LFOs, per timbre. LFO2's rate can itself be a patch destination; only the
-         * timbre-wide sources (LFO1, MIDI1/2) can drive it, since it is shared by the timbre's voices. */
+         * timbre-wide sources (LFO1, pitch bend, mod wheel) can drive it, since it is shared by the timbre's voices. */
         float plfo[2][2] = { { 0.0f, 0.0f }, { 0.0f, 0.0f } };
         for (int t = 0; t < (is_layer_mode ? 2 : 1); t++) {
             const timbre_extra_t *ex = t_cfg[t].extra;
@@ -1491,8 +1619,8 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
                 if (ex->patch_dst[p] != PATCH_DST_LFO2_FREQ || ex->patch_int[p] == 0.0f) continue;
                 float sv = 0.0f;
                 if (ex->patch_src[p] == PATCH_SRC_LFO1) sv = patch_lfo_value(&synth->patch_lfo[t][0], 0, ex->lfo_wave[0]);
-                else if (ex->patch_src[p] == PATCH_SRC_MIDI1) sv = synth->midi_src[0];
-                else if (ex->patch_src[p] == PATCH_SRC_MIDI2) sv = synth->midi_src[1];
+                else if (ex->patch_src[p] == PATCH_SRC_PITCH_BEND) sv = synth->bend_src;
+                else if (ex->patch_src[p] == PATCH_SRC_MOD_WHEEL) sv = synth->modwheel_src;
                 lfo2_fmod += t_cfg[t].patch_amt[p] * sv;
             }
             for (int l = 0; l < 2; l++) {
@@ -1531,8 +1659,8 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
                     case PATCH_SRC_LFO2:     sv = plfo[t_idx][1]; break;
                     case PATCH_SRC_VELOCITY: sv = v->velocity; break;
                     case PATCH_SRC_KBD:      sv = ((float)v->note - 60.0f) / 64.0f; break;
-                    case PATCH_SRC_MIDI1:    sv = synth->midi_src[0]; break;
-                    case PATCH_SRC_MIDI2:    sv = synth->midi_src[1]; break;
+                    case PATCH_SRC_PITCH_BEND: sv = synth->bend_src; break;
+                    case PATCH_SRC_MOD_WHEEL:  sv = synth->modwheel_src; break;
                     default:                 sv = 0.0f; break;
                 }
                 pmod[cfg->extra->patch_dst[p]] += amt * sv;
@@ -1688,10 +1816,19 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
             /* SVF Multimode Filter with feedback tanh saturation & bass preservation */
             float filtered = 0.0f;
             if (cfg->filter_type == FILTER_LP_24) {
-                float stage1 = svf_process_2pole(&v->filter_svf[0], osc_sum, fc, cfg->resonance * tinyk_tuning.lp24_res_scale, cfg->drive, FILTER_LP_24, fs);
-                filtered = svf_process_2pole(&v->filter_svf[1], stage1, fc, cfg->resonance * tinyk_tuning.lp24_res_scale, cfg->drive, FILTER_LP_24, fs);
+                float stage1 = svf_process_2pole(&v->filter_svf[0], osc_sum, fc, cfg->resonance * tinyk_tuning.lp24_res_scale, FILTER_LP_24, fs);
+                filtered = svf_process_2pole(&v->filter_svf[1], stage1, fc, cfg->resonance * tinyk_tuning.lp24_res_scale, FILTER_LP_24, fs);
             } else {
-                filtered = svf_process_2pole(&v->filter_svf[0], osc_sum, fc, cfg->resonance, cfg->drive, cfg->filter_type, fs);
+                filtered = svf_process_2pole(&v->filter_svf[0], osc_sum, fc, cfg->resonance, cfg->filter_type, fs);
+            }
+
+            /* Distortion: the microKORG's is an amp-section switch (timbre byte 27, beside amp level and pan),
+             * so it shapes the filter output, not its input. Gain 1 + drive * drive_gain (drive 0.5 = on) into a
+             * soft clip at +-dist_ceiling: on the VST it is mostly level (+19 dB on B.11, whose spectrum it
+             * leaves almost unchanged), saturating only loud signals. */
+            if (cfg->drive > 0.0f) {
+                float ceil_ = tinyk_tuning.dist_ceiling;
+                filtered = ceil_ * fast_tanh(filtered * (1.0f + cfg->drive * tinyk_tuning.drive_gain) / ceil_);
             }
 
             if (isnan(filtered) || isinf(filtered)) filtered = 0.0f;
@@ -1909,6 +2046,7 @@ static void* v2_create_instance(const char *module_dir, const char *json_default
             }
         }
     }
+    g_labels_reported = label_context(&g_synth);
     return &g_synth;
 }
 
@@ -1992,8 +2130,8 @@ static void parse_midi_buffer(synth_engine_t *synth, const uint8_t *msg, int len
                     float val01 = (float)val / 127.0f;
                     if (cc == 120 || cc == 123) {
                         synth_all_notes_off(synth);
-                    } else if (cc == 1 || cc == 2) {
-                        synth->midi_src[cc - 1] = val01; /* virtual patch sources MIDI1 / MIDI2 */
+                    } else if (cc == 1) {
+                        synth->modwheel_src = val01; /* virtual patch source Mod Wheel: 0 at rest, up to +1 */
                     } else if (cc == 74) {
                         synth_set_param(synth, "cutoff", val01);
                     } else if (cc == 71) {
@@ -2027,7 +2165,8 @@ static void parse_midi_buffer(synth_engine_t *synth, const uint8_t *msg, int len
                     int lsb = msg[i] & 0x7F;
                     int msb = msg[i + 1] & 0x7F;
                     int bend = (msb << 7) | lsb;
-                    synth->pitch_bend_semi = ((float)(bend - 8192) / 8192.0f) * 2.0f;
+                    synth->bend_src = (float)(bend - 8192) / 8192.0f; /* virtual patch source Pitch Bend, -1..+1 */
+                    synth->pitch_bend_semi = synth->bend_src * 2.0f;
                     i += 2;
                 } else {
                     break;
@@ -2141,9 +2280,28 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
     }
 
     if (strcmp(key, "category") == 0 || strcmp(key, "patch") == 0) {
-        /* option name ("Retro", "B3") or index */
+        /* option name ("Retro", "B3", "B.12 ARPEJMATR") or index */
         int byname = (strcmp(key, "category") == 0) ? name_index(val, CATEGORY_NAMES, 8) : name_index(val, PATCH_NAMES, 16);
+        if (byname < 0 && strcmp(key, "patch") == 0) byname = patch_label_index(synth, val);
         synth_set_param(synth, key, byname >= 0 ? (float)byname : (float)atof(val));
+        return;
+    }
+
+    const selector_t *sel = find_selector(key);
+    if (sel) {
+        /* option name ("Square", "SQR", "BPF12") or index; a value with a decimal point is the normalized 0..1 */
+        int n = sel->count;
+        int i = name_index(val, sel->options, n);
+        if (i < 0) i = name_index(val, sel->shorts, n);
+        if (i < 0 && strchr(val, '.') != NULL) {
+            synth_set_param(synth, key, clamp01f((float)atof(val)));
+            return;
+        }
+        if (i < 0) i = atoi(val);
+        if (i < 0) i = 0;
+        if (i > n - 1) i = n - 1;
+        int mode = sel->to_engine ? sel->to_engine[i] : i;
+        synth_set_param(synth, key, (float)mode / (float)(n - 1));
         return;
     }
 
@@ -2244,17 +2402,76 @@ static void json_put_string(json_out_t *o, const char *text) {
     json_put(o, "\"");
 }
 
-static void json_put_enum(json_out_t *o, const char *key, const char *name, const char *const *opts, int n) {
+/* Labels for the per-timbre controls while Timbre 2 is being edited, so the grid says which layer a turn
+ * changes: { key, cell label, full label (the page's own label with "T2 ") }. Timbre 1 keeps the plain
+ * labels from ui_hierarchy. The cell labels fit the host's 5-character cell (checked with its labelVerbatim). */
+static const char *const T2_LABELS[][3] = {
+    { "cutoff", "T2.CUT", "T2 Cutoff" }, { "resonance", "T2.RES", "T2 Resonance" },
+    { "attack2", "T2.ATK", "T2 Amp Atk" }, { "release2", "T2.REL", "T2 Amp Rel" },
+    { "drive", "T2.DRV", "T2 Drive" }, { "level", "T2.LVL", "T2 Level" },
+    { "wave1", "T2.WV1", "T2 Wave 1" }, { "pulse_width", "T2.PW", "T2 Pulse Width" },
+    { "wave2", "T2.WV2", "T2 Wave 2" }, { "osc2_semi", "T2.SEMI", "T2 Semi" }, { "osc2_tune", "T2.TUNE", "T2 Tune" },
+    { "attack1", "T2.FATK", "T2 Filter Atk" }, { "decay1", "T2.FDCY", "T2 Filter Dcy" },
+    { "sustain1", "T2.FSU", "T2 Filter Sus" }, { "release1", "T2.FRL", "T2 Filter Rel" },
+    { "decay2", "T2.ADCY", "T2 Amp Dcy" }, { "sustain2", "T2.ASU", "T2 Amp Sus" },
+    { "keytrack", "T2.KTRK", "T2 Key Track" }, { "env_int", "T2.EGIN", "T2 EG Int" },
+    { "osc_mix", "T2.MIX", "T2 Osc Mix" }, { "noise_level", "T2.NOIS", "T2 Noise" },
+    { "sync_ring", "T2.SYNC", "T2 Sync / Ring" }, { "filter_type", "T2.FTYP", "T2 Filter Type" },
+    { "portamento", "T2.PORT", "T2 Portamento" }
+};
+
+/* Opens a chain_params entry: key, name and, for a per-timbre control while Timbre 2 is edited, its T2 labels */
+static void json_put_head(json_out_t *o, const char *key, const char *name, int t2) {
     json_put(o, "{\"key\":");
     json_put_string(o, key);
     json_put(o, ",\"name\":");
     json_put_string(o, name);
+    for (size_t i = 0; t2 && i < sizeof T2_LABELS / sizeof T2_LABELS[0]; i++) {
+        if (strcmp(key, T2_LABELS[i][0]) != 0) continue;
+        json_put(o, ",\"label\":");
+        json_put_string(o, T2_LABELS[i][2]);
+        json_put(o, ",\"short_name\":");
+        json_put_string(o, T2_LABELS[i][1]);
+        break;
+    }
+}
+
+/* An enum entry; shorts (the 3-character square's texts) may be NULL */
+static void json_put_enum(json_out_t *o, const char *key, const char *name, const char *const *opts,
+                          const char *const *shorts, int n, int t2) {
+    json_put_head(o, key, name, t2);
     json_put(o, ",\"type\":\"enum\",\"options\":[");
     for (int i = 0; i < n; i++) {
         if (i) json_put(o, ",");
         json_put_string(o, opts[i]);
     }
+    if (shorts) {
+        json_put(o, "],\"short_options\":[");
+        for (int i = 0; i < n; i++) {
+            if (i) json_put(o, ",");
+            json_put_string(o, shorts[i]);
+        }
+    }
     json_put(o, "],\"default\":0},");
+}
+
+/* Program: options are the current category's patch names ("B.12 ARPEJMATR"), which the host shows when
+ * the knob is touched or turned; short_options are the codes its 3-character enum square has room for. */
+static void json_put_patch_enum(json_out_t *o, const synth_engine_t *synth) {
+    char label[48];
+    json_put(o, "{\"key\":\"patch\",\"name\":\"Program\",\"type\":\"enum\",\"options\":[");
+    for (int i = 0; i < 16; i++) {
+        if (i) json_put(o, ",");
+        format_preset_name(patch_preset(synth->genre_category, i), label, sizeof label);
+        json_put_string(o, label);
+    }
+    json_put(o, "],\"short_options\":[");
+    for (int i = 0; i < 16; i++) {
+        if (i) json_put(o, ",");
+        json_put_string(o, PATCH_NAMES[i]);
+    }
+    json_put(o, "],\"default\":0},");
+    g_labels_reported = label_context(synth); /* the host now has these labels */
 }
 
 static const char *build_bank_list_json(void) {
@@ -2273,30 +2490,45 @@ static const char *build_bank_list_json(void) {
     return buf;
 }
 
-static const char *build_chain_params_json(void) {
+static const char *build_chain_params_json(const synth_engine_t *synth) {
     static char buf[16384];
     json_out_t o = { buf, sizeof buf, 0 };
     const char *bank_names[SYX_MAX_BANKS + 1];
     static const char *const VOICE_MODES[2] = { "Single", "Layer" };
+    static const char *const VOICE_MODES_SHORT[2] = { "SNGL", "LAYR" }; /* "Single" folds to SIN/GLE */
     static const char *const TIMBRES[2] = { "Timbre 1", "Timbre 2" };
+    static const char *const TIMBRES_SHORT[2] = { "T1", "T2" };
     char num[160];
+    int t2 = edit_timbre(synth);
     buf[0] = '\0';
     bank_names[0] = "Built-in";
     for (int i = 0; i < g_syx_bank_count; i++) bank_names[i + 1] = g_syx_banks[i].name;
 
     json_put(&o, "[");
-    json_put_enum(&o, "category", "Category", CATEGORY_NAMES, 8);
-    json_put_enum(&o, "patch", "Program", PATCH_NAMES, 16);
-    json_put_enum(&o, "bank_file", "Bank", bank_names, g_syx_bank_count + 1);
-    json_put_enum(&o, "voice_mode", "Voice Mode", VOICE_MODES, 2);
-    json_put_enum(&o, "timbre_edit", "Timbre Edit", TIMBRES, 2);
+    json_put_enum(&o, "category", "Category", CATEGORY_NAMES, NULL, 8, 0);
+    json_put_patch_enum(&o, synth);
+    json_put_enum(&o, "bank_file", "Bank", bank_names, NULL, g_syx_bank_count + 1, 0);
+    json_put_enum(&o, "voice_mode", "Voice Mode", VOICE_MODES, VOICE_MODES_SHORT, 2, 0);
+    json_put_enum(&o, "timbre_edit", "Timbre Edit", TIMBRES, TIMBRES_SHORT, 2, 0);
+    for (size_t i = 0; i < sizeof SELECTORS / sizeof SELECTORS[0]; i++) {
+        const selector_t *s = &SELECTORS[i];
+        json_put_enum(&o, s->key, s->name, s->options, s->shorts, s->count, t2);
+    }
+    json_put_head(&o, "osc2_semi", "Semi", t2);
+    json_put(&o, ",\"type\":\"int\",\"min\":-24,\"max\":24,\"default\":0,\"unit\":\"st\"},");
+    json_put_head(&o, "osc2_tune", "Tune", t2);
+    json_put(&o, ",\"type\":\"int\",\"min\":-50,\"max\":50,\"default\":0,\"unit\":\"ct\"},");
+    json_put_head(&o, "level", "Level", t2);
+    json_put(&o, ",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":0.9},");
+    json_put_head(&o, "noise_level", "Noise", t2);
+    json_put(&o, ",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":0},");
+    json_put(&o, "{\"key\":\"mod_wheel\",\"name\":\"Mod Wheel\",\"short_name\":\"MOD\",\"type\":\"int\",\"min\":0,\"max\":127,\"default\":0},");
     json_put(&o, "{\"key\":\"timbre_balance\",\"name\":\"Timbre Bal\",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":0.5}");
     for (int i = 0; i < NUM_PARAMS; i++) {
-        if (i == PARAM_VOICE_MODE || i == PARAM_TIMBRE_EDIT || i == PARAM_TIMBRE_BALANCE) continue;
-        json_put(&o, ",{\"key\":");
-        json_put_string(&o, PARAM_METAS[i].id);
-        json_put(&o, ",\"name\":");
-        json_put_string(&o, PARAM_METAS[i].name);
+        if (i == PARAM_VOICE_MODE || i == PARAM_TIMBRE_EDIT || i == PARAM_TIMBRE_BALANCE ||
+            find_selector(PARAM_METAS[i].id)) continue;
+        json_put(&o, ",");
+        json_put_head(&o, PARAM_METAS[i].id, PARAM_METAS[i].name, t2);
         snprintf(num, sizeof num, ",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":%.3f}", PARAM_METAS[i].def_val);
         json_put(&o, num);
     }
@@ -2306,51 +2538,67 @@ static const char *build_chain_params_json(void) {
 
 /* UI hierarchy served to the host: GENERATED from src/module.json's ui_hierarchy (keep them identical) */
 static const char MK_UI_HIERARCHY[] =
-    "{\"levels\":{\"root\":{\"name\":\"TinyK\",\"label\":\"TinyK\",\"list_param\":\"preset\",\"count_param\":\"preset_count\",\"name_par"
-    "am\":\"preset_name\",\"params\":[{\"level\":\"bank\",\"label\":\"Bank\"},{\"key\":\"category\",\"label\":\"Category\",\"type\":\"enum\""
-    ",\"options\":[\"Trance\",\"Techno/House\",\"Electronica\",\"DnB/Breaks\",\"Hiphop/Vintage\",\"Retro\",\"SE/Hit\",\"Vocoder\"],\"d"
-    "efault\":0},{\"key\":\"patch\",\"label\":\"Program\",\"type\":\"enum\",\"options\":[\"A1\",\"A2\",\"A3\",\"A4\",\"A5\",\"A6\",\"A7\",\"A8\",\""
-    "B1\",\"B2\",\"B3\",\"B4\",\"B5\",\"B6\",\"B7\",\"B8\"],\"default\":0},{\"key\":\"voice_mode\",\"label\":\"Voice Mode\",\"type\":\"enum\",\"o"
-    "ptions\":[\"Single (4-Voice)\",\"Layer (2-Voice)\"],\"default\":0},{\"key\":\"timbre_edit\",\"label\":\"Timbre Edit\",\"type\":"
-    "\"enum\",\"options\":[\"Timbre 1\",\"Timbre 2\"],\"default\":0},{\"key\":\"timbre_balance\",\"label\":\"Timbre Bal\",\"type\":\"flo"
-    "at\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"wave1\",\"label\":\"Wave 1\",\"type\":\"float\",\"min\":0.0,\"m"
-    "ax\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"pulse_width\",\"label\":\"Pulse Width\",\"type\":\"float\",\"min\":0.0,\"max\":1"
-    ".0,\"default\":0.0,\"step\":0.01},{\"key\":\"wave2\",\"label\":\"Wave 2\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0"
-    ",\"step\":0.01},{\"key\":\"detune\",\"label\":\"Detune\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{"
-    "\"key\":\"sync_ring\",\"label\":\"Sync / Ring\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\""
-    "osc_mix\",\"label\":\"Osc Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"sub_level\",\"l"
-    "abel\":\"Sub Level\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"portamento\",\"label\":\"P"
-    "ortamento\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"cutoff\",\"label\":\"Cutoff\",\"typ"
-    "e\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.7,\"step\":0.01},{\"key\":\"resonance\",\"label\":\"Resonance\",\"type\":\"float"
-    "\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01},{\"key\":\"filter_type\",\"label\":\"Filter Type\",\"type\":\"float\",\"mi"
-    "n\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"keytrack\",\"label\":\"Key Track\",\"type\":\"float\",\"min\":0.0,\"ma"
-    "x\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"env_int\",\"label\":\"Env Intensity\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,"
-    "\"default\":0.5,\"step\":0.01},{\"key\":\"drive\",\"label\":\"Drive\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"st"
-    "ep\":0.01},{\"key\":\"attack1\",\"label\":\"Filter Atk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.01,\"step\":0.01}"
-    ",{\"key\":\"decay1\",\"label\":\"Filter Dcy\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.4,\"step\":0.01},{\"key\":\"su"
-    "stain1\",\"label\":\"Filter Sus\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"release1\",\""
-    "label\":\"Filter Rel\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01},{\"key\":\"attack2\",\"label\":\"Am"
-    "p Atk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.01,\"step\":0.01},{\"key\":\"decay2\",\"label\":\"Amp Dcy\",\"type\""
-    ":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"sustain2\",\"label\":\"Amp Sus\",\"type\":\"float\",\"mi"
-    "n\":0.0,\"max\":1.0,\"default\":0.8,\"step\":0.01},{\"key\":\"release2\",\"label\":\"Amp Rel\",\"type\":\"float\",\"min\":0.0,\"max\""
-    ":1.0,\"default\":0.2,\"step\":0.01},{\"key\":\"chorus_mix\",\"label\":\"Chorus Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"d"
-    "efault\":0.0,\"step\":0.01},{\"key\":\"delay_time\",\"label\":\"Delay Time\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\""
-    ":0.3,\"step\":0.01},{\"key\":\"delay_feedback\",\"label\":\"Delay Fdbk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0."
-    "3,\"step\":0.01},{\"key\":\"delay_mix\",\"label\":\"Delay Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":"
-    "0.01}],\"knobs\":[\"category\",\"patch\",\"voice_mode\",\"timbre_edit\",\"timbre_balance\",\"wave1\",\"pulse_width\",\"wave2\",\""
-    "detune\",\"sync_ring\",\"osc_mix\",\"sub_level\",\"portamento\",\"cutoff\",\"resonance\",\"filter_type\",\"keytrack\",\"env_int\""
-    ",\"drive\",\"attack1\",\"decay1\",\"sustain1\",\"release1\",\"attack2\",\"decay2\",\"sustain2\",\"release2\",\"chorus_mix\",\"delay"
-    "_time\",\"delay_feedback\",\"delay_mix\"]},\"bank\":{\"name\":\"Bank\",\"label\":\"Bank\",\"params\":[{\"key\":\"bank_file\",\"label"
-    "\":\"Bank\",\"type\":\"enum\",\"options\":[\"Built-in\"],\"default\":0},{\"level\":\"bank_list\",\"label\":\"Browse banks\"}],\"knob"
-    "s\":[\"bank_file\"]},\"bank_list\":{\"name\":\"Banks\",\"label\":\"Select Bank\",\"items_param\":\"bank_list\",\"select_param\":\""
-    "bank_file\",\"navigate_to\":\"root\"}}}";
+    "{\"levels\":{\"root\":{\"name\":\"TinyK\",\"label\":\"TinyK\",\"list_param\":\"preset\",\"count_param\":\"preset_count\",\"name_param\":\"prese"
+    "t_name\",\"params\":[{\"level\":\"perf\",\"label\":\"Perf\"},{\"level\":\"osc\",\"label\":\"Osc/Timbre\"},{\"level\":\"env\",\"label\":\"Envelopes"
+    "\"},{\"level\":\"fx\",\"label\":\"Effects\"},{\"level\":\"mix\",\"label\":\"Mix/Filter\"},{\"level\":\"bank\",\"label\":\"Bank\"}],\"knobs\":[]},\"p"
+    "erf\":{\"name\":\"Perf [T1]\",\"label\":\"Perf\",\"params\":[{\"key\":\"category\",\"label\":\"Category\",\"type\":\"enum\",\"options\":[\"Trance\""
+    ",\"Techno/House\",\"Electronica\",\"DnB/Breaks\",\"Hiphop/Vintage\",\"Retro\",\"SE/Hit\",\"Vocoder\"],\"default\":0},{\"key\":\"patch\",\"lab"
+    "el\":\"Program\",\"short_name\":\"PROG\",\"type\":\"enum\",\"options\":[\"A1\",\"A2\",\"A3\",\"A4\",\"A5\",\"A6\",\"A7\",\"A8\",\"B1\",\"B2\",\"B3\",\"B4\",\""
+    "B5\",\"B6\",\"B7\",\"B8\"],\"default\":0},{\"key\":\"cutoff\",\"label\":\"Cutoff\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.7,\"step"
+    "\":0.01},{\"key\":\"resonance\",\"label\":\"Resonance\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01},{\"key\":\"att"
+    "ack2\",\"label\":\"Amp Atk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.01,\"step\":0.01},{\"key\":\"release2\",\"label\":\"Amp Re"
+    "l\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01},{\"key\":\"drive\",\"label\":\"Drive\",\"type\":\"float\",\"min\":0.0"
+    ",\"max\":1.0,\"default\":0.2,\"step\":0.01},{\"key\":\"mod_wheel\",\"label\":\"Mod Wheel\",\"short_name\":\"MOD\",\"type\":\"int\",\"min\":0,\"ma"
+    "x\":127,\"default\":0}],\"knobs\":[\"category\",\"patch\",\"cutoff\",\"resonance\",\"attack2\",\"release2\",\"drive\",\"mod_wheel\"]},\"osc\":{"
+    "\"name\":\"Osc/Timbre [T1]\",\"label\":\"Osc/Timbre\",\"params\":[{\"key\":\"wave1\",\"label\":\"Wave 1\",\"type\":\"enum\",\"options\":[\"Saw\",\""
+    "Square\",\"Triangle\",\"Sine\",\"Vox\",\"DWGS\",\"Noise\"],\"short_options\":[\"SAW\",\"SQR\",\"TRI\",\"SIN\",\"VOX\",\"DWG\",\"NZ\"],\"default\":0},"
+    "{\"key\":\"pulse_width\",\"label\":\"Pulse Width\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"wave2\","
+    "\"label\":\"Wave 2\",\"type\":\"enum\",\"options\":[\"Saw\",\"Square\",\"Triangle\"],\"short_options\":[\"SAW\",\"SQR\",\"TRI\"],\"default\":0},{\""
+    "key\":\"osc2_semi\",\"label\":\"Semi\",\"type\":\"int\",\"min\":-24,\"max\":24,\"default\":0,\"unit\":\"st\"},{\"key\":\"osc2_tune\",\"label\":\"Tun"
+    "e\",\"type\":\"int\",\"min\":-50,\"max\":50,\"default\":0,\"unit\":\"ct\"},{\"key\":\"voice_mode\",\"label\":\"Voice Mode\",\"type\":\"enum\",\"opti"
+    "ons\":[\"Single (4-Voice)\",\"Layer (2-Voice)\"],\"short_options\":[\"SNGL\",\"LAYR\"],\"default\":0},{\"key\":\"timbre_edit\",\"label\":\"T"
+    "imbre Edit\",\"type\":\"enum\",\"options\":[\"Timbre 1\",\"Timbre 2\"],\"short_options\":[\"T1\",\"T2\"],\"default\":0},{\"key\":\"timbre_bala"
+    "nce\",\"label\":\"Timbre Bal\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01}],\"knobs\":[\"wave1\",\"pulse_width\","
+    "\"wave2\",\"osc2_semi\",\"osc2_tune\",\"voice_mode\",\"timbre_edit\",\"timbre_balance\"]},\"env\":{\"name\":\"Envelopes [T1]\",\"label\":\"En"
+    "velopes\",\"params\":[{\"key\":\"attack1\",\"label\":\"Filter Atk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.01,\"step\":0.01},"
+    "{\"key\":\"decay1\",\"label\":\"Filter Dcy\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.4,\"step\":0.01},{\"key\":\"sustain1\",\"la"
+    "bel\":\"Filter Sus\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"release1\",\"label\":\"Filter Rel\",\""
+    "type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01},{\"key\":\"decay2\",\"label\":\"Amp Dcy\",\"type\":\"float\",\"min\":0.0,"
+    "\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"sustain2\",\"label\":\"Amp Sus\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0."
+    "8,\"step\":0.01},{\"key\":\"keytrack\",\"label\":\"Key Track\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key"
+    "\":\"env_int\",\"label\":\"EG Int\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01}],\"knobs\":[\"attack1\",\"decay1\","
+    "\"sustain1\",\"release1\",\"decay2\",\"sustain2\",\"keytrack\",\"env_int\"]},\"fx\":{\"name\":\"Effects\",\"label\":\"Effects\",\"params\":[{\"ke"
+    "y\":\"chorus_mix\",\"label\":\"Chorus Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"delay_time\",\""
+    "label\":\"Delay Time\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01},{\"key\":\"delay_feedback\",\"label\":\"Delay"
+    " Fdbk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01},{\"key\":\"delay_mix\",\"label\":\"Delay Mix\",\"type\":\"floa"
+    "t\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"lfo1_rate\",\"label\":\"LFO1 Rate\",\"type\":\"float\",\"min\":0.0,\"max\":"
+    "1.0,\"default\":0.3,\"step\":0.01,\"short_name\":\"LFO1\"},{\"key\":\"lfo2_rate\",\"label\":\"LFO2 Rate\",\"type\":\"float\",\"min\":0.0,\"max\""
+    ":1.0,\"default\":0.3,\"step\":0.01,\"short_name\":\"LFO2\"},{\"key\":\"master_vol\",\"label\":\"Master Vol\",\"type\":\"float\",\"min\":0.0,\"m"
+    "ax\":1.0,\"default\":0.8,\"step\":0.01,\"short_name\":\"VOL\"},{\"key\":\"pan\",\"label\":\"Pan\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"def"
+    "ault\":0.5,\"step\":0.01}],\"knobs\":[\"chorus_mix\",\"delay_time\",\"delay_feedback\",\"delay_mix\",\"lfo1_rate\",\"lfo2_rate\",\"master_"
+    "vol\",\"pan\"]},\"mix\":{\"name\":\"Mix/Filter [T1]\",\"label\":\"Mix/Filter\",\"params\":[{\"key\":\"osc_mix\",\"label\":\"Osc Mix\",\"type\":\"f"
+    "loat\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"noise_level\",\"label\":\"Noise\",\"type\":\"float\",\"min\":0.0,\"max\""
+    ":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"sync_ring\",\"label\":\"Sync / Ring\",\"type\":\"enum\",\"options\":[\"Off\",\"Ring\",\"Sync\",\"R"
+    "ing Sync\"],\"short_options\":[\"OFF\",\"RING\",\"SYNC\",\"R.SNC\"],\"default\":0},{\"key\":\"filter_type\",\"label\":\"Filter Type\",\"type\":"
+    "\"enum\",\"options\":[\"LPF24\",\"LPF12\",\"BPF12\",\"HPF12\"],\"short_options\":[\"LPF24\",\"LPF12\",\"BPF12\",\"HPF12\"],\"default\":0},{\"key\""
+    ":\"portamento\",\"label\":\"Portamento\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"level\",\"label\":"
+    "\"Level\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.9,\"step\":0.01}],\"knobs\":[\"osc_mix\",\"noise_level\",\"sync_ring\",\"fil"
+    "ter_type\",\"portamento\",\"level\"]},\"bank\":{\"name\":\"Bank\",\"label\":\"Bank\",\"params\":[{\"key\":\"bank_file\",\"label\":\"Bank\",\"type\""
+    ":\"enum\",\"options\":[\"Built-in\"],\"default\":0},{\"level\":\"bank_list\",\"label\":\"Browse banks\"}],\"knobs\":[\"bank_file\"]},\"bank_l"
+    "ist\":{\"name\":\"Banks\",\"label\":\"Select Bank\",\"items_param\":\"bank_list\",\"select_param\":\"bank_file\",\"navigate_to\":\"root\"}}}";
 
 static int v2_get_param(void *instance, const char *key, char *buf, int buf_len) {
     synth_engine_t *synth = (synth_engine_t*)instance;
     if (!synth || !key || !buf || buf_len <= 0) return -1;
 
     if (strcmp(key, "ui_hierarchy") == 0) {
-        return snprintf(buf, buf_len, "%s", MK_UI_HIERARCHY);
+        /* The per-timbre pages carry the edited timbre in their name ("Perf [T1]"): "[T2]" while Timbre 2 is
+         * edited. A rename keeps the page on screen: the host re-anchors by level. */
+        int n = snprintf(buf, buf_len, "%s", MK_UI_HIERARCHY);
+        if (edit_timbre(synth) == 1 && n < buf_len) {
+            for (char *p = strstr(buf, "[T1]"); p; p = strstr(p + 4, "[T1]")) p[2] = '2';
+        }
+        return n;
     }
 
     if (strcmp(key, "name") == 0) {
@@ -2421,7 +2669,14 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     }
 
     if (strcmp(key, "chain_params") == 0) {
-        return snprintf(buf, buf_len, "%s", build_chain_params_json());
+        return snprintf(buf, buf_len, "%s", build_chain_params_json(synth));
+    }
+
+    if (strcmp(key, "is_loading") == 0) { /* "1" once per unreported Program label change, see g_labels_reported */
+        int ctx = label_context(synth);
+        int changed = (ctx != g_labels_reported);
+        g_labels_reported = ctx;
+        return snprintf(buf, buf_len, "%s", changed ? "1" : "0");
     }
 
     if (strcmp(key, "bank_file_name") == 0) {
@@ -2461,6 +2716,27 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
 
     if (strcmp(key, "octave_transpose") == 0) {
         return snprintf(buf, buf_len, "%d", synth->octave_transpose);
+    }
+
+    const selector_t *sel = find_selector(key);
+    if (sel) { /* option index */
+        int n = sel->count;
+        int mode = (int)lroundf(synth_get_param(synth, key) * (float)(n - 1));
+        if (mode < 0) mode = 0;
+        if (mode > n - 1) mode = n - 1;
+        return snprintf(buf, buf_len, "%d", sel->to_engine ? sel->to_engine[mode] : mode);
+    }
+
+    if (strcmp(key, "osc2_semi") == 0 || strcmp(key, "osc2_tune") == 0) {
+        return snprintf(buf, buf_len, "%d", (int)synth_get_param(synth, key));
+    }
+
+    if (strcmp(key, "mod_wheel") == 0) {
+        return snprintf(buf, buf_len, "%d", (int)lroundf(synth_get_param(synth, key)));
+    }
+
+    if (strcmp(key, "level") == 0 || strcmp(key, "noise_level") == 0) {
+        return snprintf(buf, buf_len, "%.4f", synth_get_param(synth, key));
     }
 
     /* Check parameter values */

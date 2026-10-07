@@ -25,3 +25,6 @@ tools/reference/*.wav
 
 # rendered demos (tools/render_demo_sweeps.py)
 output/
+
+# local listening renders
+tests/output/

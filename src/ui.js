@@ -2,11 +2,15 @@
  * microKORG VA (schwung-mk-va) Move Synth Module UI
  *
  * Handles 128x64 OLED display rendering and 8 hardware encoders
- * across 4 parameter pages:
- *   Page 1: OSC (Wave1, PulseWidth, Wave2, Detune, Sync/Ring, Mix, Sub, Portamento)
- *   Page 2: FILTER (Cutoff, Res, Type, KeyTrack, EnvInt, Drive, ModInt, VelSens)
- *   Page 3: ENVs (Attack1, Decay1, Sustain1, Release1, Attack2, Decay2, Sustain2, Release2)
- *   Page 4: FX/MOD (LFO1 Rate, LFO2 Rate, Chorus Mix, Delay Time, Delay Feedback, Delay Mix, Master Vol, Pan)
+ * across the parameter pages (the same pages as the module.json ui_hierarchy):
+ *   PERF:         Category, Program, Cutoff, Res, Amp Attack, Amp Release, Drive, Mod Wheel
+ *   OSC / TIMBRE: Wave1, Pulse Width, Wave2, Semi, Tune, Voice Mode, Timbre Edit, Timbre Balance
+ *   ENVELOPES:    Filter Atk/Dcy/Sus/Rel, Amp Dcy/Sus, Key Track, EG Int
+ *   EFFECTS:      Chorus Mix, Delay Time/Feedback/Mix, LFO1/LFO2 Rate, Master Vol, Pan
+ *   MIX / FILTER: Osc Mix, Noise, Sync/Ring, Filter Type, Portamento, Level
+ *   BANK:         the active bank file
+ * Pages marked `timbre` edit the timbre selected by Timbre Edit (in Layer mode): their header shows
+ * [T1] or [T2], and with Timbre 2 their per-timbre labels read "T2.CUT" etc.
  */
 
 // Cutoff knob -> Hz, the engine's measured mapping (cutoff_base_hz * 2^(knob * cutoff_octaves))
@@ -14,21 +18,87 @@ const cutoffHz = (v) => {
     const hz = 37.46 * Math.pow(2, v * 10.61);
     return hz >= 1000 ? `${(hz / 1000).toFixed(1)}k` : `${Math.round(hz)}Hz`;
 };
+const pct = (v) => `${Math.round(v * 100)}%`;
+const bipolar = (v) => `${Math.round((v - 0.5) * 200)}%`;
+const signed = (unit) => (v) => `${v > 0 ? "+" : ""}${Math.round(v)}${unit}`;
 
+// `index`: an enum the engine reports and takes as an index; `int`: an integer range; `timbre`: per-timbre
 export const PAGES = [
     {
-        id: "preset",
-        name: "0: PRESET",
+        id: "perf",
+        name: "PERF",
+        timbre: true,
         params: [
             // Category = matrix row (genre); Program = the row's 16 patches, A1..A8 then B1..B8
-            { key: "category",       label: "Category", short: "Cat",  values: ["Trance", "Techno", "Electr", "DnB", "Hiphop", "Retro", "SE/Hit", "Vocod"] },
-            { key: "patch",          label: "Program",  short: "Prog", values: ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"] },
+            { key: "category",       label: "Category", short: "Cat",  index: true, values: ["Trance", "Techno", "Electr", "DnB", "Hiphop", "Retro", "SE/Hit", "Vocod"] },
+            // Program shows the full patch code and name ("B.12 ARPEJMATR"), see formatValue
+            { key: "patch",          label: "Program",  short: "Prog", index: true, values: ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"], presetName: true },
+            { key: "cutoff",         label: "Cutoff",  short: "Cut",  t2: "T2.CUT", format: cutoffHz },
+            { key: "resonance",      label: "Res",     short: "Res",  t2: "T2.RES", format: pct },
+            { key: "attack2",        label: "AmpAtk",  short: "Atk",  t2: "T2.ATK", format: pct },
+            { key: "release2",       label: "AmpRel",  short: "Rel",  t2: "T2.REL", format: pct },
+            { key: "drive",          label: "Drive",   short: "Drive", t2: "T2.DRV", format: pct },
+            // stands in for the mod wheel the Move lacks: virtual patch source 7, same as CC1
+            { key: "mod_wheel",      label: "ModWhl",  short: "MOD",   int: [0, 127], format: (v) => `${Math.round(v)}` }
+        ]
+    },
+    {
+        id: "osc",
+        name: "OSC / TIMBRE",
+        timbre: true,
+        params: [
+            { key: "wave1",          label: "Wave1",   short: "Wav1", t2: "T2.WV1", index: true, values: ["SAW", "SQR", "TRI", "SIN", "VOX", "DWG", "NZ"] },
+            { key: "pulse_width",    label: "Width",   short: "PulW", t2: "T2.PW",  format: (v) => `${Math.round(50 + 45 * v)}%` },
+            { key: "wave2",          label: "Wave2",   short: "Wav2", t2: "T2.WV2", index: true, values: ["SAW", "SQR", "TRI"] },
+            { key: "osc2_semi",      label: "Semi",    short: "Semi", t2: "T2.SEMI", int: [-24, 24], format: signed("st") },
+            { key: "osc2_tune",      label: "Tune",    short: "Tune", t2: "T2.TUNE", int: [-50, 50], format: signed("ct") },
+            // 2-position voice/timbre switches
             { key: "voice_mode",     label: "Mode",    short: "Mode", values: ["Single", "Layer"] },
             { key: "timbre_edit",    label: "Edit",    short: "Edit", values: ["Timb 1", "Timb 2"] },
-            { key: "timbre_balance", label: "Balance", short: "Bal",  format: (v) => `${Math.round((1 - v) * 100)}:${Math.round(v * 100)}` },
-            { key: "cutoff",         label: "Cutoff",  short: "Cut",  format: cutoffHz },
-            { key: "resonance",      label: "Res",     short: "Res",  format: (v) => `${Math.round(v * 100)}%` },
-            { key: "env_int",        label: "EnvIn",   short: "EnvIn",format: (v) => `${Math.round((v - 0.5) * 200)}%` }
+            { key: "timbre_balance", label: "Balance", short: "Bal",  format: (v) => `${Math.round((1 - v) * 100)}:${Math.round(v * 100)}` }
+        ]
+    },
+    {
+        id: "env",
+        name: "ENVELOPES",
+        timbre: true,
+        params: [
+            { key: "attack1",     label: "FltAtk", short: "FAtk", t2: "T2.FATK", format: pct },
+            { key: "decay1",      label: "FltDcy", short: "FDcy", t2: "T2.FDCY", format: pct },
+            { key: "sustain1",    label: "FltSus", short: "FSus", t2: "T2.FSU",  format: pct },
+            { key: "release1",    label: "FltRel", short: "FRel", t2: "T2.FRL",  format: pct },
+            { key: "decay2",      label: "AmpDcy", short: "ADcy", t2: "T2.ADCY", format: pct },
+            { key: "sustain2",    label: "AmpSus", short: "ASus", t2: "T2.ASU",  format: pct },
+            { key: "keytrack",    label: "KeyTr",  short: "KeyTr", t2: "T2.KTRK", format: bipolar },
+            { key: "env_int",     label: "EG Int", short: "EGInt", t2: "T2.EGIN", format: bipolar }
+        ]
+    },
+    {
+        id: "fx",
+        name: "EFFECTS",
+        params: [
+            { key: "chorus_mix",  label: "Chor",  short: "Chor",  format: pct },
+            { key: "delay_time",  label: "Time",  short: "Time",  format: (v) => `${Math.round(v * 1000)}ms` },
+            { key: "delay_feedback",label: "Fdbk",short: "Fdbk",  format: pct },
+            { key: "delay_mix",   label: "D.Mix", short: "D.Mix", format: pct },
+            { key: "lfo1_rate",   label: "LFO1",  short: "LFO1",  format: (v) => `${(0.05 * Math.pow(600, v)).toFixed(1)}Hz` },
+            { key: "lfo2_rate",   label: "LFO2",  short: "LFO2",  format: (v) => `${(0.05 * Math.pow(600, v)).toFixed(1)}Hz` },
+            { key: "master_vol",  label: "Vol",   short: "Vol",   format: pct },
+            { key: "pan",         label: "Pan",   short: "Pan",   format: (v) => v < 0.48 ? `L${Math.round((0.5 - v) * 200)}` : (v > 0.52 ? `R${Math.round((v - 0.5) * 200)}` : "C") }
+        ]
+    },
+    {
+        id: "mix",
+        name: "MIX / FILTER",
+        timbre: true,
+        params: [
+            { key: "osc_mix",     label: "Mix",   short: "Mix",   t2: "T2.MIX",  format: pct },
+            { key: "noise_level", label: "Noise", short: "Noise", t2: "T2.NOIS", format: pct },
+            // option indices, in the hardware's order (the engine remaps Sync / Ring to its own)
+            { key: "sync_ring",   label: "SyncR", short: "SyncR", t2: "T2.SYNC", index: true, values: ["OFF", "RING", "SYNC", "R.SNC"] },
+            { key: "filter_type", label: "Type",  short: "Type",  t2: "T2.FTYP", index: true, values: ["LPF24", "LPF12", "BPF12", "HPF12"] },
+            { key: "portamento",  label: "Porta", short: "Porta", t2: "T2.PORT", format: pct },
+            { key: "level",       label: "Level", short: "Level", t2: "T2.LVL",  format: pct }
         ]
     },
     {
@@ -37,62 +107,6 @@ export const PAGES = [
         params: [
             // 0 = built-in, 1..N = .syx dumps in the module's banks/ folder; shows the file name
             { key: "bank_file",      label: "Bank",    short: "Bank", bank: true }
-        ]
-    },
-    {
-        id: "osc",
-        name: "1: OSC",
-        params: [
-            { key: "wave1",       label: "Wave1", short: "Wave1", values: ["Saw", "Sqr", "Tri", "Sin", "Vox", "DWGS", "Noise"] },
-            { key: "pulse_width", label: "Width", short: "Width", format: (v) => `${Math.round(50 + 45 * v)}%` },
-            { key: "wave2",       label: "Wave2", short: "Wave2", values: ["Saw", "Sqr", "Tri"] },
-            { key: "detune",      label: "Detun", short: "Detun", format: (v) => `${Math.round((v - 0.5) * 48)}st` },
-            { key: "sync_ring",   label: "SyncR", short: "SyncR", values: ["Off", "Sync", "Ring", "Both"] },
-            { key: "osc_mix",     label: "Mix",   short: "Mix",   format: (v) => `${Math.round(v * 100)}%` },
-            { key: "sub_level",   label: "Sub",   short: "Sub",   format: (v) => `${Math.round(v * 100)}%` },
-            { key: "portamento",  label: "Porta", short: "Porta", format: (v) => `${Math.round(v * 100)}%` }
-        ]
-    },
-    {
-        id: "filter",
-        name: "2: FILTER",
-        params: [
-            { key: "cutoff",      label: "Cut",   short: "Cut",   format: cutoffHz },
-            { key: "resonance",   label: "Res",   short: "Res",   format: (v) => `${Math.round(v * 100)}%` },
-            { key: "filter_type", label: "Type",  short: "Type",  values: ["24LP", "12LP", "12BP", "12HP"] },
-            { key: "keytrack",    label: "KeyTr", short: "KeyTr", format: (v) => `${Math.round((v - 0.5) * 200)}%` },
-            { key: "env_int",     label: "EnvIn", short: "EnvIn", format: (v) => `${Math.round((v - 0.5) * 200)}%` },
-            { key: "drive",       label: "Drive", short: "Drive", format: (v) => `${Math.round(v * 100)}%` },
-            { key: "mod_int",     label: "ModIn", short: "ModIn", format: (v) => `${Math.round(v * 100)}%` },
-            { key: "vel_sens",    label: "VelSn", short: "VelSn", format: (v) => `${Math.round(v * 100)}%` }
-        ]
-    },
-    {
-        id: "envs",
-        name: "3: ENVs",
-        params: [
-            { key: "attack1",     label: "Atk1",  short: "Atk1",  format: (v) => `${Math.round(v * 100)}%` },
-            { key: "decay1",      label: "Dcy1",  short: "Dcy1",  format: (v) => `${Math.round(v * 100)}%` },
-            { key: "sustain1",    label: "Sus1",  short: "Sus1",  format: (v) => `${Math.round(v * 100)}%` },
-            { key: "release1",    label: "Rel1",  short: "Rel1",  format: (v) => `${Math.round(v * 100)}%` },
-            { key: "attack2",     label: "Atk2",  short: "Atk2",  format: (v) => `${Math.round(v * 100)}%` },
-            { key: "decay2",      label: "Dcy2",  short: "Dcy2",  format: (v) => `${Math.round(v * 100)}%` },
-            { key: "sustain2",    label: "Sus2",  short: "Sus2",  format: (v) => `${Math.round(v * 100)}%` },
-            { key: "release2",    label: "Rel2",  short: "Rel2",  format: (v) => `${Math.round(v * 100)}%` }
-        ]
-    },
-    {
-        id: "fx_mod",
-        name: "4: FX/MOD",
-        params: [
-            { key: "lfo1_rate",   label: "LFO1",  short: "LFO1",  format: (v) => `${(0.05 * Math.pow(600, v)).toFixed(1)}Hz` },
-            { key: "lfo2_rate",   label: "LFO2",  short: "LFO2",  format: (v) => `${(0.05 * Math.pow(600, v)).toFixed(1)}Hz` },
-            { key: "chorus_mix",  label: "Chor",  short: "Chor",  format: (v) => `${Math.round(v * 100)}%` },
-            { key: "delay_time",  label: "Time",  short: "Time",  format: (v) => `${Math.round(v * 1000)}ms` },
-            { key: "delay_feedback",label: "Fdbk",short: "Fdbk",  format: (v) => `${Math.round(v * 100)}%` },
-            { key: "delay_mix",   label: "D.Mix", short: "D.Mix", format: (v) => `${Math.round(v * 100)}%` },
-            { key: "master_vol",  label: "Vol",   short: "Vol",   format: (v) => `${Math.round(v * 100)}%` },
-            { key: "pan",         label: "Pan",   short: "Pan",   format: (v) => v < 0.48 ? `L${Math.round((0.5 - v) * 200)}` : (v > 0.52 ? `R${Math.round((v - 0.5) * 200)}` : "C") }
         ]
     }
 ];
@@ -166,10 +180,16 @@ export class MicroKorgUI {
             this.setParam("bank_file", Math.max(0, Math.min(count - 1, cur + (delta > 0 ? 1 : -1))));
             return;
         }
-        if (paramDef.key === "category" || paramDef.key === "patch") {
+        if (paramDef.index) {
             const last = paramDef.values.length - 1;
             const cur = parseInt(this.getParam(paramDef.key)) || 0;
             this.setParam(paramDef.key, Math.max(0, Math.min(last, cur + (delta > 0 ? 1 : -1))));
+            return;
+        }
+        if (paramDef.int) {
+            const [lo, hi] = paramDef.int;
+            const cur = Math.round(this.getParam(paramDef.key)) || 0;
+            this.setParam(paramDef.key, Math.max(lo, Math.min(hi, cur + (delta > 0 ? 1 : -1))));
             return;
         }
         if (paramDef.key === "voice_mode") {
@@ -249,11 +269,14 @@ export class MicroKorgUI {
             const name = this.host && this.host.getParam ? this.host.getParam("bank_file_name") : null;
             return name ? String(name) : "Built-in";
         }
+        if (paramDef.presetName) {
+            return this.getPresetName();
+        }
         if (paramDef.values) {
             const num = parseFloat(val);
             let idx = 0;
             if (!isNaN(num)) {
-                if (paramDef.key === "category" || paramDef.key === "patch") {
+                if (paramDef.index) {
                     idx = Math.round(num);
                 } else if (paramDef.key === "voice_mode" || paramDef.key === "timbre_edit") {
                     idx = (num >= 0.5) ? 1 : 0;
@@ -279,6 +302,12 @@ export class MicroKorgUI {
         return `${Math.round(val * 100)}%`;
     }
 
+    // The timbre the per-timbre controls edit, as the engine routes them: 2 only for Timbre 2 in Layer mode
+    editTimbre() {
+        const layer = parseFloat(this.getParam("voice_mode")) >= 0.5;
+        return (layer && parseInt(this.getParam("timbre_edit")) === 1) ? 2 : 1;
+    }
+
     // Render OLED Display (128x64 pixels)
     drawUI(display) {
         if (!display) return;
@@ -289,11 +318,13 @@ export class MicroKorgUI {
         }
 
         const page = PAGES[this.currentPageIndex];
+        const timbre = page.timbre ? this.editTimbre() : 0;
 
         // 1. Header Bar (y: 0 to 12)
-        // Module title, Active Page, and Current Preset
+        // Active page with its timbre badge ([T1] / [T2] on per-timbre pages), and the current preset
         const currentName = this.getPresetName();
-        const headerText = `${page.name}  [${currentName}]`;
+        const badge = timbre ? ` [T${timbre}]` : "";
+        const headerText = `${page.name}${badge}  [${currentName}]`;
         if (typeof display.print === "function") {
             display.print(2, 2, headerText);
         }
@@ -319,9 +350,9 @@ export class MicroKorgUI {
             const x = col * colWidth;
             const y = 16 + row * 24;
 
-            // Parameter short label (e.g. "Wave1", "Cut", "Atk1")
+            // Parameter short label (e.g. "Wav1", "Cut"; "T2.CUT" while Timbre 2 is edited)
             if (typeof display.print === "function") {
-                display.print(x + 2, y, paramDef.short);
+                display.print(x + 2, y, (timbre === 2 && paramDef.t2) ? paramDef.t2 : paramDef.short);
             }
 
             // Value label or mini bar
@@ -333,7 +364,8 @@ export class MicroKorgUI {
             // Mini bar indicator (selector controls are drawn as their position in the range)
             if (typeof display.fill_rect === "function") {
                 let frac = val;
-                if (paramDef.key === "category" || paramDef.key === "patch") frac = val / (paramDef.values.length - 1);
+                if (paramDef.index) frac = val / (paramDef.values.length - 1);
+                else if (paramDef.int) frac = (val - paramDef.int[0]) / (paramDef.int[1] - paramDef.int[0]);
                 else if (paramDef.bank) {
                     const count = parseInt(this.host && this.host.getParam ? this.host.getParam("bank_file_count") : 1) || 1;
                     frac = count > 1 ? val / (count - 1) : 0;

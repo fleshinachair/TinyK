@@ -92,6 +92,9 @@ static void test_layer(void) {
     float balances[3] = {0.0f, 0.5f, 1.0f};
     for (int k = 0; k < 3; k++) {
         fresh(0);
+        /* the patch routes off: A.11's Timbre 1 has LFO1 -> pan, which would swing a 1 s render either way */
+        for (int t = 0; t < 2; t++)
+            for (int p = 0; p < 4; p++) S.timbre_extra[t].patch_int[p] = 0.0f;
         synth_set_param(&S, "timbre_balance", balances[k]);
         synth_note_on(&S, 60, 100);
         int frames;
@@ -215,10 +218,95 @@ static void test_envelopes(void) {
     check(rel[1] < rel[2] && rel[2] < rel[3] && rel[3] < rel[4], "release time rises monotonically across the knob");
 }
 
+/* High-frequency share of a render (rms of the first difference over rms): a brightness proxy */
+static double brightness(const int16_t *b, int frames) {
+    double d = 0.0, x = 0.0;
+    for (int i = 1; i < frames; i++) {
+        double s = 0.5 * (b[2 * i] + b[2 * i + 1]), p = 0.5 * (b[2 * i - 2] + b[2 * i - 1]);
+        d += (s - p) * (s - p);
+        x += s * s;
+    }
+    return sqrt(d / (x + 1e-12));
+}
+
+/* A single-timbre saw through an open-ish LPF12 with one patch slot routed src -> dst at intensity `in`
+ * (hardware -63..+63); the other slots off and no LFO-driven routes, so renders are exactly repeatable. */
+static void patch_voice(int src, int dst, int in) {
+    open_voice();
+    synth_set_param(&S, "cutoff", 0.55f);
+    synth_set_param(&S, "filter_type", 1.0f / 3.0f);
+    for (int p = 0; p < 4; p++) S.timbre_extra[0].patch_int[p] = 0.0f;
+    S.timbre_extra[0].patch_src[0] = src;
+    S.timbre_extra[0].patch_dst[0] = dst;
+    S.timbre_extra[0].patch_int[0] = (float)in / 63.0f;
+}
+
+static int16_t *play(double seconds, int *frames) {
+    synth_note_on(&S, 48, 100);
+    return render(seconds, frames);
+}
+
+static void midi(uint8_t a, uint8_t b, uint8_t c) {
+    uint8_t msg[3] = { a, b, c };
+    move_plugin_on_midi(&S, msg, 3, 0);
+}
+
+static void test_patch_sources(void) {
+    printf("\nVirtual patch sources (6 = Pitch Bend, 7 = Mod Wheel / CC1) and the pan curve:\n");
+    int n;
+
+    patch_voice(PATCH_SRC_MOD_WHEEL, PATCH_DST_CUTOFF, -35);
+    midi(0xB0, 2, 127);
+    check(S.modwheel_src == 0.0f && S.bend_src == 0.0f, "CC2 drives no patch source");
+    midi(0xB0, 1, 127);
+    check(fabsf(S.modwheel_src - 1.0f) < 1e-6f, "CC1 (mod wheel) drives source 7, up to +1");
+    midi(0xB0, 1, 0);
+    check(S.modwheel_src == 0.0f, "mod wheel at 0 -> source 7 is 0");
+
+    /* The Move has no wheel: the Mod Wheel knob feeds the same source; whichever moved last wins */
+    synth_set_param(&S, "mod_wheel", 127.0f);
+    check(fabsf(S.modwheel_src - 1.0f) < 1e-6f, "Mod Wheel knob at 127 -> source 7 = +1 (no CC1 sent)");
+    midi(0xB0, 1, 32);
+    check(fabsf(synth_get_param(&S, "mod_wheel") - 32.0f) < 0.01f, "an external CC1 takes over, and the knob reads it back");
+    synth_set_param(&S, "mod_wheel", 0.0f);
+    check(S.modwheel_src == 0.0f, "Mod Wheel knob back to 0 -> source 7 is 0");
+
+    /* Mod wheel at rest adds exactly nothing: same samples as the slot switched off */
+    patch_voice(PATCH_SRC_MOD_WHEEL, PATCH_DST_CUTOFF, -35);
+    int16_t *rest = play(0.4, &n);
+    patch_voice(PATCH_SRC_MOD_WHEEL, PATCH_DST_CUTOFF, 0);
+    int16_t *off = play(0.4, &n);
+    check(memcmp(rest, off, (size_t)n * 2 * sizeof(int16_t)) == 0, "mod wheel at 0: modulation delta is exactly 0 (render unchanged)");
+    patch_voice(PATCH_SRC_MOD_WHEEL, PATCH_DST_CUTOFF, -35);
+    midi(0xB0, 1, 127);
+    int16_t *wheel = play(0.4, &n);
+    check(brightness(wheel, n) < 0.8 * brightness(rest, n), "mod wheel up with -35 -> cutoff closes (B.11 patch 2)");
+    free(rest); free(off); free(wheel);
+
+    patch_voice(PATCH_SRC_PITCH_BEND, PATCH_DST_CUTOFF, 40);
+    midi(0xE0, 0x7F, 0x7F);
+    check(S.bend_src > 0.99f, "pitch bend up -> source 6 = +1");
+    midi(0xE0, 0x00, 0x00);
+    check(S.bend_src < -0.99f, "pitch bend down -> source 6 = -1 (bipolar)");
+    midi(0xE0, 0x00, 0x40);
+    check(S.bend_src == 0.0f, "pitch bend centred -> source 6 = 0");
+
+    /* Pan: a held source at +1 shows the depth the curve gives a +20 route */
+    patch_voice(PATCH_SRC_MOD_WHEEL, PATCH_DST_PAN, 20);
+    midi(0xB0, 1, 127);
+    int16_t *pan = play(0.4, &n);
+    double db = 10.0 * log10(energy(pan, n, 1) / (energy(pan, n, 0) + 1e-12));
+    char what[96];
+    snprintf(what, sizeof what, "pan +20 at full source swings %.1f dB (6..9 dB wanted)", db);
+    check(db > 6.0 && db < 9.0, what);
+    free(pan);
+}
+
 int main(void) {
     test_layer();
     test_edit_routing();
     test_envelopes();
+    test_patch_sources();
     printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "ALL PASSED", failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;
 }

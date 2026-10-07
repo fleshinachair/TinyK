@@ -187,7 +187,7 @@ typedef struct {
 
 /* Virtual patch sources and destinations (microKORG order) */
 typedef enum { PATCH_SRC_EG1 = 0, PATCH_SRC_EG2, PATCH_SRC_LFO1, PATCH_SRC_LFO2, PATCH_SRC_VELOCITY,
-               PATCH_SRC_KBD, PATCH_SRC_MIDI1, PATCH_SRC_MIDI2, PATCH_SRC_COUNT } patch_source_t;
+               PATCH_SRC_KBD, PATCH_SRC_PITCH_BEND, PATCH_SRC_MOD_WHEEL, PATCH_SRC_COUNT } patch_source_t;
 typedef enum { PATCH_DST_PITCH = 0, PATCH_DST_OSC2_PITCH, PATCH_DST_OSC1_CTRL1, PATCH_DST_NOISE,
                PATCH_DST_CUTOFF, PATCH_DST_AMP, PATCH_DST_PAN, PATCH_DST_LFO2_FREQ, PATCH_DST_COUNT } patch_dest_t;
 
@@ -255,10 +255,11 @@ typedef struct {
     int octave_transpose;
     float pitch_bend_semi;
 
-    /* Patch-matrix LFOs, one pair per timbre ([timbre][0 = LFO1, 1 = LFO2]), and the MIDI1/MIDI2
-     * patch sources (CC1 mod wheel, CC2), 0..1 */
+    /* Patch-matrix LFOs, one pair per timbre ([timbre][0 = LFO1, 1 = LFO2]), and the controller patch
+     * sources: pitch bend (-1..+1, centre 0) and the mod wheel (CC1, 0..+1) */
     lfo_t patch_lfo[2][2];
-    float midi_src[2];
+    float bend_src;
+    float modwheel_src;
 } synth_engine_t;
 
 /* Move Plugin Host API v1 */
@@ -319,7 +320,7 @@ typedef struct {
     float env_octaves;        /* filter EG at full intensity, in octaves (multiplies the cutoff) */
     float res_damping_range;  /* SVF damping k = 2 - range * resonance */
     float lp24_res_scale;     /* resonance scale per stage of the 24 dB filter */
-    float drive_gain;         /* input gain added per unit of drive */
+    float drive_gain;         /* distortion (post-filter tanh) gain added per unit of drive; drive 0.5 = on */
     float attack_scale;       /* multipliers on the EG time ranges (1.0 = 1.5 ms..12 s, 15 ms..20 s) */
     float decay_scale;
     float release_scale;
@@ -331,6 +332,11 @@ typedef struct {
     float patch_int_curve;    /* patch depth = full scale * (|int|/63)^curve (VST: 2.4 measured at +20 / +63) */
     float tilt_db;            /* high-shelf gain on the voice mix, dB (VST open saw vs ideal: 26.7) */
     float tilt_hz;            /* high-shelf corner, Hz (20000): ~+2 dB at 3 kHz, +7 at 8 kHz, +18 at 17 kHz */
+    float patch_pan_curve;    /* patch -> pan depth = (|int|/63)^curve; 0.6 (not measured, chosen): LFO -> pan
+                               * swings +-3.4 dB at +6, +-7.6 dB at +20, +-14 dB at +40, hard L/R at +63 */
+    float bpf_cutoff_octaves; /* BPF12 centre = base * 2^(knob * bpf_cutoff_octaves + bpf_cutoff_offset) */
+    float bpf_cutoff_offset;  /* octaves */
+    float dist_ceiling;       /* distortion soft-clip level (output = ceiling * tanh(gain * x / ceiling)) */
 } tinyk_tuning_t;
 
 #ifdef TINYK_TUNING
