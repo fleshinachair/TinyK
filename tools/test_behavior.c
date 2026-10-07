@@ -302,11 +302,44 @@ static void test_patch_sources(void) {
     free(pan);
 }
 
+/* Energy of the mono mix in [t0, t1) seconds */
+static double window_energy(const int16_t *b, int frames, double t0, double t1) {
+    double e = 0.0;
+    for (int i = (int)(t0 * SR); i < (int)(t1 * SR) && i < frames; i++) {
+        double s = 0.5 * (b[2 * i] + b[2 * i + 1]) / 32768.0;
+        e += s * s;
+    }
+    return e;
+}
+
+/* A.21's Timbre 2 is a held sine + noise gated by a tempo-synced, key-synced LFO1 saw -> amp (+48, +63,
+ * a quarter note per cycle at 120 BPM); LFO2's square adds an off-beat noise burst. The saw falls, so each
+ * beat has died away before the next; a rising saw played every hit backwards (loudest at the beat's end). */
+static void test_lfo_saw_gate(void) {
+    printf("\nLFO saw -> amp gate (A.21 Timbre 2):\n");
+    fresh(8);
+    synth_set_param(&S, "timbre_balance", 1.0f); /* Timbre 2 only */
+    synth_set_param(&S, "delay_mix", 0.0f);
+    synth_note_on(&S, 60, 100);
+    int n;
+    int16_t *b = render(1.0, &n);
+    for (int beat = 0; beat < 2; beat++) {
+        double t = beat * 0.5;
+        double early = window_energy(b, n, t + 0.01, t + 0.11), late = window_energy(b, n, t + 0.43, t + 0.49);
+        char what[112];
+        snprintf(what, sizeof what, "beat %d starts loud and has died away before the next (%.1f dB down at 430-490 ms)",
+                 beat + 1, 10.0 * log10(early * 0.06 / (late * 0.10 + 1e-12)));
+        check(early * 0.06 > 100.0 * late * 0.10, what); /* per-sample energy at least 20 dB lower */
+    }
+    free(b);
+}
+
 int main(void) {
     test_layer();
     test_edit_routing();
     test_envelopes();
     test_patch_sources();
+    test_lfo_saw_gate();
     printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "ALL PASSED", failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;
 }
