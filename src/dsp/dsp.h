@@ -131,6 +131,8 @@ typedef struct {
     float phase;
     float sh_value;
     float prev_phase;
+    float lim;        /* patch LFOs: the slew-limited value (see LFO_SLEW_S) */
+    float out;        /* ...and the output: that value through a short one-pole (LFO_SMOOTH_S) */
 } lfo_t;
 
 /* State-Variable Filter (SVF) State */
@@ -227,6 +229,7 @@ typedef struct {
     /* Brightness tilt (first-order high shelf) on the voice mix: previous input / output, L/R */
     float tilt_x1[2];
     float tilt_y1[2];
+    float noise_x1, noise_y1;  /* inverse-tilt state of the audible noise */
 
     float chorus_buf_l[CHORUS_BUFFER_SIZE];
     float chorus_buf_r[CHORUS_BUFFER_SIZE];
