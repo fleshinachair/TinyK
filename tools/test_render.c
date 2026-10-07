@@ -77,6 +77,8 @@ static const struct { const char *name; float *value; } TUNING_TABLE[] = {
     { "xmod_semitones",     &tinyk_tuning.xmod_semitones },
     { "xmod_offset_semitones", &tinyk_tuning.xmod_offset_semitones },
     { "hpf_ceil_hz",        &tinyk_tuning.hpf_ceil_hz },
+    { "unison_spread",      &tinyk_tuning.unison_spread },
+    { "unison_cents_scale", &tinyk_tuning.unison_cents_scale },
 };
 #define TUNING_COUNT ((int)(sizeof TUNING_TABLE / sizeof TUNING_TABLE[0]))
 

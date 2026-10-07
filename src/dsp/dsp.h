@@ -171,6 +171,11 @@ typedef struct {
 
     /* Filter 2-pole SVF states (2 stages for up to 4-pole / 24dB) */
     svf_t filter_svf[2];
+
+    /* Unison: this voice's detune (cents) and stereo place (-1..+1) in the stack, and its share of the level */
+    float unison_cents;
+    float unison_pan;
+    float unison_gain;
 } voice_t;
 
 /* Per-timbre settings that come from the patch but have no PARAM_* slot */
@@ -180,6 +185,10 @@ typedef struct {
     float level;            /* 0..1 overall timbre level (osc levels x amp level) */
     float dwgs;             /* 0..1 -> DWGS waveform 0..63 */
     float osc1_ctrl[2];     /* Osc 1 Control 1 / 2 (raw / 127); for Sine: cross-mod depth / LFO1 modulation of it */
+    int assign;             /* voice assign: 0 Mono, 1 Poly, 2 Unison */
+    float unison_cents;     /* unison detune: the spread of the stacked voices, cents */
+    float pan;              /* timbre pan, -1 left .. +1 right */
+    int multi_trigger;      /* mono / unison: 1 = every key restarts the EGs, 0 = legato keys do not */
 
     /* Per-timbre LFOs (index 0 = LFO1, 1 = LFO2) and the 4-slot virtual patch matrix */
     int lfo_wave[2];        /* LFO1: saw, square, triangle, S&H; LFO2: saw, square, sine, S&H */
@@ -275,6 +284,12 @@ typedef struct {
 
     /* The program's arpeggiator (src/dsp/arp.c): MIDI keys go through it while it is on */
     arp_t arp;
+
+    /* Mono / Unison timbres: their held keys, last on top (last-note priority) */
+    uint8_t mono_keys[2][16];
+    uint8_t mono_vel[2][16];
+    int mono_count[2];
+    uint32_t phase_rng;     /* oscillator start phases (seeded by synth_init: renders stay repeatable) */
 } synth_engine_t;
 
 /* Move Plugin Host API v1: field for field Schwung's src/host/plugin_api_v1.h (the order is the ABI). Every
@@ -414,6 +429,8 @@ typedef struct {
                                * semitones; 0 = off. Fitted on the A.21 T2 takes (sine_xmod_ratio in dsp.c) */
     float xmod_offset_semitones; /* ...and the offset at depth 0 */
     float hpf_ceil_hz;        /* HPF12's highest cutoff, knob plus modulation (fitted on A.21's hat) */
+    float unison_spread;      /* unison: the outer voices' stereo place, 0 (centre) .. 1 (hard L / R) */
+    float unison_cents_scale; /* unison detune byte -> cents of spread between the outer voices */
 } tinyk_tuning_t;
 
 #ifdef TINYK_TUNING

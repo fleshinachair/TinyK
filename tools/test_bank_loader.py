@@ -291,7 +291,7 @@ def host_api():
         except ValueError:
             doc = {}
         check(doc.get("tinyk_state") == 1 and doc.get("bank") == "MicroKorgFactory" and doc.get("preset") == 20
-              and len(doc.get("params", [])) == 35 and len(doc.get("extra2", [])) == 26,
+              and len(doc.get("params", [])) == 35 and len(doc.get("extra2", [])) == 30,
               f"state is JSON ({len(state)} bytes): bank, preset, params, extras")
         put("bank_file", "0")
         put("preset", "99")

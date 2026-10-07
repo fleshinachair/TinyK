@@ -86,7 +86,7 @@ static void test_layer(void) {
         if (S.voices[v].active && S.voices[v].is_timbre_2 == 0) a++;
         if (S.voices[v].active && S.voices[v].is_timbre_2 == 1) b++;
     }
-    check(a == 1 && b == 1, "one note-on starts exactly one Timbre 1 voice and one Timbre 2 voice");
+    check(a == 1 && b == 2, "one note-on starts one Timbre 1 voice (Poly) and both Timbre 2 voices (A.11 T2 is Unison)");
 
     double e[3][2];
     float balances[3] = {0.0f, 0.5f, 1.0f};
@@ -108,8 +108,11 @@ static void test_layer(void) {
     check(e[0][0] / (e[0][1] + 1e-12) > 1.0 || e[0][1] > 0, "balance 0.0 and 1.0 render different signals");
     check(fabs(e[0][0] - e[2][0]) > 1e-6 || fabs(e[0][1] - e[2][1]) > 1e-6,
           "balance moves the output between the two timbres");
-    check(e[0][0] > e[0][1], "balance 0.0 (Timbre 1 only) is weighted left");
-    check(e[2][1] > e[2][0], "balance 1.0 (Timbre 2 only) is weighted right");
+    /* Pan is the patch's (byte +26): A.11 has both timbres centred, so neither end of the balance leans */
+    char what[128];
+    double lean0 = 10.0 * log10(e[0][0] / (e[0][1] + 1e-12)), lean2 = 10.0 * log10(e[2][0] / (e[2][1] + 1e-12));
+    snprintf(what, sizeof what, "timbre pans from the patch (A.11: both centred): Timbre 1 alone leans %+.2f dB, Timbre 2 %+.2f dB", lean0, lean2);
+    check(fabs(lean0) < 1.0 && fabs(lean2) < 1.0, what);
     check(e[1][0] + e[1][1] > 0, "balance 0.5: both play");
 }
 

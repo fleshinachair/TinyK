@@ -54,6 +54,10 @@
       "patch4_int": 0.65873,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.811024,
       "delay_time": 0.614173,
       "delay_feedback": 0.590551,
@@ -118,7 +122,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 1.0,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 1.0
       }
     },
     {
@@ -175,6 +183,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.0,
       "delay_time": 0.188976,
       "delay_feedback": 0.0,
@@ -239,7 +251,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -296,6 +312,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.07874,
+      "assign": 1.0,
+      "unison_detune": 0.23622,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.244094,
       "delay_time": 0.472441,
       "delay_feedback": 0.606299,
@@ -360,7 +380,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -417,6 +441,10 @@
       "patch4_int": 0.0,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.897638,
+      "assign": 1.0,
+      "unison_detune": 0.062992,
+      "pan": 0.690476,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.19685,
       "delay_time": 0.551181,
       "delay_feedback": 0.503937,
@@ -481,7 +509,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.785714,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.897638
+        "osc1_ctrl2": 0.897638,
+        "assign": 1.0,
+        "unison_detune": 0.047244,
+        "pan": 0.309524,
+        "trigger_multi": 1.0
       }
     },
     {
@@ -538,6 +570,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.267717,
       "delay_time": 0.669291,
       "delay_feedback": 0.535433,
@@ -602,7 +638,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -659,6 +699,10 @@
       "patch4_int": 0.579365,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.826772,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.645669,
       "delay_time": 0.559055,
       "delay_feedback": 0.771654,
@@ -723,7 +767,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -780,6 +828,10 @@
       "patch4_int": 0.269841,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.173228,
       "delay_time": 0.685039,
       "delay_feedback": 0.440945,
@@ -844,7 +896,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -901,6 +957,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.834646,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.645669,
       "delay_time": 0.622047,
       "delay_feedback": 0.551181,
@@ -965,7 +1025,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -1022,6 +1086,10 @@
       "patch4_int": 0.753968,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.0,
       "delay_time": 0.314961,
       "delay_feedback": 0.488189,
@@ -1086,7 +1154,11 @@
         "patch4_dst": 0.428571,
         "patch4_int": 0.0,
         "osc1_ctrl1": 0.007874,
-        "osc1_ctrl2": 0.102362
+        "osc1_ctrl2": 0.102362,
+        "assign": 0.0,
+        "unison_detune": 0.0,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -1143,6 +1215,10 @@
       "patch4_int": 0.515873,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.322835,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.125984,
       "delay_time": 0.393701,
       "delay_feedback": 0.456693,
@@ -1207,7 +1283,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.590551
+        "osc1_ctrl2": 0.590551,
+        "assign": 1.0,
+        "unison_detune": 0.23622,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -1264,6 +1344,10 @@
       "patch4_int": 0.0,
       "osc1_ctrl1": 0.275591,
       "osc1_ctrl2": 0.496063,
+      "assign": 1.0,
+      "unison_detune": 0.23622,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.0,
       "delay_time": 0.015748,
       "delay_feedback": 0.84252,
@@ -1328,7 +1412,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -1385,6 +1473,10 @@
       "patch4_int": 0.801587,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.0,
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
@@ -1449,7 +1541,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -1506,6 +1602,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.181102,
+      "assign": 0.0,
+      "unison_detune": 0.094488,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.086614,
       "delay_time": 0.598425,
       "delay_feedback": 0.149606,
@@ -1570,7 +1670,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -1627,6 +1731,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.181102,
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
@@ -1691,7 +1799,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -1748,6 +1860,10 @@
       "patch4_int": 0.325397,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 1.0,
+      "unison_detune": 0.23622,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.480315,
       "delay_time": 0.543307,
       "delay_feedback": 0.275591,
@@ -1812,7 +1928,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -1869,6 +1989,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 1.0,
+      "unison_detune": 0.181102,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.141732,
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
@@ -1933,7 +2057,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -1990,6 +2118,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.346457,
       "delay_time": 0.314961,
       "delay_feedback": 0.724409,
@@ -2054,7 +2186,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -2111,6 +2247,10 @@
       "patch4_int": 0.825397,
       "osc1_ctrl1": 0.330709,
       "osc1_ctrl2": 0.716535,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.0,
       "delay_time": 0.314961,
       "delay_feedback": 0.527559,
@@ -2175,7 +2315,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -2232,6 +2376,10 @@
       "patch4_int": 1.0,
       "osc1_ctrl1": 0.275591,
       "osc1_ctrl2": 0.0,
+      "assign": 0.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.181102,
       "delay_time": 0.685039,
       "delay_feedback": 0.188976,
@@ -2296,7 +2444,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -2353,6 +2505,10 @@
       "patch4_int": 0.261905,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.677165,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.259843,
       "delay_time": 0.212598,
       "delay_feedback": 0.307087,
@@ -2417,7 +2573,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -2474,6 +2634,10 @@
       "patch4_int": 0.690476,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.0,
       "delay_time": 0.314961,
       "delay_feedback": 0.637795,
@@ -2538,7 +2702,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -2595,6 +2763,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.811024,
       "delay_time": 0.771654,
       "delay_feedback": 0.724409,
@@ -2659,7 +2831,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -2716,6 +2892,10 @@
       "patch4_int": 0.746032,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.433071,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 1.0,
       "delay_time": 0.811024,
       "delay_feedback": 0.653543,
@@ -2780,7 +2960,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -2837,6 +3021,10 @@
       "patch4_int": 0.230159,
       "osc1_ctrl1": 0.125984,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.188976,
       "delay_time": 0.637795,
       "delay_feedback": 0.23622,
@@ -2901,7 +3089,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -2958,6 +3150,10 @@
       "patch4_int": 0.68254,
       "osc1_ctrl1": 0.110236,
       "osc1_ctrl2": 0.0,
+      "assign": 0.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.0,
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
@@ -3022,7 +3218,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.0,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 1.0
       }
     },
     {
@@ -3079,6 +3279,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.19685,
       "osc1_ctrl2": 0.0,
+      "assign": 0.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.070866,
       "delay_time": 0.433071,
       "delay_feedback": 0.0,
@@ -3143,7 +3347,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -3200,6 +3408,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.0,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.0,
       "delay_time": 0.314961,
       "delay_feedback": 0.031496,
@@ -3264,7 +3476,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.801587,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.0,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -3321,6 +3537,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.0,
+      "unison_detune": 0.094488,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.0,
       "delay_time": 0.480315,
       "delay_feedback": 0.0,
@@ -3385,7 +3605,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -3442,6 +3666,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 1.0,
+      "unison_detune": 0.094488,
+      "pan": 0.380952,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.0,
       "delay_time": 0.669291,
       "delay_feedback": 0.244094,
@@ -3506,7 +3734,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.566929,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 1.0,
+        "unison_detune": 0.094488,
+        "pan": 0.619048,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -3563,6 +3795,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.23622,
       "osc1_ctrl2": 0.23622,
+      "assign": 1.0,
+      "unison_detune": 0.125984,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.0,
       "delay_time": 0.811024,
       "delay_feedback": 0.15748,
@@ -3627,7 +3863,11 @@
         "patch4_dst": 0.142857,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.23622,
-        "osc1_ctrl2": 0.23622
+        "osc1_ctrl2": 0.23622,
+        "assign": 1.0,
+        "unison_detune": 0.015748,
+        "pan": 0.833333,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -3684,6 +3924,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.188976,
       "osc1_ctrl2": 0.0,
+      "assign": 1.0,
+      "unison_detune": 0.11811,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.259843,
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
@@ -3748,7 +3992,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -3805,6 +4053,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.094488,
       "delay_time": 0.314961,
       "delay_feedback": 0.393701,
@@ -3869,7 +4121,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -3926,6 +4182,10 @@
       "patch4_int": 0.563492,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.03937,
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
@@ -3990,7 +4250,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.0,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 1.0
       }
     },
     {
@@ -4047,6 +4311,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.141732,
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
@@ -4111,7 +4379,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -4168,6 +4440,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.0,
       "delay_time": 0.614173,
       "delay_feedback": 0.212598,
@@ -4232,7 +4508,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -4289,6 +4569,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.889764,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.645669,
       "delay_time": 0.622047,
       "delay_feedback": 0.551181,
@@ -4353,7 +4637,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -4410,6 +4698,10 @@
       "patch4_int": 0.761905,
       "osc1_ctrl1": 0.015748,
       "osc1_ctrl2": 0.03937,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.0,
       "delay_time": 0.755906,
       "delay_feedback": 0.0,
@@ -4474,7 +4766,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -4531,6 +4827,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.0,
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
@@ -4595,7 +4895,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -4652,6 +4956,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.748031,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.0,
       "delay_time": 0.401575,
       "delay_feedback": 0.0,
@@ -4716,7 +5024,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -4773,6 +5085,10 @@
       "patch4_int": 0.52381,
       "osc1_ctrl1": 0.732283,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.551181,
       "delay_time": 0.582677,
       "delay_feedback": 0.582677,
@@ -4837,7 +5153,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -4894,6 +5214,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.244094,
       "osc1_ctrl2": 0.598425,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.0,
       "delay_time": 0.795276,
       "delay_feedback": 0.692913,
@@ -4958,7 +5282,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -5015,6 +5343,10 @@
       "patch4_int": 0.246032,
       "osc1_ctrl1": 0.527559,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.094488,
       "delay_time": 0.84252,
       "delay_feedback": 0.787402,
@@ -5079,7 +5411,11 @@
         "patch4_dst": 0.142857,
         "patch4_int": 0.928571,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.755906
+        "osc1_ctrl2": 0.755906,
+        "assign": 0.0,
+        "unison_detune": 0.141732,
+        "pan": 0.5,
+        "trigger_multi": 1.0
       }
     },
     {
@@ -5136,6 +5472,10 @@
       "patch4_int": 0.539683,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.19685,
       "delay_time": 0.527559,
       "delay_feedback": 0.0,
@@ -5200,7 +5540,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -5257,6 +5601,10 @@
       "patch4_int": 0.634921,
       "osc1_ctrl1": 0.503937,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.047244,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.0,
       "delay_time": 0.629921,
       "delay_feedback": 0.291339,
@@ -5321,7 +5669,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -5378,6 +5730,10 @@
       "patch4_int": 0.722222,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.968504,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.165354,
       "delay_time": 0.629921,
       "delay_feedback": 0.314961,
@@ -5442,7 +5798,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -5499,6 +5859,10 @@
       "patch4_int": 0.539683,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.19685,
       "delay_time": 0.527559,
       "delay_feedback": 0.188976,
@@ -5563,7 +5927,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -5620,6 +5988,10 @@
       "patch4_int": 0.722222,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.834646,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.645669,
       "delay_time": 0.535433,
       "delay_feedback": 0.708661,
@@ -5684,7 +6056,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -5741,6 +6117,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.850394,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.645669,
       "delay_time": 0.622047,
       "delay_feedback": 0.551181,
@@ -5805,7 +6185,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -5862,6 +6246,10 @@
       "patch4_int": 0.785714,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.299213,
       "delay_time": 0.653543,
       "delay_feedback": 0.543307,
@@ -5926,7 +6314,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -5983,6 +6375,10 @@
       "patch4_int": 0.690476,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.0,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.787402,
       "delay_time": 0.818898,
       "delay_feedback": 0.629921,
@@ -6047,7 +6443,11 @@
         "patch4_dst": 0.142857,
         "patch4_int": 0.198413,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.0,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -6104,6 +6504,10 @@
       "patch4_int": 0.079365,
       "osc1_ctrl1": 0.204724,
       "osc1_ctrl2": 0.0,
+      "assign": 1.0,
+      "unison_detune": 0.015748,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.094488,
       "delay_time": 0.03937,
       "delay_feedback": 0.228346,
@@ -6168,7 +6572,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -6225,6 +6633,10 @@
       "patch4_int": 0.134921,
       "osc1_ctrl1": 0.748031,
       "osc1_ctrl2": 0.433071,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.0,
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
@@ -6289,7 +6701,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -6346,6 +6762,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 1.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.307087,
       "delay_time": 0.543307,
       "delay_feedback": 0.409449,
@@ -6410,7 +6830,11 @@
         "patch4_dst": 0.0,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.125984
+        "osc1_ctrl2": 0.125984,
+        "assign": 1.0,
+        "unison_detune": 0.133858,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -6467,6 +6891,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 1.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.283465,
       "delay_time": 0.543307,
       "delay_feedback": 0.409449,
@@ -6531,7 +6959,11 @@
         "patch4_dst": 0.0,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.125984
+        "osc1_ctrl2": 0.125984,
+        "assign": 1.0,
+        "unison_detune": 0.133858,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -6588,6 +7020,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.062992,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.669291,
       "delay_time": 0.314961,
       "delay_feedback": 0.480315,
@@ -6652,7 +7088,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.464567
+        "osc1_ctrl2": 0.464567,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -6709,6 +7149,10 @@
       "patch4_int": 0.095238,
       "osc1_ctrl1": 0.181102,
       "osc1_ctrl2": 0.314961,
+      "assign": 1.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.330709,
       "delay_time": 0.582677,
       "delay_feedback": 0.212598,
@@ -6773,7 +7217,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.095238,
         "osc1_ctrl1": 0.370079,
-        "osc1_ctrl2": 0.456693
+        "osc1_ctrl2": 0.456693,
+        "assign": 1.0,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -6830,6 +7278,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.19685,
       "delay_time": 0.433071,
       "delay_feedback": 0.488189,
@@ -6894,7 +7346,11 @@
         "patch4_dst": 0.0,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.0,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -6951,6 +7407,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.19685,
       "delay_time": 0.433071,
       "delay_feedback": 0.488189,
@@ -7015,7 +7475,11 @@
         "patch4_dst": 0.0,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.0,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -7072,6 +7536,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.401575,
       "delay_time": 0.433071,
       "delay_feedback": 0.488189,
@@ -7136,7 +7604,11 @@
         "patch4_dst": 0.0,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.0,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -7193,6 +7665,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.23622,
       "delay_time": 0.433071,
       "delay_feedback": 0.251969,
@@ -7257,7 +7733,11 @@
         "patch4_dst": 0.0,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.0,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -7314,6 +7794,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.283465,
       "delay_time": 0.614173,
       "delay_feedback": 0.291339,
@@ -7378,7 +7862,11 @@
         "patch4_dst": 0.0,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.0,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -7435,6 +7923,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.393701,
       "delay_time": 0.433071,
       "delay_feedback": 0.488189,
@@ -7499,7 +7991,11 @@
         "patch4_dst": 0.0,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.0,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -7556,6 +8052,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.07874,
       "delay_time": 0.377953,
       "delay_feedback": 0.267717,
@@ -7620,7 +8120,11 @@
         "patch4_dst": 0.0,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.0,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -7677,6 +8181,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.251969,
       "delay_time": 0.614173,
       "delay_feedback": 0.0,
@@ -7741,7 +8249,11 @@
         "patch4_dst": 0.0,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.0,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -7798,6 +8310,10 @@
       "patch4_int": 0.65873,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.811024,
       "delay_time": 0.614173,
       "delay_feedback": 0.669291,
@@ -7862,7 +8378,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -7919,6 +8439,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.0,
       "delay_time": 0.188976,
       "delay_feedback": 0.0,
@@ -7983,7 +8507,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -8040,6 +8568,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.07874,
+      "assign": 1.0,
+      "unison_detune": 0.23622,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.244094,
       "delay_time": 0.472441,
       "delay_feedback": 0.480315,
@@ -8104,7 +8636,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -8161,6 +8697,10 @@
       "patch4_int": 0.730159,
       "osc1_ctrl1": 0.070866,
       "osc1_ctrl2": 0.905512,
+      "assign": 1.0,
+      "unison_detune": 0.15748,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.755906,
       "delay_time": 0.535433,
       "delay_feedback": 0.433071,
@@ -8225,7 +8765,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -8282,6 +8826,10 @@
       "patch4_int": 0.65873,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.811024,
       "delay_time": 0.614173,
       "delay_feedback": 0.551181,
@@ -8346,7 +8894,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -8403,6 +8955,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.370079,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.267717,
       "delay_time": 0.669291,
       "delay_feedback": 0.692913,
@@ -8467,7 +9023,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -8524,6 +9084,10 @@
       "patch4_int": 0.34127,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.23622,
       "delay_time": 0.338583,
       "delay_feedback": 0.724409,
@@ -8588,7 +9152,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -8645,6 +9213,10 @@
       "patch4_int": 0.52381,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.866142,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.503937,
       "delay_time": 0.622047,
       "delay_feedback": 0.551181,
@@ -8709,7 +9281,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -8766,6 +9342,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.15748,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.0,
       "delay_time": 0.787402,
       "delay_feedback": 0.645669,
@@ -8830,7 +9410,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -8887,6 +9471,10 @@
       "patch4_int": 0.865079,
       "osc1_ctrl1": 0.850394,
       "osc1_ctrl2": 0.503937,
+      "assign": 1.0,
+      "unison_detune": 0.102362,
+      "pan": 0.460317,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.338583,
       "delay_time": 0.559055,
       "delay_feedback": 0.370079,
@@ -8951,7 +9539,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.746032,
         "osc1_ctrl1": 0.566929,
-        "osc1_ctrl2": 0.779528
+        "osc1_ctrl2": 0.779528,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.555556,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -9008,6 +9600,10 @@
       "patch4_int": 0.293651,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.362205,
       "delay_time": 0.503937,
       "delay_feedback": 0.629921,
@@ -9072,7 +9668,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.753968,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.0,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 1.0
       }
     },
     {
@@ -9129,6 +9729,10 @@
       "patch4_int": 0.753968,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.0,
       "delay_time": 0.417323,
       "delay_feedback": 0.0,
@@ -9193,7 +9797,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -9250,6 +9858,10 @@
       "patch4_int": 0.65873,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 1.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.818898,
       "delay_time": 0.598425,
       "delay_feedback": 0.03937,
@@ -9314,7 +9926,11 @@
         "patch4_dst": 0.0,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.19685,
-        "osc1_ctrl2": 0.267717
+        "osc1_ctrl2": 0.267717,
+        "assign": 1.0,
+        "unison_detune": 0.007874,
+        "pan": 0.904762,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -9371,6 +9987,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.755906,
       "osc1_ctrl2": 0.220472,
+      "assign": 0.0,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.0,
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
@@ -9435,7 +10055,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -9492,6 +10116,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 1.0,
+      "unison_detune": 0.23622,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.0,
       "delay_time": 0.543307,
       "delay_feedback": 0.0,
@@ -9556,7 +10184,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -9613,6 +10245,10 @@
       "patch4_int": 0.515873,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 1.0,
+      "unison_detune": 0.149606,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.181102,
       "delay_time": 0.519685,
       "delay_feedback": 0.188976,
@@ -9677,7 +10313,11 @@
         "patch4_dst": 0.142857,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.125984,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -9734,6 +10374,10 @@
       "patch4_int": 0.833333,
       "osc1_ctrl1": 0.393701,
       "osc1_ctrl2": 0.464567,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.125984,
       "delay_time": 0.314961,
       "delay_feedback": 0.566929,
@@ -9798,7 +10442,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -9855,6 +10503,10 @@
       "patch4_int": 0.769841,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 1.0,
+      "assign": 1.0,
+      "unison_detune": 0.133858,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.0,
       "delay_time": 0.314961,
       "delay_feedback": 0.448819,
@@ -9919,7 +10571,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -9976,6 +10632,10 @@
       "patch4_int": 0.857143,
       "osc1_ctrl1": 0.968504,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.779528,
       "delay_time": 0.314961,
       "delay_feedback": 0.637795,
@@ -10040,7 +10700,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -10097,6 +10761,10 @@
       "patch4_int": 0.920635,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.19685,
       "delay_time": 0.314961,
       "delay_feedback": 0.299213,
@@ -10161,7 +10829,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -10218,6 +10890,10 @@
       "patch4_int": 0.801587,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.511811,
       "delay_time": 0.606299,
       "delay_feedback": 0.692913,
@@ -10282,7 +10958,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -10339,6 +11019,10 @@
       "patch4_int": 0.563492,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.228346,
       "delay_time": 0.677165,
       "delay_feedback": 0.456693,
@@ -10403,7 +11087,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -10460,6 +11148,10 @@
       "patch4_int": 0.047619,
       "osc1_ctrl1": 0.724409,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.519685,
       "delay_time": 0.314961,
       "delay_feedback": 0.748031,
@@ -10524,7 +11216,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -10581,6 +11277,10 @@
       "patch4_int": 0.198413,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.362205,
       "delay_time": 0.614173,
       "delay_feedback": 0.685039,
@@ -10645,7 +11345,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -10702,6 +11406,10 @@
       "patch4_int": 0.68254,
       "osc1_ctrl1": 0.19685,
       "osc1_ctrl2": 0.0,
+      "assign": 0.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.0,
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
@@ -10766,7 +11474,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.0,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 1.0
       }
     },
     {
@@ -10823,6 +11535,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 1.0,
+      "unison_detune": 0.11811,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.220472,
       "delay_time": 0.259843,
       "delay_feedback": 0.047244,
@@ -10887,7 +11603,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -10944,6 +11664,10 @@
       "patch4_int": 1.0,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.692913,
+      "assign": 0.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.0,
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
@@ -11008,7 +11732,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -11065,6 +11793,10 @@
       "patch4_int": 1.0,
       "osc1_ctrl1": 0.165354,
       "osc1_ctrl2": 0.629921,
+      "assign": 0.0,
+      "unison_detune": 0.133858,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.0,
       "delay_time": 0.0,
       "delay_feedback": 0.031496,
@@ -11129,7 +11861,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -11186,6 +11922,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.165354,
       "delay_time": 0.724409,
       "delay_feedback": 0.330709,
@@ -11250,7 +11990,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -11307,6 +12051,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.031496,
       "osc1_ctrl2": 0.0,
+      "assign": 1.0,
+      "unison_detune": 0.055118,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.0,
       "delay_time": 0.566929,
       "delay_feedback": 0.212598,
@@ -11371,7 +12119,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -11428,6 +12180,10 @@
       "patch4_int": 0.539683,
       "osc1_ctrl1": 0.503937,
       "osc1_ctrl2": 0.0,
+      "assign": 1.0,
+      "unison_detune": 0.047244,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.0,
       "delay_time": 0.629921,
       "delay_feedback": 0.23622,
@@ -11492,7 +12248,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -11549,6 +12309,10 @@
       "patch4_int": 0.690476,
       "osc1_ctrl1": 0.188976,
       "osc1_ctrl2": 0.0,
+      "assign": 1.0,
+      "unison_detune": 0.11811,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.259843,
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
@@ -11613,7 +12377,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -11670,6 +12438,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.0,
       "delay_time": 0.614173,
       "delay_feedback": 0.165354,
@@ -11734,7 +12506,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -11791,6 +12567,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.141732,
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
@@ -11855,7 +12635,11 @@
         "patch4_dst": 0.0,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -11912,6 +12696,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.0,
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
@@ -11976,7 +12764,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -12033,6 +12825,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.0,
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
@@ -12097,7 +12893,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -12154,6 +12954,10 @@
       "patch4_int": 0.865079,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.464567,
       "delay_time": 0.275591,
       "delay_feedback": 0.0,
@@ -12218,7 +13022,11 @@
         "patch4_dst": 0.0,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -12275,6 +13083,10 @@
       "patch4_int": 1.0,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.102362,
       "delay_time": 0.417323,
       "delay_feedback": 0.015748,
@@ -12339,7 +13151,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -12396,6 +13212,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.401575,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.598425,
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
@@ -12460,7 +13280,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.614173,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -12517,6 +13341,10 @@
       "patch4_int": 0.65873,
       "osc1_ctrl1": 0.456693,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.377953,
       "delay_time": 0.314961,
       "delay_feedback": 0.0,
@@ -12581,7 +13409,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -12638,6 +13470,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.259843,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.488189,
       "delay_time": 0.488189,
       "delay_feedback": 0.716535,
@@ -12702,7 +13538,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -12759,6 +13599,10 @@
       "patch4_int": 0.714286,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.362205,
       "delay_time": 0.503937,
       "delay_feedback": 0.629921,
@@ -12823,7 +13667,11 @@
         "patch4_dst": 0.857143,
         "patch4_int": 0.690476,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.0,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -12880,6 +13728,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.149606,
       "osc1_ctrl2": 0.0,
+      "assign": 1.0,
+      "unison_detune": 0.007874,
+      "pan": 0.5,
+      "trigger_multi": 1.0,
       "chorus_mix": 0.291339,
       "delay_time": 0.629921,
       "delay_feedback": 0.188976,
@@ -12944,7 +13796,11 @@
         "patch4_dst": 0.0,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.19685,
-        "osc1_ctrl2": 0.267717
+        "osc1_ctrl2": 0.267717,
+        "assign": 1.0,
+        "unison_detune": 0.007874,
+        "pan": 0.904762,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -13001,6 +13857,10 @@
       "patch4_int": 0.730159,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.0,
       "delay_time": 0.574803,
       "delay_feedback": 0.11811,
@@ -13065,7 +13925,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -13122,6 +13986,10 @@
       "patch4_int": 0.52381,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.125984,
       "delay_time": 0.535433,
       "delay_feedback": 0.173228,
@@ -13186,7 +14054,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -13243,6 +14115,10 @@
       "patch4_int": 0.515873,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.181102,
       "delay_time": 0.566929,
       "delay_feedback": 0.15748,
@@ -13307,7 +14183,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -13364,6 +14244,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.700787,
       "delay_time": 0.614173,
       "delay_feedback": 0.464567,
@@ -13428,7 +14312,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -13485,6 +14373,10 @@
       "patch4_int": 0.52381,
       "osc1_ctrl1": 0.267717,
       "osc1_ctrl2": 0.905512,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.850394,
       "delay_time": 0.551181,
       "delay_feedback": 0.740157,
@@ -13549,7 +14441,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -13606,6 +14502,10 @@
       "patch4_int": 0.619048,
       "osc1_ctrl1": 0.015748,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.645669,
       "delay_time": 0.622047,
       "delay_feedback": 0.551181,
@@ -13670,7 +14570,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -13727,6 +14631,10 @@
       "patch4_int": 0.777778,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 1.0,
+      "unison_detune": 0.362205,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.15748,
       "delay_time": 0.598425,
       "delay_feedback": 0.275591,
@@ -13791,7 +14699,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -13848,6 +14760,10 @@
       "patch4_int": 0.698413,
       "osc1_ctrl1": 0.23622,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.0,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.03937,
       "delay_time": 0.181102,
       "delay_feedback": 0.314961,
@@ -13912,7 +14828,11 @@
         "patch4_dst": 0.285714,
         "patch4_int": 0.698413,
         "osc1_ctrl1": 0.23622,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 1.0,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -13969,6 +14889,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.259843,
       "osc1_ctrl2": 0.0,
+      "assign": 1.0,
+      "unison_detune": 0.23622,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.244094,
       "delay_time": 0.472441,
       "delay_feedback": 0.472441,
@@ -14033,7 +14957,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -14090,6 +15018,10 @@
       "patch4_int": 0.761905,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.102362,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.259843,
       "delay_time": 0.244094,
       "delay_feedback": 0.511811,
@@ -14154,7 +15086,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.714286,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.102362,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -14211,6 +15147,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.188976,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.484127,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.19685,
       "delay_time": 0.527559,
       "delay_feedback": 0.244094,
@@ -14275,7 +15215,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.212598
+        "osc1_ctrl2": 0.212598,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -14332,6 +15276,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.23622,
       "osc1_ctrl2": 0.511811,
+      "assign": 0.5,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.740157,
       "delay_time": 0.496063,
       "delay_feedback": 0.574803,
@@ -14396,7 +15344,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.440945,
-        "osc1_ctrl2": 0.574803
+        "osc1_ctrl2": 0.574803,
+        "assign": 0.5,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -14453,6 +15405,10 @@
       "patch4_int": 0.142857,
       "osc1_ctrl1": 0.362205,
       "osc1_ctrl2": 0.314961,
+      "assign": 1.0,
+      "unison_detune": 0.07874,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.330709,
       "delay_time": 0.582677,
       "delay_feedback": 0.212598,
@@ -14517,7 +15473,11 @@
         "patch4_dst": 0.571429,
         "patch4_int": 0.134921,
         "osc1_ctrl1": 0.370079,
-        "osc1_ctrl2": 0.314961
+        "osc1_ctrl2": 0.314961,
+        "assign": 1.0,
+        "unison_detune": 0.07874,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -14574,6 +15534,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.19685,
       "delay_time": 0.433071,
       "delay_feedback": 0.488189,
@@ -14638,7 +15602,11 @@
         "patch4_dst": 0.0,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.0,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -14695,6 +15663,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.19685,
       "delay_time": 0.433071,
       "delay_feedback": 0.488189,
@@ -14759,7 +15731,11 @@
         "patch4_dst": 0.0,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.0,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -14816,6 +15792,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.19685,
       "delay_time": 0.433071,
       "delay_feedback": 0.488189,
@@ -14880,7 +15860,11 @@
         "patch4_dst": 0.0,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.0,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -14937,6 +15921,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.393701,
       "delay_time": 0.433071,
       "delay_feedback": 0.488189,
@@ -15001,7 +15989,11 @@
         "patch4_dst": 0.0,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.0,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -15058,6 +16050,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.393701,
       "delay_time": 0.433071,
       "delay_feedback": 0.488189,
@@ -15122,7 +16118,11 @@
         "patch4_dst": 0.0,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.0,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -15179,6 +16179,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.346457,
       "delay_time": 0.433071,
       "delay_feedback": 0.165354,
@@ -15243,7 +16247,11 @@
         "patch4_dst": 0.0,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.0,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -15300,6 +16308,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.0,
       "delay_time": 0.543307,
       "delay_feedback": 0.307087,
@@ -15364,7 +16376,11 @@
         "patch4_dst": 0.0,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.0,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     },
     {
@@ -15421,6 +16437,10 @@
       "patch4_int": 0.5,
       "osc1_ctrl1": 0.0,
       "osc1_ctrl2": 0.0,
+      "assign": 0.5,
+      "unison_detune": 0.0,
+      "pan": 0.5,
+      "trigger_multi": 0.0,
       "chorus_mix": 0.0,
       "delay_time": 0.19685,
       "delay_feedback": 0.385827,
@@ -15485,7 +16505,11 @@
         "patch4_dst": 0.0,
         "patch4_int": 0.5,
         "osc1_ctrl1": 0.0,
-        "osc1_ctrl2": 0.0
+        "osc1_ctrl2": 0.0,
+        "assign": 0.5,
+        "unison_detune": 0.0,
+        "pan": 0.5,
+        "trigger_multi": 0.0
       }
     }
   ]
