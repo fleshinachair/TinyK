@@ -27,12 +27,56 @@
             "Category, Program,",
             "Cutoff, Resonance,",
             "Amp Attack, Release,",
-            "Arp on / off,",
+            "Timbre Edit (T1 / T2",
+            "in Layer, N/A in",
+            "Single), Arp on/off."
+          ]
+        },
+        {
+          "title": "2: Osc/Timbre",
+          "lines": [
+            "Wave 1, Wave 2,",
+            "Pulse Width, Semi,",
+            "Tune, Voice Mode",
+            "(Single / Layer),",
+            "Timbre Balance,",
             "Mod Wheel (as CC1)."
           ]
         },
         {
-          "title": "2: Arp Settings",
+          "title": "3: Envelopes",
+          "lines": [
+            "Filter EG: Attack,",
+            "Decay, Sustain,",
+            "Release.",
+            "Amp EG: Decay,",
+            "Sustain.",
+            "Key Track, EG Int."
+          ]
+        },
+        {
+          "title": "4: Mix/Filter",
+          "lines": [
+            "Osc Mix, Noise,",
+            "Sync / Ring,",
+            "Filter Type (LPF24,",
+            "LPF12, BPF12, HPF12),",
+            "Drive, Level,",
+            "Portamento."
+          ]
+        },
+        {
+          "title": "5: Effects",
+          "lines": [
+            "Chorus mix,",
+            "Delay Time, Feedback,",
+            "Delay mix,",
+            "Master Vol, Pan,",
+            "LFO 1 & 2 rates."
+          ]
+        },
+        {
+          "title": "6: Arp Settings",
           "lines": [
             "Type: UP, DOWN, ALT1,",
             "ALT2, RANDOM, TRIGGER",
@@ -44,7 +88,7 @@
           ]
         },
         {
-          "title": "3: Arp Steps",
+          "title": "7: Arp Steps",
           "lines": [
             "8 knobs = 8 steps:",
             "top row 1-4,",
@@ -54,48 +98,6 @@
             "Inverted: sounding",
             "Dotted: past the",
             "pattern length."
-          ]
-        },
-        {
-          "title": "4: Osc/Timbre",
-          "lines": [
-            "Wave 1, Pulse Width,",
-            "Wave 2, Semi, Tune,",
-            "Voice Mode (Single /",
-            "Layer), Timbre Edit,",
-            "Timbre Balance."
-          ]
-        },
-        {
-          "title": "5: Envelopes",
-          "lines": [
-            "Filter EG: Attack,",
-            "Decay, Sustain,",
-            "Release.",
-            "Amp EG: Decay,",
-            "Sustain.",
-            "Key Track, EG Int."
-          ]
-        },
-        {
-          "title": "6: Mix/Filter",
-          "lines": [
-            "Osc Mix, Noise,",
-            "Sync / Ring,",
-            "Filter Type (LPF24,",
-            "LPF12, BPF12, HPF12),",
-            "Portamento, Level,",
-            "Drive."
-          ]
-        },
-        {
-          "title": "7: Effects",
-          "lines": [
-            "Chorus mix,",
-            "Delay Time, Feedback,",
-            "Delay mix,",
-            "LFO 1 & 2 rates,",
-            "Master Vol, Pan."
           ]
         },
         {
@@ -126,11 +128,17 @@
     {
       "title": "Layer Mode",
       "lines": [
-        "Timbre Edit picks the",
-        "timbre the per-timbre",
-        "pages edit: [T1] or",
+        "Timbre Edit (Perf)",
+        "picks the timbre the",
+        "per-timbre knobs edit",
+        "on Perf, Osc/Timbre,",
+        "Envelopes and",
+        "Mix/Filter: [T1] or",
         "[T2] in the header,",
-        "labels T2.CUT etc."
+        "labels T1.CUT/T2.CUT.",
+        "In Single mode there",
+        "is one timbre: Timbre",
+        "Edit reads N/A."
       ]
     }
   ]

@@ -158,28 +158,36 @@ def host_api():
         manifest = json.load(open(os.path.join(cal.ROOT, "src", "module.json"), encoding="utf-8"))
         check(hier == manifest["capabilities"]["ui_hierarchy"], "engine ui_hierarchy == module.json ui_hierarchy")
         levels = hier["levels"]
-        pages = {"perf": ("Perf [T1]", ["category", "patch", "cutoff", "resonance", "attack2", "release2", "arp_on", "mod_wheel"]),
-                 "osc": ("Osc/Timbre [T1]", ["wave1", "pulse_width", "wave2", "osc2_semi", "osc2_tune", "voice_mode",
-                                             "timbre_edit", "timbre_balance"]),
+        # Sound design first (Perf, Osc/Timbre, Envelopes, Mix/Filter, Effects), then the arpeggiator, then Bank;
+        # Timbre Edit on Perf, next to the per-timbre macros it switches
+        pages = {"perf": ("Perf [T1]", ["category", "patch", "cutoff", "resonance", "attack2", "release2", "timbre_edit", "arp_on"]),
+                 "osc": ("Osc/Timbre [T1]", ["wave1", "wave2", "pulse_width", "osc2_semi", "osc2_tune", "voice_mode",
+                                             "timbre_balance", "mod_wheel"]),
                  "env": ("Envelopes [T1]", ["attack1", "decay1", "sustain1", "release1", "decay2", "sustain2", "keytrack", "env_int"]),
-                 "fx": ("Effects", ["chorus_mix", "delay_time", "delay_feedback", "delay_mix", "lfo1_rate", "lfo2_rate",
-                                    "master_vol", "pan"]),
-                 "mix": ("Mix/Filter [T1]", ["osc_mix", "noise_level", "sync_ring", "filter_type", "portamento", "level", "drive"]),
+                 "mix": ("Mix/Filter [T1]", ["osc_mix", "noise_level", "sync_ring", "filter_type", "drive", "level", "portamento"]),
+                 "fx": ("Effects", ["chorus_mix", "delay_time", "delay_feedback", "delay_mix", "master_vol", "pan",
+                                    "lfo1_rate", "lfo2_rate"]),
                  "arpset": ("Arp Settings", ["arp_type", "arp_range", "arp_resolution", "arp_gate", "arp_swing", "arp_latch",
                                              "arp_key_sync", "arp_target"]),
                  "steps": ("Arp Steps", [f"arp_step{n}" for n in range(1, 9)])}
-        check([p.get("level") for p in levels["root"]["params"]] == ["perf", "arpset", "steps", "osc", "env", "mix", "fx", "bank"]
+        check([p.get("level") for p in levels["root"]["params"]] == ["perf", "osc", "env", "mix", "fx", "arpset", "steps", "bank"]
               and levels["root"]["knobs"] == [],
               f"root is the preset browser with the page levels in order: {[p.get('level') for p in levels['root']['params']]}")
         check(all(levels[k]["name"] == name and levels[k]["knobs"] == knobs for k, (name, knobs) in pages.items()),
-              "Perf / Osc/Timbre / Envelopes / Effects / Mix/Filter / Arp Settings / Arp Steps pages hold their knobs (per-timbre pages badged [T1])")
+              "Perf / Osc/Timbre / Envelopes / Mix/Filter / Effects / Arp Settings / Arp Steps pages hold their knobs (per-timbre pages badged [T1])")
+        help_doc = json.load(open(os.path.join(cal.ROOT, "src", "help.json"), encoding="utf-8"))
+        help_pages = [c["title"] for c in next(c for c in help_doc["children"] if c["title"] == "Pages")["children"]]
+        check(help_pages == [f"{i}: {levels[p['level']]['label']}" for i, p in enumerate(levels["root"]["params"], 1)],
+              f"help.json lists the pages in the same order: {help_pages}")
         every = [k for _, knobs in pages.values() for k in knobs]
         check(len(every) == len(set(every)) and not {"bank_side", "program", "bank_file", "detune", "sub_level"} & set(every),
               "each control on one page; no A/B, Bank, Detune or Sub Level knob")
         check(meta["wave1"].get("options") == ["Saw", "Square", "Triangle", "Sine", "Vox", "DWGS", "Noise"]
               and meta["wave1"].get("short_options") == ["SAW", "SQR", "TRI", "SIN", "VOX", "DWG", "NZ"]
-              and meta["wave2"].get("short_options") == ["SAW", "SQR", "TRI"] and "short_name" not in meta["cutoff"],
-              "Wave 1/2 are enums named for the waveform; Timbre 1 labels are the plain ones")
+              and meta["wave2"].get("short_options") == ["SAW", "SQR", "TRI"]
+              and meta["cutoff"].get("short_name") == ("T1.CUT" if get("voice_mode") == "1" else None),
+              f"Wave 1/2 are enums named for the waveform; Timbre 1 labels: {meta['cutoff'].get('short_name')!r} "
+              f"(voice mode {get('voice_mode')}: T1.CUT in Layer, plain in Single)")
         missing = [k for k in every if k not in meta]
         check(not missing, f"chain_params describes every page knob (missing: {missing})")
 
@@ -219,17 +227,49 @@ def host_api():
               f"Timbre 2 edit: is_loading {loading}, page {hier2['levels']['perf']['name']!r}, "
               f"cutoff cell {meta2['cutoff'].get('short_name')!r}")
         put("level", "0.75")
+        macros = ("cutoff", "resonance", "attack2", "release2")  # the Perf page's per-timbre knobs
+        put("timbre_edit", "0")
+        t1_macros = [get(k) for k in macros]
+        put("timbre_edit", "1")
+        for k in macros:
+            put(k, "0.3")
+        t2_macros = [get(k) for k in macros]
         put("timbre_edit", "0")
         check(get("level") == "0.2500", f"Level edits the selected timbre only (Timbre 1 kept {get('level')})")
+        check([get(k) for k in macros] == t1_macros and t2_macros == ["0.3000"] * 4,
+              f"Perf macros (Cutoff, Resonance, Amp Atk / Rel) edit the selected timbre: T2 {t2_macros}, T1 kept {t1_macros}")
         put("voice_mode", "0")
         get("is_loading")             # the host takes the change back to Timbre 1
         # Filter Type and Sync / Ring are option boxes; Sync / Ring in the hardware's order (off, ring, sync,
         # ring sync), which the engine remaps to its own (off, sync, ring, both)
         check(meta["filter_type"].get("short_options") == ["LPF24", "LPF12", "BPF12", "HPF12"]
               and meta["sync_ring"].get("short_options") == ["OFF", "RING", "SYNC", "R.SNC"]
-              and meta["voice_mode"].get("short_options") == ["SNGL", "LAYR"]
-              and meta["timbre_edit"].get("short_options") == ["T1", "T2"],
-              "Filter Type / Sync-Ring / Voice Mode / Timbre Edit option-box texts")
+              and meta["voice_mode"].get("short_options") == ["SNGL", "LAYR"],
+              "Filter Type / Sync-Ring / Voice Mode option-box texts")
+        # Single mode has one timbre: Timbre Edit says N/A and the per-timbre labels are plain; Layer mode names
+        # the edited timbre on the labels (T1.CUT / T2.CUT) and the per-timbre pages' headers ([T1] / [T2])
+        seen = {}
+        for vm, te in (("0", "0"), ("0", "1"), ("1", "0"), ("1", "1")):
+            put("voice_mode", vm)
+            put("timbre_edit", te)
+            changed = [get("is_loading"), get("is_loading")]
+            m = {e["key"]: e for e in json.loads(get("chain_params"))}
+            names = {k: v["name"] for k, v in json.loads(get("ui_hierarchy"))["levels"].items()}
+            seen[vm + te] = (m["timbre_edit"].get("short_options"), m["cutoff"].get("short_name"),
+                             m["attack1"].get("short_name"), m["drive"].get("label"), m["wave1"].get("short_name"),
+                             names["osc"], names["env"], names["mix"], names["perf"], changed)
+        single = (["N/A", "N/A"], None, None, None, None, "Osc/Timbre [T1]", "Envelopes [T1]", "Mix/Filter [T1]", "Perf [T1]")
+        check(seen["00"][:-1] == single and seen["01"][:-1] == single and seen["01"][-1] == ["0", "0"],
+              f"Single mode: Timbre Edit {seen['00'][0]}, plain labels, either stored edit choice: {seen['00'][:5]}")
+        check(seen["10"][:-1] == (["T1", "T2"], "T1.CUT", "T1.FATK", "T1 Drive", "T1.WV1", "Osc/Timbre [T1]",
+                                  "Envelopes [T1]", "Mix/Filter [T1]", "Perf [T1]") and seen["10"][-1] == ["1", "0"],
+              f"Layer, Timbre 1: {seen['10'][:-1]}; is_loading {seen['10'][-1]} (the Voice Mode turn is a label change)")
+        check(seen["11"][:-1] == (["T1", "T2"], "T2.CUT", "T2.FATK", "T2 Drive", "T2.WV1", "Osc/Timbre [T2]",
+                                  "Envelopes [T2]", "Mix/Filter [T2]", "Perf [T2]") and seen["11"][-1] == ["1", "0"],
+              f"Layer, Timbre 2: {seen['11'][:-1]}; is_loading {seen['11'][-1]}")
+        put("voice_mode", "0")
+        put("timbre_edit", "0")
+        get("is_loading")
         put("filter_type", "BPF12")
         ft = get("filter_type")
         put("sync_ring", "R.SNC")
@@ -257,10 +297,13 @@ def host_api():
         prog = {e["key"]: e for e in json.loads(get("chain_params"))}["patch"]
         check(prog["options"][11] == "B.64 Name 107" and get("is_loading") == "0",
               f"re-read Program options name the new category and bank: {prog['options'][11]!r}")
+        vm_before = get("voice_mode")
         put("patch", "11")            # by index: B4
+        relabel = get("is_loading")   # only the timbre labels can change (a program in the other voice mode)
         check(get("preset") == str(64 + 5 * 8 + 3) and get("category") == "5" and get("patch") == "11"
-              and get("is_loading") == "0",
-              f"Category Retro + Program B4 -> preset {get('preset')} (expected {64 + 5 * 8 + 3}); no label change")
+              and relabel == ("0" if get("voice_mode") == vm_before else "1"),
+              f"Category Retro + Program B4 -> preset {get('preset')} (expected {64 + 5 * 8 + 3}); "
+              f"is_loading {relabel} (voice mode {vm_before} -> {get('voice_mode')})")
         check(get("preset_name") == "B.64 Name 107", f"name from the selected bank: {get('preset_name')!r}")
         put("patch", "A.62 Name 041")
         check(get("preset") == str(5 * 8 + 1), f"Program by its label -> preset {get('preset')}")
@@ -390,6 +433,81 @@ def host_api():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def multi_instance():
+    """Two slots each running TinyK: one dsp.so, two v2 instances that must share nothing."""
+    print("\nTwo instances (two slots):")
+    tmp = tempfile.mkdtemp(prefix="tinyk_multi_")
+    try:
+        lib = ctypes.CDLL(cal.build_library(tmp))
+        lib.tinyk_v2_create_n.argtypes = [ctypes.c_int, ctypes.c_char_p]
+        lib.tinyk_v2_set_n.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_char_p]
+        lib.tinyk_v2_get_n.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
+        lib.tinyk_v2_midi_n.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
+        lib.tinyk_v2_render_n.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_int16), ctypes.c_int]
+        module_dir = os.path.join(tmp, "module")
+        os.makedirs(os.path.join(module_dir, "banks"))
+        shutil.copy(FACTORY, os.path.join(module_dir, "banks", "MicroKorgFactory.syx"))
+
+        def get(n, key):
+            buf = ctypes.create_string_buffer(65536)
+            return buf.value.decode() if lib.tinyk_v2_get_n(n, key.encode(), buf, len(buf)) >= 0 else None
+
+        def put(n, key, val):
+            lib.tinyk_v2_set_n(n, key.encode(), str(val).encode())
+
+        def midi(n, *msg):
+            lib.tinyk_v2_midi_n(n, bytes(msg), len(msg))
+
+        def peak(n, blocks=40):
+            out = (ctypes.c_int16 * 256)()
+            top = 0
+            for _ in range(blocks):
+                lib.tinyk_v2_render_n(n, out, 128)
+                top = max(top, max(abs(v) for v in out))
+            return top
+
+        check(lib.tinyk_v2_create_n(0, module_dir.encode()) == 1 and lib.tinyk_v2_create_n(1, module_dir.encode()) == 1,
+              "two instances created")
+        keys = ("preset", "bank_file_name", "cutoff", "voice_mode", "timbre_edit", "modfx_type", "arp_on", "arp_step1")
+        fresh = {k: get(1, k) for k in keys}
+        state1 = get(1, "state")
+        chain1 = get(1, "chain_params")
+        put(0, "bank_file", "MicroKorgFactory")
+        put(0, "preset", "20")
+        put(0, "cutoff", "0.123")
+        put(0, "voice_mode", "1")
+        put(0, "timbre_edit", "1")
+        put(0, "modfx_type", "2")
+        put(0, "arp_on", "1")
+        put(0, "arp_step1", "Rest")
+        edited = {k: get(0, k) for k in keys}
+        check({k: get(1, k) for k in keys} == fresh and edited != fresh,
+              f"edits on slot 1 leave slot 2 alone: slot 1 {edited}, slot 2 {fresh}")
+        check(get(1, "state") == state1 and get(1, "chain_params") == chain1 and get(0, "state") != state1,
+              "slot 2's state and chain_params unchanged (bank, program, labels)")
+        load0 = [get(0, "is_loading"), get(0, "is_loading")]
+        check(load0 == ["1", "0"] and get(1, "is_loading") == "0",
+              f"label changes are reported to the slot that made them only: slot 1 {load0}, slot 2 {get(1, 'is_loading')}")
+
+        # Audio: a note on slot 1 sounds on slot 1 only; a note off on slot 2 does not stop it
+        put(0, "arp_on", "0")
+        put(0, "voice_mode", "0")
+        put(1, "preset", "0")
+        quiet = [peak(0, 4), peak(1, 4)]
+        midi(0, 0x90, 60, 100)
+        sounding = [peak(0), peak(1)]
+        midi(1, 0x80, 60, 0)
+        midi(1, 0xB0, 123, 0)
+        held = peak(0)
+        check(quiet == [0, 0] and sounding[0] > 1000 and sounding[1] == 0 and held > 1000,
+              f"a note on slot 1 sounds there only (peaks {sounding}); slot 2's note off / all notes off leave it ({held})")
+        midi(1, 0x90, 64, 100)
+        both = [peak(0), peak(1)]
+        check(both[0] > 1000 and both[1] > 1000, f"both slots play at once: peaks {both}")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main():
     if not os.path.exists(FACTORY):
         sys.exit(f"missing {FACTORY}")
@@ -466,6 +584,7 @@ def main():
         check(sel("bank_file", "9") == 127, "bank_file beyond the loaded banks clamps")
         user_banks(fptr)
         host_api()
+        multi_instance()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print(f"\n{'ALL PASSED' if not FAILS else f'{len(FAILS)} FAILED'}")

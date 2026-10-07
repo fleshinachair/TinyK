@@ -197,6 +197,17 @@ int tinyk_dsp_v2_get(const char *key, char *buf, int buf_len);
 TK_EXPORT int tinyk_v2_create(const char *module_dir) { return tinyk_dsp_v2_create(module_dir); }
 TK_EXPORT void tinyk_v2_set(const char *key, const char *val) { tinyk_dsp_v2_set(key, val); }
 TK_EXPORT int tinyk_v2_get(const char *key, char *buf, int buf_len) { return tinyk_dsp_v2_get(key, buf, buf_len); }
+/* Two instances side by side (n = 0 or 1), as two slots on the Move */
+int tinyk_dsp_v2_create_n(int n, const char *module_dir);
+void tinyk_dsp_v2_set_n(int n, const char *key, const char *val);
+int tinyk_dsp_v2_get_n(int n, const char *key, char *buf, int buf_len);
+void tinyk_dsp_v2_midi_n(int n, const uint8_t *msg, int len);
+void tinyk_dsp_v2_render_n(int n, int16_t *out, int frames);
+TK_EXPORT int tinyk_v2_create_n(int n, const char *module_dir) { return tinyk_dsp_v2_create_n(n, module_dir); }
+TK_EXPORT void tinyk_v2_set_n(int n, const char *key, const char *val) { tinyk_dsp_v2_set_n(n, key, val); }
+TK_EXPORT int tinyk_v2_get_n(int n, const char *key, char *buf, int buf_len) { return tinyk_dsp_v2_get_n(n, key, buf, buf_len); }
+TK_EXPORT void tinyk_v2_midi_n(int n, const uint8_t *msg, int len) { tinyk_dsp_v2_midi_n(n, msg, len); }
+TK_EXPORT void tinyk_v2_render_n(int n, int16_t *out, int frames) { tinyk_dsp_v2_render_n(n, out, frames); }
 TK_EXPORT const char *tinyk_bank_name(int b) { return tinyk_dsp_bank_name(b); }
 TK_EXPORT int tinyk_bank_preset(int b, int idx, float *t1, float *t2, float *fx, char *label, int label_len) {
     return tinyk_dsp_bank_preset(b, idx, t1, t2, fx, label, label_len);

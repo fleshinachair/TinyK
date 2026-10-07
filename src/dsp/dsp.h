@@ -304,6 +304,11 @@ typedef struct {
     uint8_t mono_vel[2][16];
     int mono_count[2];
     uint32_t phase_rng;     /* oscillator start phases (seeded by synth_init: renders stay repeatable) */
+    uint32_t noise_state;   /* white noise (xorshift32, seeded by synth_init) */
+
+    /* Host side, per instance: each slot picks its own bank, and reports its own label changes (is_loading) */
+    int bank_file;          /* 0 = built-in, 1..N = the .syx banks found at start-up */
+    int labels_reported;    /* label_context() the host last read */
 } synth_engine_t;
 
 /* Move Plugin Host API v1: field for field Schwung's src/host/plugin_api_v1.h (the order is the ABI). Every
@@ -464,7 +469,6 @@ void synth_all_notes_off(synth_engine_t *synth);
 void synth_set_param(synth_engine_t *synth, const char *key, float val);
 float synth_get_param(const synth_engine_t *synth, const char *key);
 void synth_load_preset(synth_engine_t *synth, int preset_idx);
-void load_preset(int index);
 void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames);
 
 #ifdef __cplusplus
