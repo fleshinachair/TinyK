@@ -145,6 +145,15 @@ static const float LFO_SYNC_NOTES[15] = {
     1.0f / 6.0f, 1.0f / 8.0f, 3.0f / 32.0f, 1.0f / 12.0f, 1.0f / 16.0f, 1.0f / 24.0f, 1.0f / 32.0f
 };
 
+/* Shortest time a patch LFO may take for a full -1 -> +1 swing (slew limit on its output) */
+#ifndef LFO_SLEW_S
+#define LFO_SLEW_S 0.0015f
+#endif
+/* ...and a one-pole after it that rounds the ramp's corners, where its slope used to jump */
+#ifndef LFO_SMOOTH_S
+#define LFO_SMOOTH_S 0.0005f
+#endif
+
 /* Delay time base when the delay is tempo-synced, the other way round (1/32 .. 1/1, as the Time knob turns):
  * the factory programs' most used values 7, 5, 8 are then 3/16, 1/8, 1/4 (the LFO order would make 5 and 8
  * a 1/3 and a 1/6). */
@@ -634,7 +643,7 @@ int tinyk_dsp_bank_preset(int b, int idx, float *t1, float *t2, float *fx, char 
 void synth_init(synth_engine_t *synth) {
     if (!synth) synth = &g_synth;
     memset(synth, 0, sizeof(*synth));
-    synth->tempo_bpm = tinyk_tuning.lfo_tempo_bpm;
+    synth->tempo_bpm = 0.0f;  /* unknown: the first block takes the host's tempo as is */
     synth->delay_sync_note = -1;
     noise_state = NOISE_SEED;
 
@@ -1424,8 +1433,42 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
     const float fs = (float)MOVE_SAMPLE_RATE;
 
     /* Session tempo and transport position, once per block: tempo-synced LFOs and delays follow the Move */
-    synth->tempo_bpm = host_tempo_bpm();
+    {
+        /* The host tempo, smoothed: while playing it is measured from MIDI clock and jitters by about
+         * +-0.3 BPM block to block (seen on the Move), which wobbled synced delay times. Real changes (> 2 BPM
+         * away) are followed within ~50 ms, small wobble over ~1 s; the first block takes the value as is. */
+        float bpm = host_tempo_bpm();
+        if (synth->tempo_bpm <= 0.0f) {
+            synth->tempo_bpm = bpm;
+        } else {
+            float tau = (fabsf(bpm - synth->tempo_bpm) > 2.0f) ? 0.05f : 1.0f;
+            synth->tempo_bpm += (bpm - synth->tempo_bpm) * (1.0f - expf(-(float)frames / (tau * fs)));
+        }
+    }
     const double beat = host_beat_position();
+    const float lfo_slew_step = 2.0f / (LFO_SLEW_S * fs);
+    const float lfo_smooth_k = 1.0f - expf(-1.0f / (LFO_SMOOTH_S * fs));
+
+#ifdef TINYK_TEMPO_LOG
+    /* Diagnostic builds only (-DTINYK_TEMPO_LOG): what the host reports, logged at start and on every change.
+     * host->log does blocking file I/O when /data/UserData/schwung/debug_log_on exists: never in a release. */
+    {
+        static int logged = 0, last_running = -2, last_clock = -9;
+        static float last_raw = -1.0f;
+        float raw = (g_host && g_host->get_bpm) ? g_host->get_bpm() : -1.0f;
+        int running = beat >= 0.0;
+        int clock = (g_host && g_host->get_clock_status) ? g_host->get_clock_status() : -1;
+        if (g_host && g_host->log &&
+            (!logged || fabsf(raw - last_raw) > 0.5f || running != last_running || clock != last_clock)) {
+            char msg[200];
+            snprintf(msg, sizeof msg, "TinyK tempo: api %u get_bpm %s -> %.2f (using %.2f) | beat_position %s -> %.3f | clock status %d",
+                     (unsigned)g_host->api_version, g_host->get_bpm ? "set" : "NULL", raw, synth->tempo_bpm,
+                     g_host->get_beat_position ? "set" : "NULL", beat, clock);
+            g_host->log(msg);
+            logged = 1; last_raw = raw; last_running = running; last_clock = clock;
+        }
+    }
+#endif
 
     /* Extract global parameters */
     float lfo1_rate_p   = synth->params[PARAM_LFO1_RATE];
@@ -1670,6 +1713,13 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
         noise_state ^= noise_state >> 17;
         noise_state ^= noise_state << 5;
         float white_noise = (float)(int32_t)noise_state * (1.0f / 2147483648.0f);
+        /* The noise you hear is white after the brightness tilt: the tilt models the VST oscillators' extra top
+         * end, and on noise it added ~18 dB around 17 kHz (A.21's off-beat hat came out as loud, thin hiss). So
+         * the audible noise is pre-shaped by the tilt's inverse, (1 + a1 z^-1) / (b0 + b1 z^-1), stable since the
+         * tilt's zero is inside the unit circle. S&H keeps the raw source. */
+        float heard_noise = (white_noise + tilt_a1 * synth->noise_x1) / tilt_b0 - (tilt_b1 / tilt_b0) * synth->noise_y1;
+        synth->noise_x1 = white_noise;
+        synth->noise_y1 = heard_noise;
 
         /* Patch-matrix LFOs, per timbre. LFO2's rate can itself be a patch destination; only the
          * timbre-wide sources (LFO1, pitch bend, mod wheel) can drive it, since it is shared by the timbre's voices. */
@@ -1680,7 +1730,7 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
             for (int p = 0; p < 4; p++) {
                 if (ex->patch_dst[p] != PATCH_DST_LFO2_FREQ || ex->patch_int[p] == 0.0f) continue;
                 float sv = 0.0f;
-                if (ex->patch_src[p] == PATCH_SRC_LFO1) sv = patch_lfo_value(&synth->patch_lfo[t][0], 0, ex->lfo_wave[0]);
+                if (ex->patch_src[p] == PATCH_SRC_LFO1) sv = synth->patch_lfo[t][0].out;
                 else if (ex->patch_src[p] == PATCH_SRC_PITCH_BEND) sv = synth->bend_src;
                 else if (ex->patch_src[p] == PATCH_SRC_MOD_WHEEL) sv = synth->modwheel_src;
                 lfo2_fmod += t_cfg[t].patch_amt[p] * sv;
@@ -1692,7 +1742,14 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
                     lf->phase -= floorf(lf->phase);
                     lf->sh_value = white_noise; /* sample & hold from the deterministic noise source */
                 }
-                plfo[t][l] = patch_lfo_value(lf, l, ex->lfo_wave[l]);
+                /* Slew-limited: a full -1 -> +1 swing takes at least LFO_SLEW_S, so the saw's wrap, square
+                 * edges, S&H steps and key-sync restarts are short ramps instead of one-sample jumps (an
+                 * LFO -> amp / pan route turned each into a click: A.21's gate, A.31's S&H pan). Continuous
+                 * shapes are far slower than the limit and pass unchanged. */
+                float d = patch_lfo_value(lf, l, ex->lfo_wave[l]) - lf->lim;
+                lf->lim += fmaxf(-lfo_slew_step, fminf(lfo_slew_step, d));
+                lf->out += (lf->lim - lf->out) * lfo_smooth_k;
+                plfo[t][l] = lf->out;
             }
         }
 
@@ -1801,7 +1858,7 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
                     break;
                 }
                 case OSC1_WAVE_NOISE:
-                    osc1_out = white_noise;
+                    osc1_out = heard_noise;
                     break;
             }
 
@@ -1837,7 +1894,7 @@ void synth_render(synth_engine_t *synth, int16_t *out_lr, int frames) {
             float g2 = fminf(1.0f, 2.0f * cfg->osc_mix);
             float osc_sum = (g1 * osc1_out + g2 * osc2_final
                           + cfg->sub_level * sub_out
-                          + fmaxf(0.0f, fminf(1.0f, cfg->noise_level + pmod[PATCH_DST_NOISE])) * white_noise)
+                          + fmaxf(0.0f, fminf(1.0f, cfg->noise_level + pmod[PATCH_DST_NOISE])) * heard_noise)
                           * cfg->level * tinyk_tuning.mixer_trim;
 
             /* --- Envelopes (Exponential Curves) --- */

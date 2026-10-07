@@ -415,14 +415,87 @@ static void test_host_tempo(void) {
     S.timbre_extra[1].lfo_keysync[0] = 0;
     synth_note_on(&S, 60, 100);
     b = render_clocked(0.6, &n);
-    double at_note = window_energy(b, n, 0.005, 0.045), on_beat = window_energy(b, n, 0.380, 0.420);
-    snprintf(what, sizeof what, "transport at beat 4.25: the gate peaks on beat 5 (+0.375 s), %.0f dB over note-on",
-             10.0 * log10(on_beat / (at_note + 1e-12)));
-    check(on_beat > 4.0 * at_note, what);
+    /* the gate closes just before beat 5 (+0.375 s) and reopens on it; key-synced it would be mid-cycle there */
+    double before_beat = window_energy(b, n, 0.345, 0.370), on_beat = window_energy(b, n, 0.380, 0.420);
+    snprintf(what, sizeof what, "transport at beat 4.25: the gate closes before beat 5 (+0.375 s) and reopens on it (%.0f dB)",
+             10.0 * log10(on_beat / 0.040 / (before_beat / 0.025 + 1e-12)));
+    check(on_beat / 0.040 > 100.0 * before_beat / 0.025, what);
     free(b);
 
     g_fake_beat = -1.0;
     move_plugin_init_v2(NULL);
+}
+
+/* Worst 1 ms burst of high-frequency content (second difference) relative to the local level (+-25 ms) of
+ * channel ch, after `from` seconds, in dB: an LFO stepping a gain shows up as a burst well above the rest. */
+static double worst_hf_burst_db(const int16_t *b, int frames, int ch, double from) {
+    int w = SR / 1000, n = frames / w;
+    double *hf = calloc((size_t)n, sizeof(double)), *lv = calloc((size_t)n, sizeof(double)), worst = -200.0;
+    for (int i = 0; i < n; i++) {
+        for (int j = i * w; j < (i + 1) * w; j++) {
+            double x = b[2 * j + ch];
+            double d2 = (j >= 2) ? x - 2.0 * b[2 * (j - 1) + ch] + b[2 * (j - 2) + ch] : 0.0;
+            hf[i] += d2 * d2;
+            lv[i] += x * x;
+        }
+    }
+    for (int i = (int)(from * 1000.0) + 25; i < n - 25; i++) {
+        double loc = 0.0;
+        for (int k = i - 25; k < i + 25; k++) loc += lv[k];
+        double db = 10.0 * log10(hf[i] / (loc / 50.0 + 1e-9) + 1e-12);
+        if (db > worst) worst = db;
+    }
+    free(hf); free(lv);
+    return worst;
+}
+
+/* A.31's Timbre 1: an S&H LFO2 (1/16, key-synced) -> pan +63 on a held note. Each step used to switch the
+ * channel gains in one sample: a click per sixteenth. The patch LFO slew limit turns them into short ramps. */
+static void test_lfo_steps_click_free(void) {
+    printf("\nLFO steps without clicks (A.31 Timbre 1, S&H -> pan +63):\n");
+    double worst[2], plain[2];
+    for (int pass = 0; pass < 2; pass++) {
+        fresh(16);
+        synth_set_param(&S, "timbre_balance", 0.0f); /* Timbre 1 only */
+        synth_set_param(&S, "delay_mix", 0.0f);
+        synth_set_param(&S, "chorus_mix", 0.0f);
+        if (pass == 1)
+            for (int p = 0; p < 4; p++) S.timbre_extra[0].patch_int[p] = 0.0f; /* the same sound, unmodulated */
+        synth_note_on(&S, 60, 100);
+        int n;
+        int16_t *b = render(2.0, &n);
+        double *dst = pass ? plain : worst;
+        dst[0] = worst_hf_burst_db(b, n, 0, 0.2);
+        dst[1] = worst_hf_burst_db(b, n, 1, 0.2);
+        free(b);
+    }
+    char what[128];
+    snprintf(what, sizeof what, "worst HF burst L %.1f / R %.1f dB vs %.1f / %.1f unmodulated (within 5 dB)",
+             worst[0], worst[1], plain[0], plain[1]);
+    check(worst[0] < plain[0] + 5.0 && worst[1] < plain[1] + 5.0, what);
+}
+
+/* The audible noise is white after the brightness tilt: for white noise the first difference carries exactly
+ * twice the energy of the signal, a top-heavy spectrum more (the uncompensated tilt gave 2.9). Osc 1 = noise
+ * through a wide-open LPF12, mono mix. */
+static void test_noise_is_white(void) {
+    printf("\nNoise spectrum after the brightness tilt:\n");
+    open_voice();
+    synth_set_param(&S, "wave1", 1.0f);               /* Noise */
+    synth_set_param(&S, "filter_type", 1.0f / 3.0f);  /* LPF12 */
+    synth_note_on(&S, 60, 100);
+    int n;
+    int16_t *b = render(1.0, &n);
+    double e = 0.0, d = 0.0;
+    for (int i = (int)(0.1 * SR); i < n; i++) {
+        double x = 0.5 * (b[2 * i] + b[2 * i + 1]), p = 0.5 * (b[2 * i - 2] + b[2 * i - 1]);
+        e += x * x;
+        d += (x - p) * (x - p);
+    }
+    char what[96];
+    snprintf(what, sizeof what, "first-difference / signal energy %.2f (white noise 2.00; top-heavy > 2.6)", d / e);
+    check(d / e > 1.2 && d / e < 2.6, what);
+    free(b);
 }
 
 int main(void) {
@@ -432,6 +505,8 @@ int main(void) {
     test_patch_sources();
     test_lfo_saw_gate();
     test_host_tempo();
+    test_lfo_steps_click_free();
+    test_noise_is_white();
     printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "ALL PASSED", failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;
 }
