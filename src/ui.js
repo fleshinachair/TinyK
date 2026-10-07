@@ -4,13 +4,13 @@
  * Handles 128x64 OLED display rendering and 8 hardware encoders
  * across the parameter pages (the same pages as the module.json ui_hierarchy):
  *   PERF:         Category, Program, Cutoff, Res, Amp Attack, Amp Release, Arp, Mod Wheel
- *   OSC / TIMBRE: Wave1, Pulse Width, Wave2, Semi, Tune, Voice Mode, Timbre Edit, Timbre Balance
- *   ENVELOPES:    Filter Atk/Dcy/Sus/Rel, Amp Dcy/Sus, Key Track, EG Int
- *   EFFECTS:      Chorus Mix, Delay Time/Feedback/Mix, LFO1/LFO2 Rate, Master Vol, Pan
- *   MIX / FILTER: Osc Mix, Noise, Sync/Ring, Filter Type, Portamento, Level, Drive
- *   BANK:         the active bank file
  *   ARP SETTINGS: Type, Range, Resolution, Gate, Swing, Latch, Key Sync, Target
  *   ARP STEPS:    Step 1..8 of the arpeggiator's pattern (Rest / Play)
+ *   OSC / TIMBRE: Wave1, Pulse Width, Wave2, Semi, Tune, Voice Mode, Timbre Edit, Timbre Balance
+ *   ENVELOPES:    Filter Atk/Dcy/Sus/Rel, Amp Dcy/Sus, Key Track, EG Int
+ *   MIX / FILTER: Osc Mix, Noise, Sync/Ring, Filter Type, Portamento, Level, Drive
+ *   EFFECTS:      Chorus Mix, Delay Time/Feedback/Mix, LFO1/LFO2 Rate, Master Vol, Pan
+ *   BANK:         the active bank file
  * Pages marked `timbre` edit the timbre selected by Timbre Edit (in Layer mode): their header shows
  * [T1] or [T2], and with Timbre 2 their per-timbre labels read "T2.CUT" etc.
  */
@@ -46,6 +46,27 @@ export const PAGES = [
         ]
     },
     {
+        id: "arpset",
+        name: "ARP SETTINGS",
+        // the program's arpeggiator; a turn changes the running arpeggio at once
+        params: [
+            { key: "arp_type",       label: "Type",   short: "Type",  index: true, values: ["UP", "DOWN", "ALT1", "ALT2", "RND", "TRIG"] },
+            { key: "arp_range",      label: "Range",  short: "Range", index: true, values: ["1 Oct", "2 Oct", "3 Oct", "4 Oct"] },
+            { key: "arp_resolution", label: "Reso",   short: "Reso",  index: true, values: ["1/24", "1/16", "1/12", "1/8", "1/6", "1/4"] },
+            { key: "arp_gate",       label: "Gate",   short: "Gate",  int: [0, 100], format: (v) => `${Math.round(v)}%` },
+            { key: "arp_swing",      label: "Swing",  short: "Swing", int: [-100, 100], format: (v) => `${v > 0 ? "+" : ""}${Math.round(v)}%` },
+            { key: "arp_latch",      label: "Latch",  short: "Latch", index: true, values: ["Off", "On"] },
+            { key: "arp_key_sync",   label: "KeySync", short: "KSync", index: true, values: ["Off", "On"] },
+            { key: "arp_target",     label: "Target", short: "Targ",  index: true, values: ["Both", "T1", "T2"] }
+        ]
+    },
+    {
+        id: "steps",
+        name: "ARP STEPS",
+        // the arpeggiator's 8-step trigger pattern: each step plays or rests, live
+        params: [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ key: `arp_step${n}`, label: `Step${n}`, short: `St${n}`, values: ["Rest", "Play"] }))
+    },
+    {
         id: "osc",
         name: "OSC / TIMBRE",
         timbre: true,
@@ -77,20 +98,6 @@ export const PAGES = [
         ]
     },
     {
-        id: "fx",
-        name: "EFFECTS",
-        params: [
-            { key: "chorus_mix",  label: "Chor",  short: "Chor",  format: pct },
-            { key: "delay_time",  label: "Time",  short: "Time",  format: (v) => `${Math.round(v * 1000)}ms` },
-            { key: "delay_feedback",label: "Fdbk",short: "Fdbk",  format: pct },
-            { key: "delay_mix",   label: "D.Mix", short: "D.Mix", format: pct },
-            { key: "lfo1_rate",   label: "LFO1",  short: "LFO1",  format: (v) => `${(0.05 * Math.pow(600, v)).toFixed(1)}Hz` },
-            { key: "lfo2_rate",   label: "LFO2",  short: "LFO2",  format: (v) => `${(0.05 * Math.pow(600, v)).toFixed(1)}Hz` },
-            { key: "master_vol",  label: "Vol",   short: "Vol",   format: pct },
-            { key: "pan",         label: "Pan",   short: "Pan",   format: (v) => v < 0.48 ? `L${Math.round((0.5 - v) * 200)}` : (v > 0.52 ? `R${Math.round((v - 0.5) * 200)}` : "C") }
-        ]
-    },
-    {
         id: "mix",
         name: "MIX / FILTER",
         timbre: true,
@@ -106,33 +113,26 @@ export const PAGES = [
         ]
     },
     {
+        id: "fx",
+        name: "EFFECTS",
+        params: [
+            { key: "chorus_mix",  label: "Chor",  short: "Chor",  format: pct },
+            { key: "delay_time",  label: "Time",  short: "Time",  format: (v) => `${Math.round(v * 1000)}ms` },
+            { key: "delay_feedback",label: "Fdbk",short: "Fdbk",  format: pct },
+            { key: "delay_mix",   label: "D.Mix", short: "D.Mix", format: pct },
+            { key: "lfo1_rate",   label: "LFO1",  short: "LFO1",  format: (v) => `${(0.05 * Math.pow(600, v)).toFixed(1)}Hz` },
+            { key: "lfo2_rate",   label: "LFO2",  short: "LFO2",  format: (v) => `${(0.05 * Math.pow(600, v)).toFixed(1)}Hz` },
+            { key: "master_vol",  label: "Vol",   short: "Vol",   format: pct },
+            { key: "pan",         label: "Pan",   short: "Pan",   format: (v) => v < 0.48 ? `L${Math.round((0.5 - v) * 200)}` : (v > 0.52 ? `R${Math.round((v - 0.5) * 200)}` : "C") }
+        ]
+    },
+    {
         id: "bank",
         name: "BANK",
         params: [
             // 0 = built-in, 1..N = .syx dumps in the module's banks/ folder; shows the file name
             { key: "bank_file",      label: "Bank",    short: "Bank", bank: true }
         ]
-    },
-    {
-        id: "arpset",
-        name: "ARP SETTINGS",
-        // the program's arpeggiator; a turn changes the running arpeggio at once
-        params: [
-            { key: "arp_type",       label: "Type",   short: "Type",  index: true, values: ["UP", "DOWN", "ALT1", "ALT2", "RND", "TRIG"] },
-            { key: "arp_range",      label: "Range",  short: "Range", index: true, values: ["1 Oct", "2 Oct", "3 Oct", "4 Oct"] },
-            { key: "arp_resolution", label: "Reso",   short: "Reso",  index: true, values: ["1/24", "1/16", "1/12", "1/8", "1/6", "1/4"] },
-            { key: "arp_gate",       label: "Gate",   short: "Gate",  int: [0, 100], format: (v) => `${Math.round(v)}%` },
-            { key: "arp_swing",      label: "Swing",  short: "Swing", int: [-100, 100], format: (v) => `${v > 0 ? "+" : ""}${Math.round(v)}%` },
-            { key: "arp_latch",      label: "Latch",  short: "Latch", index: true, values: ["Off", "On"] },
-            { key: "arp_key_sync",   label: "KeySync", short: "KSync", index: true, values: ["Off", "On"] },
-            { key: "arp_target",     label: "Target", short: "Targ",  index: true, values: ["Both", "T1", "T2"] }
-        ]
-    },
-    {
-        id: "steps",
-        name: "ARP STEPS",
-        // the arpeggiator's 8-step trigger pattern: each step plays or rests, live
-        params: [1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ key: `arp_step${n}`, label: `Step${n}`, short: `St${n}`, values: ["Rest", "Play"] }))
     }
 ];
 

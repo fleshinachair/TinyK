@@ -237,6 +237,7 @@ typedef struct {
     /* DC blocker state (L/R) on the voice mix */
     float dc_x[2];
     float dc_y[2];
+    float out_dc_x[2], out_dc_y[2]; /* a second DC blocker on the output, after the Mod FX and the delay */
 
     /* Brightness tilt (first-order high shelf) on the voice mix: previous input / output, L/R */
     float tilt_x1[2];
@@ -247,6 +248,12 @@ typedef struct {
     float chorus_buf_r[CHORUS_BUFFER_SIZE];
     uint32_t chorus_write_pos;
     float chorus_lfo_phase;
+
+    /* Mod FX (program bytes 23 speed, 24 depth = PARAM_CHORUS_MIX, 25 type): 0 Chorus/Flanger, 1 Ensemble, 2 Phaser */
+    int modfx_type;
+    float modfx_speed;          /* 0..1 */
+    float phaser_ap[2][6];      /* phaser all-pass stage states, per channel */
+    float phaser_fb[2];
 
     /* Preset State */
     int current_preset;
@@ -431,6 +438,11 @@ typedef struct {
     float hpf_ceil_hz;        /* HPF12's highest cutoff, knob plus modulation (fitted on A.21's hat) */
     float unison_spread;      /* unison: the outer voices' stereo place, 0 (centre) .. 1 (hard L / R) */
     float unison_cents_scale; /* unison detune byte -> cents of spread between the outer voices */
+    float modfx_rate_lo_hz;   /* Mod FX LFO: rate = lo * span^speed (speed 0..1, program byte 23 / 127) */
+    float modfx_rate_span;
+    float chorus_center_ms;   /* Chorus/Flanger: delay centre, and its triangle sweep at full depth (+-), ms */
+    float chorus_depth_ms;
+    float chorus_wet;         /* wet copy's gain, added to the dry signal at unity */
 } tinyk_tuning_t;
 
 #ifdef TINYK_TUNING

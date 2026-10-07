@@ -168,8 +168,7 @@ def host_api():
                  "arpset": ("Arp Settings", ["arp_type", "arp_range", "arp_resolution", "arp_gate", "arp_swing", "arp_latch",
                                              "arp_key_sync", "arp_target"]),
                  "steps": ("Arp Steps", [f"arp_step{n}" for n in range(1, 9)])}
-        check([p.get("level") for p in levels["root"]["params"]] == [k for k in pages if k not in ("arpset", "steps")]
-              + ["bank", "arpset", "steps"]
+        check([p.get("level") for p in levels["root"]["params"]] == ["perf", "arpset", "steps", "osc", "env", "mix", "fx", "bank"]
               and levels["root"]["knobs"] == [],
               f"root is the preset browser with the page levels in order: {[p.get('level') for p in levels['root']['params']]}")
         check(all(levels[k]["name"] == name and levels[k]["knobs"] == knobs for k, (name, knobs) in pages.items()),
