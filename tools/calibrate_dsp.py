@@ -221,7 +221,7 @@ def find_compiler():
 def build_library(out_dir):
     ext = ".dll" if os.name == "nt" else ".so"
     out = os.path.join(out_dir, "tinyk_cal" + ext)
-    cmd = find_compiler() + ["-O2", "-shared", "-fPIC", "-DTINYK_LIB", "-DTINYK_TUNING",
+    cmd = find_compiler() + ["-O2", "-shared", "-fPIC", "-DTINYK_LIB", "-DTINYK_TUNING", "-DTINYK_OUTPUT_HEADROOM=1.0f",
                              "-I", os.path.join(ROOT, "src", "dsp"), os.path.join(HERE, "test_render.c"),
                              os.path.join(ROOT, "src", "dsp", "dsp.c"), "-lm", "-o", out]
     r = subprocess.run(cmd, capture_output=True, text=True, cwd=ROOT)

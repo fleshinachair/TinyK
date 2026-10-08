@@ -97,7 +97,7 @@ def user_banks(fptr):
                 n_arp = lib.tinyk_bank_arp(b, i, arp.ctypes.data_as(fptr))
                 want_arp = np.array([ref[i]["arp"][f] for f in ARP_FIELDS], np.float32)
                 worst = max(worst, float(np.abs(arp - want_arp).max()) if n_arp == len(ARP_FIELDS) else 1.0)
-                worst = max(worst, 0.0 if vm == int(ref[i]["voice_mode"]) else 1.0)
+                worst = max(worst, 0.0 if vm == (2 if not ref[i]["data_valid"] else int(ref[i]["voice_mode"])) else 1.0)  # 2 = vocoder
                 labels.append(lab.value.decode())
                 named += len(labels[-1]) > 4
                 vocoders += not ref[i]["data_valid"]
@@ -105,6 +105,133 @@ def user_banks(fptr):
                                  f"matches extracts_presets.py (max diff {worst:.1e}); e.g. {labels[0]!r}, {labels[1]!r}, {labels[64]!r}")
         for f in skipped:
             print(f"  skip  {f} ({os.path.getsize(os.path.join(USER_BANKS, f))} bytes: not a 128-program bank dump)")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def with_modes(dump, modes):
+    """The factory dump with the voice mode (byte 16 bits 4-5: 0 Single, 2 Layer, 3 Vocoder) set on the given programs."""
+    start, end = dump.find(b"\xF0"), dump.rfind(b"\xF7")
+    raw = bytearray(unpack_7to8(dump[start + 5:end]))
+    for idx, mode in modes.items():
+        raw[idx * 254 + 16] = (raw[idx * 254 + 16] & ~0x30) | (mode << 4)
+    return dump[:start + 5] + pack_7to8(raw) + b"\xF7"
+
+
+def vocoder_banks():
+    """Vocoder programs (voice mode byte = 3) are left out of what an instance offers, wherever they sit in the bank."""
+    print("\nVocoder programs are filtered out (any bank):")
+    tmp = tempfile.mkdtemp(prefix="tinyk_vocoder_")
+    try:
+        lib = ctypes.CDLL(cal.build_library(tmp))
+        lib.tinyk_v2_create.argtypes = [ctypes.c_char_p]
+        lib.tinyk_v2_set.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+        lib.tinyk_v2_get.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
+        module_dir = os.path.join(tmp, "module")
+        os.makedirs(os.path.join(module_dir, "banks"))
+        dump = open(FACTORY, "rb").read()
+        progs = load_programs(FACTORY)
+        voc = [i for i, p in enumerate(progs) if ((p[16] >> 4) & 3) == 3]
+        row8 = [r for r in range(128) if r % 64 >= 56]
+        extra = 3  # A.14, a synth program, flagged as vocoder as well: no longer the factory layout
+        banks = {
+            "A_default": dump,                                                  # TinyK_Default.syx: 16 vocoder, row 8
+            "B_novoc": with_modes(dump, {i: 0 for i in voc}),                    # a bank without any
+            "C_scattered": with_modes(dump, {extra: 3}),                         # 17, one outside row 8
+            "D_allvoc": with_modes(dump, {i: 3 for i in range(128)}),            # nothing but vocoder
+            "E_names": with_names(with_modes(dump, {extra: 3}), {i: f"Name {i:03d}" for i in range(128)}),
+        }
+        for name, d in banks.items():
+            open(os.path.join(module_dir, "banks", name + ".syx"), "wb").write(d)
+
+        def get(key):
+            buf = ctypes.create_string_buffer(65536)
+            n = lib.tinyk_v2_get(key.encode(), buf, len(buf))
+            return buf.value.decode() if n >= 0 else None
+
+        def put(key, val):
+            lib.tinyk_v2_set(key.encode(), str(val).encode())
+
+        def meta():
+            return {e["key"]: e for e in json.loads(get("chain_params"))}
+
+        check(lib.tinyk_v2_create(module_dir.encode()) == 1, "instance created")
+        check(voc == row8 and len(voc) == 16, f"TinyK_Default.syx flags exactly the 16 row-8 programs as vocoder: {voc}")
+
+        # Built-in bank (presets.h): 112 programs, seven categories, the matrix without its vocoder row
+        m = meta()
+        names = [get(f"preset_name:{i}") for i in range(112)]
+        check(get("preset_count") == "112" and get("preset_name:112") is None and get("category_count") == "7",
+              f"Built-in: preset_count {get('preset_count')}, category_count {get('category_count')}, preset_name:112 -> {get('preset_name:112')}")
+        check(m["category"]["options"] == ["Trance", "Techno/House", "Electronica", "DnB/Breaks", "Hiphop/Vintage", "Retro", "SE/Hit"],
+              f"Category options without the Vocoder row: {m['category']['options']}")
+        check(names[0].startswith("A.11") and names[55].startswith("A.78") and names[56].startswith("B.11")
+              and names[111].startswith("B.78") and not any(n.startswith(("A.8", "B.8")) for n in names),
+              f"labels run A.11-A.78 then B.11-B.78: {names[0]!r} {names[55]!r} {names[56]!r} {names[111]!r}")
+        seen, bad = set(), []
+        for i in range(112):
+            put("preset", i)
+            row = get("preset_name")
+            seen.add(row)
+            if get("preset") != str(i) or get("preset_name") != names[i] or int(get("category")) > 6:
+                bad.append(i)
+        check(not bad and len(seen) == 112, f"every one of the 112 ordinals loads its own program ({len(bad)} wrong)")
+        put("preset", 500)
+        check(get("preset") == "111", f"jog past the end clamps to the last program: {get('preset')}")
+        put("category", 7)
+        put("patch", 15)
+        check(get("category") == "6" and get("preset_name").startswith("B.78"), f"Category 8 / B8 clamps to {get('preset_name')!r}")
+        put("program", "88")
+        check(get("category") == "6" and get("patch") == "15", f"program 88 -> {get('preset_name')!r}")
+        put("preset", 111)
+        put("bank_file", "A_default")
+        check(get("bank_file_name") == "A_default" and get("preset_count") == "112" and get("preset") == "111",
+              f"a factory-layout .syx bank: 112 programs, ordinal kept ({get('preset_count')}, {get('preset')})")
+
+        # A bank without vocoder programs keeps all 128 and the matrix (the 8th category holds ordinary programs)
+        put("bank_file", "B_novoc")
+        m = meta()
+        put("preset", 127)
+        check(get("preset_count") == "128" and get("category_count") == "8" and m["category"]["options"][7] == "Other"
+              and get("preset") == "127" and get("preset_name").startswith("B.88"),
+              f"no vocoder: {get('preset_count')} programs, {get('category_count')} categories, last {get('preset_name')!r}")
+
+        # Vocoder programs in other places: sequential numbering, groups of 16, never a dead program
+        put("bank_file", "C_scattered")
+        m = meta()
+        put("preset", 110)
+        check(get("preset_count") == "111" and get("category_count") == "7"
+              and m["category"]["options"][0] == "P.001-016" and m["category"]["options"][6] == "P.097-111"
+              and get("preset_name").startswith("P.111") and get("category") == "6" and get("patch") == "14",
+              f"scattered vocoder: {get('preset_count')} programs, categories {m['category']['options'][::6]}, last {get('preset_name')!r}")
+        put("category", 6)
+        m = meta()
+        check(len(m["patch"]["options"]) == 15 and m["patch"]["options"][0].startswith("P.097")
+              and m["patch"]["short_options"] == [f"{s}{c}" for s in "AB" for c in range(1, 9)][:15],
+              f"the last group lists its {len(m['patch']['options'])} programs")
+        put("patch", 15)
+        check(get("preset") == "110", f"Program past the last one clamps to it: ordinal {get('preset')}")
+        raws = set()
+        for i in range(111):
+            put("preset", i)
+            raws.add(get("preset_name").split(" ")[0])
+        check(len(raws) == 111, "every ordinal of the scattered bank is its own program")
+        put("bank_file", "E_names")
+        put("preset", 3)  # raw slot 4 (A.15): the flagged A.14 is skipped
+        check(get("preset_name") == "P.004 Name 004" and get("preset_name:2") == "P.003 Name 002",
+              f"names follow the skipped slot: {get('preset_name')!r}, {get('preset_name:2')!r}")
+
+        # A bank of nothing but vocoder programs keeps them all rather than offering nothing
+        put("bank_file", "D_allvoc")
+        check(get("preset_count") == "128", f"all-vocoder bank still offers {get('preset_count')} programs")
+
+        # A saved state pointing at a vocoder slot (an old save) lands on a playable program
+        put("bank_file", "A_default")
+        state = json.loads(get("state"))
+        state["preset"] = 125
+        state["bank"] = "A_default"
+        put("state", json.dumps(state))
+        check(int(get("preset")) < 112, f"a state saved on a vocoder slot restores to a playable program ({get('preset')})")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -146,10 +273,10 @@ def host_api():
               f"Bank options are the file names (with JSON escaping): {meta.get('bank_file', {}).get('options')}")
         codes = [f"{s}{c}" for s in "AB" for c in range(1, 9)]
         prog = meta.get("patch", {})
-        check(meta.get("category", {}).get("options", [None])[0] == "Trance" and len(prog.get("options", [])) == 16
-              and prog.get("short_options") == codes,
-              "Category has 8 named options, Program 16 (short_options A1..B8)")
-        check(prog.get("options") == [get(f"preset_name:{(i // 8) * 64 + i % 8}") for i in range(16)],
+        check(meta.get("category", {}).get("options", [None])[0] == "Trance" and len(meta["category"]["options"]) == 7
+              and len(prog.get("options", [])) == 16 and prog.get("short_options") == codes,
+              "Category has 7 named options (the vocoder row is not offered), Program 16 (short_options A1..B8)")
+        check(prog.get("options") == [get(f"preset_name:{(i // 8) * 56 + i % 8}") for i in range(16)],
               f"Program options are the category's patch names: {prog.get('options', [])[:2]} ... {prog.get('options', [])[-1:]}")
         items = json.loads(get("bank_list") or "[]")
         check([i["label"] for i in items] == ["Built-in", "MicroKorgFactory", "Odd 'Name' & Co"] and [i["index"] for i in items] == [0, 1, 2],
@@ -317,9 +444,9 @@ def host_api():
         vm_before = get("voice_mode")
         put("patch", "11")            # by index: B4
         relabel = get("is_loading")   # only the timbre labels can change (a program in the other voice mode)
-        check(get("preset") == str(64 + 5 * 8 + 3) and get("category") == "5" and get("patch") == "11"
+        check(get("preset") == str(56 + 5 * 8 + 3) and get("category") == "5" and get("patch") == "11"
               and relabel == ("0" if get("voice_mode") == vm_before else "1"),
-              f"Category Retro + Program B4 -> preset {get('preset')} (expected {64 + 5 * 8 + 3}); "
+              f"Category Retro + Program B4 -> preset {get('preset')} (expected {56 + 5 * 8 + 3}, ordinal of slot 107); "
               f"is_loading {relabel} (voice mode {vm_before} -> {get('voice_mode')})")
         check(get("preset_name") == "B.64 Name 107", f"name from the selected bank: {get('preset_name')!r}")
         put("patch", "A.62 Name 041")
@@ -329,8 +456,8 @@ def host_api():
         put("preset", "1")
         check(get("preset") == "1", f"preset browser index '1' -> preset {get('preset')} (was 127 before the fix)")
         put("preset", "127")
-        check(get("preset") == "127" and get("category") == "7" and get("patch") == "15",
-              "preset 127 -> Category Vocoder, Program B8")
+        check(get("preset") == "111" and get("category") == "6" and get("patch") == "15",
+              "preset 127 clamps to the last of the 112 programs: Category SE/Hit, Program B8")
         put("bank_file", "MicroKorgFactory")
         check(get("bank_file") == "1" and get("bank_file_name") == "MicroKorgFactory", "bank by name")
 
@@ -596,11 +723,13 @@ def main():
         check(sel("program", "29") == 16, "stepping 28 -> 29 snaps to 31 (preset 16)")
         check(sel("program", "30") == 15, "stepping 31 -> 30 snaps to 28 (preset 15)")
         check(sel("bank_side", "1") == 79, "switching to bank B keeps the program: B.28 -> preset 79")
-        check(sel("program", "88") == 127 and sel("program", "99") == 127, "B.88 -> 127, out of range clamps")
-        check(sel("bank_file", "3") == 127, "bank_file switch keeps the current program")
-        check(sel("bank_file", "9") == 127, "bank_file beyond the loaded banks clamps")
+        check(sel("program", "88") == 119 and sel("program", "99") == 119,
+              "program 88 / out of range clamps to B.78 (slot 119): the vocoder row is not offered")
+        check(sel("bank_file", "3") == 119, "bank_file switch keeps the current program")
+        check(sel("bank_file", "9") == 119, "bank_file beyond the loaded banks clamps")
         user_banks(fptr)
         host_api()
+        vocoder_banks()
         multi_instance()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

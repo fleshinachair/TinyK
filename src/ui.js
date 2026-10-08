@@ -36,7 +36,7 @@ export const PAGES = [
         layerLabels: true,
         params: [
             // Category = matrix row (genre); Program = the row's 16 patches, A1..A8 then B1..B8
-            { key: "category",       label: "Category", short: "Cat",  index: true, values: ["Trance", "Techno", "Electr", "DnB", "Hiphop", "Retro", "SE/Hit", "Vocod"] },
+            { key: "category",       label: "Category", short: "Cat",  index: true, values: ["Trance", "Techno", "Electr", "DnB", "Hiphop", "Retro", "SE/Hit"], categories: true },
             // Program shows the full patch code and name ("B.12 ARPEJMATR"), see formatValue
             { key: "patch",          label: "Program",  short: "Prog", index: true, values: ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"], presetName: true },
             // the program's arpeggiator (stored on / off until changed here)
@@ -204,6 +204,18 @@ export class MicroKorgUI {
         return this.state.params[key] ?? 0.5;
     }
 
+    // The values of an index control: Category follows the active bank (the engine leaves vocoder programs out, so
+    // the factory layout has 7 categories; other banks are listed in groups of 16)
+    valuesOf(paramDef) {
+        if (paramDef.categories && this.host && typeof this.host.getParam === "function") {
+            try {
+                const names = JSON.parse(this.host.getParam("category_names"));
+                if (Array.isArray(names) && names.length > 0) return names;
+            } catch (e) { /* the engine has no category_names: the static list stands */ }
+        }
+        return paramDef.values;
+    }
+
     // Handle Move encoder turns (encoder 0 to 7)
     onEncoder(index, delta) {
         if (index < 0 || index >= 8) return;
@@ -218,7 +230,7 @@ export class MicroKorgUI {
             return;
         }
         if (paramDef.index) {
-            const last = paramDef.values.length - 1;
+            const last = this.valuesOf(paramDef).length - 1;
             const cur = parseInt(this.getParam(paramDef.key)) || 0;
             this.setParam(paramDef.key, Math.max(0, Math.min(last, cur + (delta > 0 ? 1 : -1))));
             return;
@@ -313,6 +325,7 @@ export class MicroKorgUI {
             return "N/A"; // Single mode: Layer 2 is not playing
         }
         if (paramDef.values) {
+            const values = this.valuesOf(paramDef);
             const num = parseFloat(val);
             let idx = 0;
             if (!isNaN(num)) {
@@ -322,19 +335,19 @@ export class MicroKorgUI {
                     idx = (num >= 0.5) ? 1 : 0;
                 } else if (num >= 1.0) {
                     // Safe clamp so it doesn't display out of bounds
-                    idx = paramDef.values.length - 1;
+                    idx = values.length - 1;
                 } else if (num <= 0.0) {
                     idx = 0;
                 } else {
                     // Matches the engine: index = round(value * (count - 1))
-                    idx = Math.min(paramDef.values.length - 1, Math.max(0, Math.round(num * (paramDef.values.length - 1))));
+                    idx = Math.min(values.length - 1, Math.max(0, Math.round(num * (values.length - 1))));
                 }
             } else if (typeof val === "string") {
-                const found = paramDef.values.indexOf(val);
+                const found = values.indexOf(val);
                 if (found >= 0) idx = found;
             }
-            idx = Math.max(0, Math.min(paramDef.values.length - 1, idx));
-            return paramDef.values[idx];
+            idx = Math.max(0, Math.min(values.length - 1, idx));
+            return values[idx];
         }
         if (typeof paramDef.format === "function") {
             return paramDef.format(val);
@@ -459,7 +472,7 @@ export class MicroKorgUI {
             // Mini bar indicator (selector controls are drawn as their position in the range)
             if (typeof display.fill_rect === "function") {
                 let frac = val;
-                if (paramDef.index) frac = val / (paramDef.values.length - 1);
+                if (paramDef.index) frac = val / (this.valuesOf(paramDef).length - 1);
                 else if (paramDef.int) frac = (val - paramDef.int[0]) / (paramDef.int[1] - paramDef.int[0]);
                 else if (paramDef.bank) {
                     const count = parseInt(this.host && this.host.getParam ? this.host.getParam("bank_file_count") : 1) || 1;
