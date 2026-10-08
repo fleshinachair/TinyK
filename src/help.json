@@ -7,7 +7,7 @@
         "microKORG-style",
         "virtual analog synth.",
         "4 voices, or two",
-        "timbres layered.",
+        "layers (L1 / L2).",
         "",
         "128 built-in programs",
         "or your own microKORG",
@@ -24,23 +24,28 @@
         {
           "title": "1: Perf",
           "lines": [
-            "Category, Program,",
-            "Cutoff, Resonance,",
-            "Amp Attack, Release,",
-            "Timbre Edit (T1 / T2",
-            "in Layer, N/A in",
-            "Single), Arp on/off."
+            "Enc 1 CAT: category",
+            "Enc 2 PROG: program",
+            "Enc 3 ARP: on / off",
+            "Enc 4 MODE: Single /",
+            "  Layer",
+            "Enc 5 CUT: cutoff",
+            "Enc 6 RES: resonance",
+            "Enc 7 AMPREL: amp rel",
+            "Enc 8 LAYER: L1 / L2",
+            "  (N/A in Single)"
           ]
         },
         {
-          "title": "2: Osc/Timbre",
+          "title": "2: Osc",
           "lines": [
             "Wave 1, Wave 2,",
             "Pulse Width, Semi,",
-            "Tune, Voice Mode",
-            "(Single / Layer),",
-            "Timbre Balance,",
-            "Mod Wheel (as CC1)."
+            "Tune, Voice (Mono /",
+            "Poly / Unison),",
+            "Layer Bal, Mod Wheel.",
+            "Header shows [L1] or",
+            "[L2]."
           ]
         },
         {
@@ -51,7 +56,9 @@
             "Release.",
             "Amp EG: Decay,",
             "Sustain.",
-            "Key Track, EG Int."
+            "Key Track, EG Int.",
+            "Header shows [L1] or",
+            "[L2]."
           ]
         },
         {
@@ -62,7 +69,9 @@
             "Filter Type (LPF24,",
             "LPF12, BPF12, HPF12),",
             "Drive, Level,",
-            "Portamento."
+            "Portamento, Amp Atk.",
+            "Header shows [L1] or",
+            "[L2]."
           ]
         },
         {
@@ -84,7 +93,7 @@
             "Resolution 1/24-1/4,",
             "Gate, Swing, Latch,",
             "Key Sync, Target",
-            "timbre (Layer mode)."
+            "layer (Layer mode)."
           ]
         },
         {
@@ -128,17 +137,20 @@
     {
       "title": "Layer Mode",
       "lines": [
-        "Timbre Edit (Perf)",
-        "picks the timbre the",
-        "per-timbre knobs edit",
-        "on Perf, Osc/Timbre,",
-        "Envelopes and",
-        "Mix/Filter: [T1] or",
-        "[T2] in the header,",
-        "labels T1.CUT/T2.CUT.",
-        "In Single mode there",
-        "is one timbre: Timbre",
-        "Edit reads N/A."
+        "Mode (Perf) picks",
+        "Single (one layer, 4",
+        "voices) or Layer (two",
+        "layers, 2 voices each).",
+        "Layer (Perf) picks the",
+        "layer the per-layer",
+        "knobs edit: L1 or L2",
+        "in the header of Osc,",
+        "Envelopes, Mix/Filter;",
+        "labels L1.CUT/L2.CUT.",
+        "In Single mode Layer",
+        "reads N/A.",
+        "Voice = Mono, Poly or",
+        "Unison (Osc page)."
       ]
     }
   ]
