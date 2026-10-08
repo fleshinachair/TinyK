@@ -3,19 +3,20 @@
  *
  * Handles 128x64 OLED display rendering and 8 hardware encoders
  * across the parameter pages (the same pages as the module.json ui_hierarchy):
- *   PERF:         Category, Program, Cutoff, Res, Amp Attack, Amp Release, Timbre Edit, Arp
- *   OSC / TIMBRE: Wave1, Wave2, Pulse Width, Semi, Tune, Voice Mode, Timbre Balance, Mod Wheel
+ *   PERF:         Category, Program, Arp, Mode (Single / Layer), Cutoff, Res, Amp Release, Layer (L1 / L2)
+ *   OSC:          Wave1, Wave2, Pulse Width, Semi, Tune, Voice (Mono / Poly / Unison), Layer Balance, Mod Wheel
  *   ENVELOPES:    Filter Atk/Dcy/Sus/Rel, Amp Dcy/Sus, Key Track, EG Int
- *   MIX / FILTER: Osc Mix, Noise, Sync/Ring, Filter Type, Drive, Level, Portamento
+ *   MIX / FILTER: Osc Mix, Noise, Sync/Ring, Filter Type, Drive, Level, Portamento, Amp Attack
  *   EFFECTS:      Chorus Mix, Delay Time/Feedback/Mix, Master Vol, Pan, LFO1/LFO2 Rate
  *   ARP SETTINGS: Type, Range, Resolution, Gate, Swing, Latch, Key Sync, Target
  *   ARP STEPS:    Step 1..8 of the arpeggiator's pattern (Rest / Play), drawn as the microKORG's 2 x 4 step LEDs
  *                 (hollow = Rest, filled = Play, inverted = sounding, dotted = past the pattern's length), as
  *                 canvas.js draws them on the Schwung param pages
  *   BANK:         the active bank file
- * Pages marked `timbre` edit the timbre selected by Timbre Edit (in Layer mode): their header shows
- * [T1] or [T2], and in Layer mode their per-timbre labels name it ("T1.CUT" / "T2.CUT"). Single mode has
- * one timbre: plain labels, and Timbre Edit reads "N/A".
+ * The per-layer controls edit the layer selected by Layer on Perf (in Layer mode): in Layer mode their labels
+ * name it ("L1.CUT" / "L2.CUT", pages marked `layerLabels`) and the sound-design pages (Osc, Envelopes,
+ * Mix / Filter, marked `layerBadge`) show [L1] or [L2] in the header. Single mode has one layer: plain labels,
+ * [L1], and Layer reads "N/A". "Voice" means polyphony only (Mono / Poly / Unison).
  */
 
 // Cutoff knob -> Hz, the engine's measured mapping (cutoff_base_hz * 2^(knob * cutoff_octaves))
@@ -27,40 +28,42 @@ const pct = (v) => `${Math.round(v * 100)}%`;
 const bipolar = (v) => `${Math.round((v - 0.5) * 200)}%`;
 const signed = (unit) => (v) => `${v > 0 ? "+" : ""}${Math.round(v)}${unit}`;
 
-// `index`: an enum the engine reports and takes as an index; `int`: an integer range; `timbre`: per-timbre
+// `index`: an enum the engine reports and takes as an index; `int`: an integer range; `layerLabels`: per-layer controls; `layerBadge`: [L1] / [L2] in the header
 export const PAGES = [
     {
         id: "perf",
         name: "PERF",
-        timbre: true,
+        layerLabels: true,
         params: [
             // Category = matrix row (genre); Program = the row's 16 patches, A1..A8 then B1..B8
             { key: "category",       label: "Category", short: "Cat",  index: true, values: ["Trance", "Techno", "Electr", "DnB", "Hiphop", "Retro", "SE/Hit", "Vocod"] },
             // Program shows the full patch code and name ("B.12 ARPEJMATR"), see formatValue
             { key: "patch",          label: "Program",  short: "Prog", index: true, values: ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"], presetName: true },
-            { key: "cutoff",         label: "Cutoff",  short: "Cut",  t2: "T2.CUT", format: cutoffHz },
-            { key: "resonance",      label: "Res",     short: "Res",  t2: "T2.RES", format: pct },
-            { key: "attack2",        label: "AmpAtk",  short: "Atk",  t2: "T2.ATK", format: pct },
-            { key: "release2",       label: "AmpRel",  short: "Rel",  t2: "T2.REL", format: pct },
-            // which timbre the per-timbre controls edit (Layer mode; "N/A" in Single)
-            { key: "timbre_edit",    label: "Edit",    short: "Edit", values: ["Timb 1", "Timb 2"] },
             // the program's arpeggiator (stored on / off until changed here)
-            { key: "arp_on",         label: "Arp",     short: "Arp",   values: ["Off", "On"] }
+            { key: "arp_on",         label: "Arp",     short: "Arp",  values: ["Off", "On"] },
+            // Single (one layer, 4 voices) or Layer (two layers, 2 voices each)
+            { key: "voice_mode",     label: "Mode",    short: "Mode", values: ["Single", "Layer"] },
+            { key: "cutoff",         label: "Cutoff",  short: "Cut",  l2: "L2.CUT", format: cutoffHz },
+            { key: "resonance",      label: "Res",     short: "Res",  l2: "L2.RES", format: pct },
+            { key: "release2",       label: "AmpRel",  short: "Rel",  l2: "L2.REL", format: pct },
+            // which layer the per-layer controls edit (Layer mode; "N/A" in Single)
+            { key: "timbre_edit",    label: "Layer",   short: "Layer", values: ["L1", "L2"] }
         ]
     },
     {
         id: "osc",
-        name: "OSC / TIMBRE",
-        timbre: true,
+        name: "OSC",
+        layerLabels: true,
+        layerBadge: true,
         params: [
-            { key: "wave1",          label: "Wave1",   short: "Wav1", t2: "T2.WV1", index: true, values: ["SAW", "SQR", "TRI", "SIN", "VOX", "DWG", "NZ"] },
-            { key: "wave2",          label: "Wave2",   short: "Wav2", t2: "T2.WV2", index: true, values: ["SAW", "SQR", "TRI"] },
-            { key: "pulse_width",    label: "Width",   short: "PulW", t2: "T2.PW",  format: (v) => `${Math.round(50 + 45 * v)}%` },
-            { key: "osc2_semi",      label: "Semi",    short: "Semi", t2: "T2.SEMI", int: [-24, 24], format: signed("st") },
-            { key: "osc2_tune",      label: "Tune",    short: "Tune", t2: "T2.TUNE", int: [-50, 50], format: signed("ct") },
-            // Single (one timbre, 4 voices) or Layer (two timbres, 2 voices each), and the layers' balance
-            { key: "voice_mode",     label: "Mode",    short: "Mode", values: ["Single", "Layer"] },
-            { key: "timbre_balance", label: "Balance", short: "Bal",  format: (v) => `${Math.round((1 - v) * 100)}:${Math.round(v * 100)}` },
+            { key: "wave1",          label: "Wave1",   short: "Wav1", l2: "L2.WV1", index: true, values: ["SAW", "SQR", "TRI", "SIN", "VOX", "DWG", "NZ"] },
+            { key: "wave2",          label: "Wave2",   short: "Wav2", l2: "L2.WV2", index: true, values: ["SAW", "SQR", "TRI"] },
+            { key: "pulse_width",    label: "Width",   short: "PulW", l2: "L2.PW",  format: (v) => `${Math.round(50 + 45 * v)}%` },
+            { key: "osc2_semi",      label: "Semi",    short: "Semi", l2: "L2.SEMI", int: [-24, 24], format: signed("st") },
+            { key: "osc2_tune",      label: "Tune",    short: "Tune", l2: "L2.TUNE", int: [-50, 50], format: signed("ct") },
+            // the layer's polyphony (Mono / Poly / Unison), and the layers' balance
+            { key: "voice_assign",   label: "Voice",   short: "Voice", l2: "L2.VOIC", index: true, values: ["Mono", "Poly", "Unison"] },
+            { key: "timbre_balance", label: "LayerBal", short: "Bal",  format: (v) => `${Math.round((1 - v) * 100)}:${Math.round(v * 100)}` },
             // stands in for the mod wheel the Move lacks: virtual patch source 7, same as CC1
             { key: "mod_wheel",      label: "ModWhl",  short: "MOD",   int: [0, 127], format: (v) => `${Math.round(v)}` }
         ]
@@ -68,31 +71,34 @@ export const PAGES = [
     {
         id: "env",
         name: "ENVELOPES",
-        timbre: true,
+        layerLabels: true,
+        layerBadge: true,
         params: [
-            { key: "attack1",     label: "FltAtk", short: "FAtk", t2: "T2.FATK", format: pct },
-            { key: "decay1",      label: "FltDcy", short: "FDcy", t2: "T2.FDCY", format: pct },
-            { key: "sustain1",    label: "FltSus", short: "FSus", t2: "T2.FSU",  format: pct },
-            { key: "release1",    label: "FltRel", short: "FRel", t2: "T2.FRL",  format: pct },
-            { key: "decay2",      label: "AmpDcy", short: "ADcy", t2: "T2.ADCY", format: pct },
-            { key: "sustain2",    label: "AmpSus", short: "ASus", t2: "T2.ASU",  format: pct },
-            { key: "keytrack",    label: "KeyTr",  short: "KeyTr", t2: "T2.KTRK", format: bipolar },
-            { key: "env_int",     label: "EG Int", short: "EGInt", t2: "T2.EGIN", format: bipolar }
+            { key: "attack1",     label: "FltAtk", short: "FAtk", l2: "L2.FATK", format: pct },
+            { key: "decay1",      label: "FltDcy", short: "FDcy", l2: "L2.FDCY", format: pct },
+            { key: "sustain1",    label: "FltSus", short: "FSus", l2: "L2.FSU",  format: pct },
+            { key: "release1",    label: "FltRel", short: "FRel", l2: "L2.FRL",  format: pct },
+            { key: "decay2",      label: "AmpDcy", short: "ADcy", l2: "L2.ADCY", format: pct },
+            { key: "sustain2",    label: "AmpSus", short: "ASus", l2: "L2.ASU",  format: pct },
+            { key: "keytrack",    label: "KeyTr",  short: "KeyTr", l2: "L2.KTRK", format: bipolar },
+            { key: "env_int",     label: "EG Int", short: "EGInt", l2: "L2.EGIN", format: bipolar }
         ]
     },
     {
         id: "mix",
         name: "MIX / FILTER",
-        timbre: true,
+        layerLabels: true,
+        layerBadge: true,
         params: [
-            { key: "osc_mix",     label: "Mix",   short: "Mix",   t2: "T2.MIX",  format: pct },
-            { key: "noise_level", label: "Noise", short: "Noise", t2: "T2.NOIS", format: pct },
+            { key: "osc_mix",     label: "Mix",   short: "Mix",   l2: "L2.MIX",  format: pct },
+            { key: "noise_level", label: "Noise", short: "Noise", l2: "L2.NOIS", format: pct },
             // option indices, in the hardware's order (the engine remaps Sync / Ring to its own)
-            { key: "sync_ring",   label: "SyncR", short: "SyncR", t2: "T2.SYNC", index: true, values: ["OFF", "RING", "SYNC", "R.SNC"] },
-            { key: "filter_type", label: "Type",  short: "Type",  t2: "T2.FTYP", index: true, values: ["LPF24", "LPF12", "BPF12", "HPF12"] },
-            { key: "drive",       label: "Drive", short: "Drive", t2: "T2.DRV", format: pct },
-            { key: "level",       label: "Level", short: "Level", t2: "T2.LVL",  format: pct },
-            { key: "portamento",  label: "Porta", short: "Porta", t2: "T2.PORT", format: pct }
+            { key: "sync_ring",   label: "SyncR", short: "SyncR", l2: "L2.SYNC", index: true, values: ["OFF", "RING", "SYNC", "R.SNC"] },
+            { key: "filter_type", label: "Type",  short: "Type",  l2: "L2.FTYP", index: true, values: ["LPF24", "LPF12", "BPF12", "HPF12"] },
+            { key: "drive",       label: "Drive", short: "Drive", l2: "L2.DRV", format: pct },
+            { key: "level",       label: "Level", short: "Level", l2: "L2.LVL",  format: pct },
+            { key: "portamento",  label: "Porta", short: "Porta", l2: "L2.PORT", format: pct },
+            { key: "attack2",     label: "AmpAtk", short: "Atk",  l2: "L2.ATK",  format: pct }
         ]
     },
     {
@@ -121,7 +127,7 @@ export const PAGES = [
             { key: "arp_swing",      label: "Swing",  short: "Swing", int: [-100, 100], format: (v) => `${v > 0 ? "+" : ""}${Math.round(v)}%` },
             { key: "arp_latch",      label: "Latch",  short: "Latch", index: true, values: ["Off", "On"] },
             { key: "arp_key_sync",   label: "KeySync", short: "KSync", index: true, values: ["Off", "On"] },
-            { key: "arp_target",     label: "Target", short: "Targ",  index: true, values: ["Both", "T1", "T2"] }
+            { key: "arp_target",     label: "Target", short: "Targ",  index: true, values: ["Both", "L1", "L2"] }
         ]
     },
     {
@@ -161,6 +167,7 @@ export class MicroKorgUI {
         this.state.params["category"] = 0;
         this.state.params["patch"] = 0;
         this.state.params["voice_mode"] = 0.0;
+        this.state.params["voice_assign"] = 1;
         this.state.params["timbre_edit"] = 0;
         this.state.params["timbre_balance"] = 0.5;
     }
@@ -303,7 +310,7 @@ export class MicroKorgUI {
             return this.getPresetName();
         }
         if (paramDef.key === "timbre_edit" && !this.isLayer()) {
-            return "N/A"; // Single mode: Timbre 2 is not playing
+            return "N/A"; // Single mode: Layer 2 is not playing
         }
         if (paramDef.values) {
             const num = parseFloat(val);
@@ -339,8 +346,8 @@ export class MicroKorgUI {
         return parseFloat(this.getParam("voice_mode")) >= 0.5;
     }
 
-    // The timbre the per-timbre controls edit, as the engine routes them: 2 only for Timbre 2 in Layer mode
-    editTimbre() {
+    // The layer the per-layer controls edit, as the engine routes them: 2 only for Layer 2 in Layer mode
+    editLayer() {
         return (this.isLayer() && parseInt(this.getParam("timbre_edit")) === 1) ? 2 : 1;
     }
 
@@ -400,12 +407,12 @@ export class MicroKorgUI {
         }
 
         const page = PAGES[this.currentPageIndex];
-        const timbre = page.timbre ? this.editTimbre() : 0;
+        const layer = this.editLayer();
 
         // 1. Header Bar (y: 0 to 12)
-        // Active page with its timbre badge ([T1] / [T2] on per-timbre pages), and the current preset
+        // Active page with its layer badge ([L1] / [L2] on the sound-design pages), and the current preset
         const currentName = this.getPresetName();
-        const badge = timbre ? ` [T${timbre}]` : "";
+        const badge = page.layerBadge ? ` [L${layer}]` : "";
         const headerText = `${page.name}${badge}  [${currentName}]`;
         if (typeof display.print === "function") {
             display.print(2, 2, headerText);
@@ -437,9 +444,9 @@ export class MicroKorgUI {
             const x = col * colWidth;
             const y = 16 + row * 24;
 
-            // Parameter short label (e.g. "Wav1", "Cut"; "T1.CUT" / "T2.CUT" in Layer mode)
+            // Parameter short label (e.g. "Wav1", "Cut"; "L1.CUT" / "L2.CUT" in Layer mode)
             if (typeof display.print === "function") {
-                const label = (timbre && paramDef.t2 && this.isLayer()) ? paramDef.t2.replace("T2", `T${timbre}`) : paramDef.short;
+                const label = (page.layerLabels && paramDef.l2 && this.isLayer()) ? paramDef.l2.replace("L2", `L${layer}`) : paramDef.short;
                 display.print(x + 2, y, label);
             }
 

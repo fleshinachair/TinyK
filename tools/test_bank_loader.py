@@ -158,13 +158,15 @@ def host_api():
         manifest = json.load(open(os.path.join(cal.ROOT, "src", "module.json"), encoding="utf-8"))
         check(hier == manifest["capabilities"]["ui_hierarchy"], "engine ui_hierarchy == module.json ui_hierarchy")
         levels = hier["levels"]
-        # Sound design first (Perf, Osc/Timbre, Envelopes, Mix/Filter, Effects), then the arpeggiator, then Bank;
-        # Timbre Edit on Perf, next to the per-timbre macros it switches
-        pages = {"perf": ("Perf [T1]", ["category", "patch", "cutoff", "resonance", "attack2", "release2", "timbre_edit", "arp_on"]),
-                 "osc": ("Osc/Timbre [T1]", ["wave1", "wave2", "pulse_width", "osc2_semi", "osc2_tune", "voice_mode",
-                                             "timbre_balance", "mod_wheel"]),
-                 "env": ("Envelopes [T1]", ["attack1", "decay1", "sustain1", "release1", "decay2", "sustain2", "keytrack", "env_int"]),
-                 "mix": ("Mix/Filter [T1]", ["osc_mix", "noise_level", "sync_ring", "filter_type", "drive", "level", "portamento"]),
+        # Sound design first (Perf, Osc, Envelopes, Mix/Filter, Effects), then the arpeggiator, then Bank;
+        # Perf is Option B: Cat, Prog, Arp, Mode, Cutoff, Res, AmpRel, Layer; Mode and Layer sit on Perf next to the
+        # per-layer macros they switch, Voice (Mono / Poly / Unison) is on Osc and Amp Atk on Mix/Filter
+        pages = {"perf": ("Perf", ["category", "patch", "arp_on", "voice_mode", "cutoff", "resonance", "release2", "timbre_edit"]),
+                 "osc": ("Osc [L1]", ["wave1", "wave2", "pulse_width", "osc2_semi", "osc2_tune", "voice_assign",
+                                      "timbre_balance", "mod_wheel"]),
+                 "env": ("Envelopes [L1]", ["attack1", "decay1", "sustain1", "release1", "decay2", "sustain2", "keytrack", "env_int"]),
+                 "mix": ("Mix/Filter [L1]", ["osc_mix", "noise_level", "sync_ring", "filter_type", "drive", "level", "portamento",
+                                              "attack2"]),
                  "fx": ("Effects", ["chorus_mix", "delay_time", "delay_feedback", "delay_mix", "master_vol", "pan",
                                     "lfo1_rate", "lfo2_rate"]),
                  "arpset": ("Arp Settings", ["arp_type", "arp_range", "arp_resolution", "arp_gate", "arp_swing", "arp_latch",
@@ -174,7 +176,7 @@ def host_api():
               and levels["root"]["knobs"] == [],
               f"root is the preset browser with the page levels in order: {[p.get('level') for p in levels['root']['params']]}")
         check(all(levels[k]["name"] == name and levels[k]["knobs"] == knobs for k, (name, knobs) in pages.items()),
-              "Perf / Osc/Timbre / Envelopes / Mix/Filter / Effects / Arp Settings / Arp Steps pages hold their knobs (per-timbre pages badged [T1])")
+              "Perf / Osc / Envelopes / Mix/Filter / Effects / Arp Settings / Arp Steps pages hold their knobs (sound-design pages badged [L1])")
         help_doc = json.load(open(os.path.join(cal.ROOT, "src", "help.json"), encoding="utf-8"))
         help_pages = [c["title"] for c in next(c for c in help_doc["children"] if c["title"] == "Pages")["children"]]
         check(help_pages == [f"{i}: {levels[p['level']]['label']}" for i, p in enumerate(levels["root"]["params"], 1)],
@@ -185,9 +187,9 @@ def host_api():
         check(meta["wave1"].get("options") == ["Saw", "Square", "Triangle", "Sine", "Vox", "DWGS", "Noise"]
               and meta["wave1"].get("short_options") == ["SAW", "SQR", "TRI", "SIN", "VOX", "DWG", "NZ"]
               and meta["wave2"].get("short_options") == ["SAW", "SQR", "TRI"]
-              and meta["cutoff"].get("short_name") == ("T1.CUT" if get("voice_mode") == "1" else None),
-              f"Wave 1/2 are enums named for the waveform; Timbre 1 labels: {meta['cutoff'].get('short_name')!r} "
-              f"(voice mode {get('voice_mode')}: T1.CUT in Layer, plain in Single)")
+              and meta["cutoff"].get("short_name") == ("L1.CUT" if get("voice_mode") == "1" else None),
+              f"Wave 1/2 are enums named for the waveform; Layer 1 labels: {meta['cutoff'].get('short_name')!r} "
+              f"(voice mode {get('voice_mode')}: L1.CUT in Layer, plain in Single)")
         missing = [k for k in every if k not in meta]
         check(not missing, f"chain_params describes every page knob (missing: {missing})")
 
@@ -213,18 +215,18 @@ def host_api():
               f"Mod Wheel knob (MOD, 0..127): starts {mw0}, set 100 -> {get('mod_wheel')}")
         put("mod_wheel", "0")
 
-        # Timbre 2 in Layer mode: the per-timbre page names and labels say T2, global ones stay plain
+        # Layer 2 in Layer mode: the per-layer page names and labels say L2, global ones stay plain
         check(get("is_loading") == "0", "no label change pending")
         put("voice_mode", "1")
         put("timbre_edit", "1")
         loading = [get("is_loading"), get("is_loading")]
         hier2 = json.loads(get("ui_hierarchy"))
         meta2 = {e["key"]: e for e in json.loads(get("chain_params"))}
-        check(loading == ["1", "0"] and hier2["levels"]["perf"]["name"] == "Perf [T2]" and hier2["levels"]["fx"]["name"] == "Effects"
-              and meta2["cutoff"].get("short_name") == "T2.CUT" and meta2["cutoff"].get("label") == "T2 Cutoff"
-              and meta2["attack2"].get("short_name") == "T2.ATK" and "short_name" not in meta2["delay_mix"]
+        check(loading == ["1", "0"] and hier2["levels"]["osc"]["name"] == "Osc [L2]" and hier2["levels"]["perf"]["name"] == "Perf" and hier2["levels"]["fx"]["name"] == "Effects"
+              and meta2["cutoff"].get("short_name") == "L2.CUT" and meta2["cutoff"].get("label") == "L2 Cutoff"
+              and meta2["attack2"].get("short_name") == "L2.ATK" and meta2["voice_assign"].get("short_name") == "L2.VOIC" and "short_name" not in meta2["delay_mix"]
               and "short_name" not in meta2["patch"],
-              f"Timbre 2 edit: is_loading {loading}, page {hier2['levels']['perf']['name']!r}, "
+              f"Layer 2 edit: is_loading {loading}, page {hier2['levels']['osc']['name']!r}, "
               f"cutoff cell {meta2['cutoff'].get('short_name')!r}")
         put("level", "0.75")
         macros = ("cutoff", "resonance", "attack2", "release2")  # the Perf page's per-timbre knobs
@@ -235,19 +237,19 @@ def host_api():
             put(k, "0.3")
         t2_macros = [get(k) for k in macros]
         put("timbre_edit", "0")
-        check(get("level") == "0.2500", f"Level edits the selected timbre only (Timbre 1 kept {get('level')})")
+        check(get("level") == "0.2500", f"Level edits the selected layer only (Layer 1 kept {get('level')})")
         check([get(k) for k in macros] == t1_macros and t2_macros == ["0.3000"] * 4,
-              f"Perf macros (Cutoff, Resonance, Amp Atk / Rel) edit the selected timbre: T2 {t2_macros}, T1 kept {t1_macros}")
+              f"Perf macros (Cutoff, Resonance, Amp Atk / Rel) edit the selected layer: L2 {t2_macros}, L1 kept {t1_macros}")
         put("voice_mode", "0")
-        get("is_loading")             # the host takes the change back to Timbre 1
+        get("is_loading")             # the host takes the change back to Layer 1
         # Filter Type and Sync / Ring are option boxes; Sync / Ring in the hardware's order (off, ring, sync,
         # ring sync), which the engine remaps to its own (off, sync, ring, both)
         check(meta["filter_type"].get("short_options") == ["LPF24", "LPF12", "BPF12", "HPF12"]
               and meta["sync_ring"].get("short_options") == ["OFF", "RING", "SYNC", "R.SNC"]
               and meta["voice_mode"].get("short_options") == ["SNGL", "LAYR"],
               "Filter Type / Sync-Ring / Voice Mode option-box texts")
-        # Single mode has one timbre: Timbre Edit says N/A and the per-timbre labels are plain; Layer mode names
-        # the edited timbre on the labels (T1.CUT / T2.CUT) and the per-timbre pages' headers ([T1] / [T2])
+        # Single mode has one layer: Layer says N/A and the per-layer labels are plain; Layer mode names
+        # the edited layer on the labels (L1.CUT / L2.CUT) and the sound-design pages' headers ([L1] / [L2])
         seen = {}
         for vm, te in (("0", "0"), ("0", "1"), ("1", "0"), ("1", "1")):
             put("voice_mode", vm)
@@ -258,18 +260,33 @@ def host_api():
             seen[vm + te] = (m["timbre_edit"].get("short_options"), m["cutoff"].get("short_name"),
                              m["attack1"].get("short_name"), m["drive"].get("label"), m["wave1"].get("short_name"),
                              names["osc"], names["env"], names["mix"], names["perf"], changed)
-        single = (["N/A", "N/A"], None, None, None, None, "Osc/Timbre [T1]", "Envelopes [T1]", "Mix/Filter [T1]", "Perf [T1]")
+        single = (["N/A", "N/A"], None, None, None, None, "Osc [L1]", "Envelopes [L1]", "Mix/Filter [L1]", "Perf")
         check(seen["00"][:-1] == single and seen["01"][:-1] == single and seen["01"][-1] == ["0", "0"],
-              f"Single mode: Timbre Edit {seen['00'][0]}, plain labels, either stored edit choice: {seen['00'][:5]}")
-        check(seen["10"][:-1] == (["T1", "T2"], "T1.CUT", "T1.FATK", "T1 Drive", "T1.WV1", "Osc/Timbre [T1]",
-                                  "Envelopes [T1]", "Mix/Filter [T1]", "Perf [T1]") and seen["10"][-1] == ["1", "0"],
-              f"Layer, Timbre 1: {seen['10'][:-1]}; is_loading {seen['10'][-1]} (the Voice Mode turn is a label change)")
-        check(seen["11"][:-1] == (["T1", "T2"], "T2.CUT", "T2.FATK", "T2 Drive", "T2.WV1", "Osc/Timbre [T2]",
-                                  "Envelopes [T2]", "Mix/Filter [T2]", "Perf [T2]") and seen["11"][-1] == ["1", "0"],
-              f"Layer, Timbre 2: {seen['11'][:-1]}; is_loading {seen['11'][-1]}")
+              f"Single mode: Layer {seen['00'][0]}, plain labels, either stored edit choice: {seen['00'][:5]}")
+        check(seen["10"][:-1] == (["L1", "L2"], "L1.CUT", "L1.FATK", "L1 Drive", "L1.WV1", "Osc [L1]",
+                                  "Envelopes [L1]", "Mix/Filter [L1]", "Perf") and seen["10"][-1] == ["1", "0"],
+              f"Layer, Layer 1: {seen['10'][:-1]}; is_loading {seen['10'][-1]} (the Mode turn is a label change)")
+        check(seen["11"][:-1] == (["L1", "L2"], "L2.CUT", "L2.FATK", "L2 Drive", "L2.WV1", "Osc [L2]",
+                                  "Envelopes [L2]", "Mix/Filter [L2]", "Perf") and seen["11"][-1] == ["1", "0"],
+              f"Layer, Layer 2: {seen['11'][:-1]}; is_loading {seen['11'][-1]}")
         put("voice_mode", "0")
         put("timbre_edit", "0")
         get("is_loading")
+        # Voice (Mono / Poly / Unison) is the layer's polyphony: by name or index, one per layer
+        va_meta = {e["key"]: e for e in json.loads(get("chain_params"))}["voice_assign"]
+        put("voice_assign", "Unison")
+        va = [get("voice_assign")]
+        put("voice_mode", "1")
+        put("timbre_edit", "1")
+        put("voice_assign", "Mono")
+        va += [get("voice_assign")]
+        put("timbre_edit", "0")
+        va += [get("voice_assign")]
+        put("voice_mode", "0")
+        check(va_meta.get("options") == ["Mono", "Poly", "Unison"] and va_meta.get("short_options") == ["MONO", "POLY", "UNIS"]
+              and va == ["2", "0", "2"],
+              f"Voice assign: Mono / Poly / Unison options, Layer 2 Mono leaves Layer 1 Unison: {va}")
+        put("voice_assign", "1")
         put("filter_type", "BPF12")
         ft = get("filter_type")
         put("sync_ring", "R.SNC")
@@ -415,7 +432,7 @@ def host_api():
         put("preset", "8")
         keys8 = ["arp_type", "arp_range", "arp_resolution", "arp_gate", "arp_swing", "arp_latch", "arp_key_sync", "arp_target"]
         a21 = [get(k) for k in keys8]
-        for k, v in zip(keys8, ["ALT1", "3", "1/8", "55", "-40", "Off", "0", "Timbre 2"]):
+        for k, v in zip(keys8, ["ALT1", "3", "1/8", "55", "-40", "Off", "0", "Layer 2"]):
             put(k, v)
         edited8 = [get(k) for k in keys8]
         st8 = json.loads(get("state"))
@@ -427,7 +444,7 @@ def host_api():
         check(a21 == ["0", "1", "1", "80", "0", "1", "1", "1"] and edited8 == ["2", "3", "3", "55", "-40", "0", "0", "2"]
               and back8 == a21 and restored8 == edited8 and st8.get("arp_type") == 2 and st8.get("arp_swing") == -40
               and meta8.get("arp_type", {}).get("options") == ["UP", "DOWN", "ALT1", "ALT2", "RANDOM", "TRIGGER"]
-              and meta8.get("arp_swing", {}).get("min") == -100 and meta8.get("arp_target", {}).get("short_options") == ["BOTH", "T1", "T2"],
+              and meta8.get("arp_swing", {}).get("min") == -100 and meta8.get("arp_target", {}).get("short_options") == ["BOTH", "L1", "L2"],
               f"Arp Settings: A.21 {a21} -> set by name {edited8}, saved in the state; the program restores its own, the state the edits")
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

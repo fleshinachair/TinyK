@@ -110,9 +110,9 @@ static const param_meta_t PARAM_METAS[NUM_PARAMS] = {
     { "pan",          "Pan",            "Pan",    4, 0.5f },
 
     /* Global / Voice Mode & Timbre controls */
-    { "voice_mode",     "Voice Mode",     "Mode",   0, 0.0f },
-    { "timbre_edit",    "Timbre Edit",    "Edit",   0, 0.0f },
-    { "timbre_balance", "Timbre Balance", "Bal",    0, 0.5f }
+    { "voice_mode",     "Mode",           "Mode",   0, 0.0f },
+    { "timbre_edit",    "Layer",          "Edit",   0, 0.0f },
+    { "timbre_balance", "Layer Balance",  "Bal",    0, 0.5f }
 };
 
 /* Real-time audio constraint: zero dynamic allocations in the audio paths. Each instance (one per slot) is one
@@ -886,7 +886,7 @@ static int edit_timbre(const synth_engine_t *synth) {
 }
 
 /* Which timbre the per-timbre labels name: 0 in Single mode (one timbre, plain labels, Timbre Edit "N/A"),
- * 1 or 2 in Layer mode (labels "T1.CUT" / "T2.CUT", the pages' header badge [T1] / [T2]) */
+ * 1 or 2 in Layer mode (labels "L1.CUT" / "L2.CUT", the pages' header badge [L1] / [L2]) */
 static int timbre_badge(const synth_engine_t *synth) {
     int is_layer = (synth->params[PARAM_VOICE_MODE] > 0.5f) || (synth->voice_mode == 1);
     return is_layer ? edit_timbre(synth) + 1 : 0;
@@ -911,6 +911,10 @@ static const char *const SYNC_RING_NAMES[4] = { "Off", "Ring", "Sync", "Ring Syn
 static const char *const SYNC_RING_SHORT[4] = { "OFF", "RING", "SYNC", "R.SNC" };
 static const int SYNC_RING_TO_ENGINE[4] = { SYNC_RING_OFF, SYNC_RING_RING, SYNC_RING_SYNC, SYNC_RING_BOTH };
 
+/* Voice assign (the layer's polyphony): the engine value is assign / 2 over ASSIGN_MONO, POLY, UNISON */
+static const char *const ASSIGN_NAMES[3] = { "Mono", "Poly", "Unison" };
+static const char *const ASSIGN_SHORT[3] = { "MONO", "POLY", "UNIS" };
+
 typedef struct {
     const char *key, *name;
     const char *const *options, *const *shorts;
@@ -923,6 +927,7 @@ static const selector_t SELECTORS[] = {
     { "wave2", "Wave 2", WAVE2_NAMES, WAVE2_SHORT, 3, NULL },
     { "sync_ring", "Sync / Ring", SYNC_RING_NAMES, SYNC_RING_SHORT, 4, SYNC_RING_TO_ENGINE },
     { "filter_type", "Filter Type", FILTER_NAMES, FILTER_NAMES, 4, NULL },
+    { "voice_assign", "Voice", ASSIGN_NAMES, ASSIGN_SHORT, 3, NULL },
 };
 
 static const selector_t *find_selector(const char *key) {
@@ -981,7 +986,7 @@ void synth_set_param(synth_engine_t *synth, const char *key, float val) {
         return;
     }
 
-    if (strcmp(key, "timbre_edit") == 0 || strcmp(key, "Timbre Edit") == 0 ||
+    if (strcmp(key, "timbre_edit") == 0 || strcmp(key, "Timbre Edit") == 0 || strcmp(key, "Layer") == 0 ||
         strcmp(key, "Edit") == 0 || strcmp(key, "3") == 0 || strcmp(key, "param_3") == 0) {
         int t = (val >= 0.5f) ? 1 : 0;
         synth->timbre_edit = t;
@@ -989,12 +994,22 @@ void synth_set_param(synth_engine_t *synth, const char *key, float val) {
         return;
     }
 
-    if (strcmp(key, "timbre_balance") == 0 || strcmp(key, "Timbre Bal") == 0 ||
+    if (strcmp(key, "timbre_balance") == 0 || strcmp(key, "Timbre Bal") == 0 || strcmp(key, "Layer Bal") == 0 ||
         strcmp(key, "Balance") == 0 || strcmp(key, "4") == 0 || strcmp(key, "param_4") == 0) {
         if (val < 0.0f) val = 0.0f;
         if (val > 1.0f) val = 1.0f;
         synth->timbre_balance = val;
         synth->params[PARAM_TIMBRE_BALANCE] = val;
+        return;
+    }
+
+    /* Voice assign of the edited layer (Mono / Poly / Unison); the sounding notes are cut over to the new rule */
+    if (strcmp(key, "voice_assign") == 0) {
+        int a = (int)lroundf(clamp01f(val) * 2.0f), t = edit_timbre(synth);
+        if (synth->timbre_extra[t].assign != a) {
+            synth->timbre_extra[t].assign = a;
+            synth_all_notes_off(synth);
+        }
         return;
     }
 
@@ -1158,11 +1173,11 @@ float synth_get_param(const synth_engine_t *synth, const char *key) {
         strcmp(key, "Mode") == 0 || strcmp(key, "2") == 0 || strcmp(key, "param_2") == 0) {
         return (float)synth->voice_mode;
     }
-    if (strcmp(key, "timbre_edit") == 0 || strcmp(key, "Timbre Edit") == 0 ||
+    if (strcmp(key, "timbre_edit") == 0 || strcmp(key, "Timbre Edit") == 0 || strcmp(key, "Layer") == 0 ||
         strcmp(key, "Edit") == 0 || strcmp(key, "3") == 0 || strcmp(key, "param_3") == 0) {
         return (float)synth->timbre_edit;
     }
-    if (strcmp(key, "timbre_balance") == 0 || strcmp(key, "Timbre Bal") == 0 ||
+    if (strcmp(key, "timbre_balance") == 0 || strcmp(key, "Timbre Bal") == 0 || strcmp(key, "Layer Bal") == 0 ||
         strcmp(key, "Balance") == 0 || strcmp(key, "4") == 0 || strcmp(key, "param_4") == 0) {
         return synth->timbre_balance;
     }
@@ -1189,6 +1204,9 @@ float synth_get_param(const synth_engine_t *synth, const char *key) {
     }
     if (strcmp(key, "preset") == 0) {
         return (float)synth->current_preset / (float)(NUM_PRESETS - 1);
+    }
+    if (strcmp(key, "voice_assign") == 0) {
+        return (float)synth->timbre_extra[edit_timbre(synth)].assign / 2.0f;
     }
     if (strcmp(key, "level") == 0) {
         return synth->timbre_extra[edit_timbre(synth)].level;
@@ -1630,8 +1648,8 @@ static const char *const ARP_RANGE_SHORT[4] = { "1OCT", "2OCT", "3OCT", "4OCT" }
 static const char *const ARP_RES_NAMES[6] = { "1/24", "1/16", "1/12", "1/8", "1/6", "1/4" };
 static const char *const ARP_OFF_ON[2] = { "Off", "On" };
 static const char *const ARP_OFF_ON_SHORT[2] = { "OFF", "ON" };
-static const char *const ARP_TARGET_NAMES[3] = { "Both", "Timbre 1", "Timbre 2" };
-static const char *const ARP_TARGET_SHORT[3] = { "BOTH", "T1", "T2" };
+static const char *const ARP_TARGET_NAMES[3] = { "Both", "Layer 1", "Layer 2" };
+static const char *const ARP_TARGET_SHORT[3] = { "BOTH", "L1", "L2" };
 
 typedef struct {
     const char *key, *name, *short_name;
@@ -3157,7 +3175,7 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         return;
     }
 
-    if (strcmp(key, "timbre_edit") == 0 || strcmp(key, "Timbre Edit") == 0 ||
+    if (strcmp(key, "timbre_edit") == 0 || strcmp(key, "Timbre Edit") == 0 || strcmp(key, "Layer") == 0 ||
         strcmp(key, "Edit") == 0 || strcmp(key, "3") == 0 || strcmp(key, "param_3") == 0) {
         int t = 0;
         if (strstr(val, "2") || strcmp(val, "1") == 0 || strcmp(val, "1.0") == 0) {
@@ -3171,7 +3189,7 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         return;
     }
 
-    if (strcmp(key, "timbre_balance") == 0 || strcmp(key, "Timbre Bal") == 0 ||
+    if (strcmp(key, "timbre_balance") == 0 || strcmp(key, "Timbre Bal") == 0 || strcmp(key, "Layer Bal") == 0 ||
         strcmp(key, "Balance") == 0 || strcmp(key, "4") == 0 || strcmp(key, "param_4") == 0) {
         float f = (float)atof(val);
         if (f < 0.0f) f = 0.0f;
@@ -3216,18 +3234,18 @@ static void json_put_string(json_out_t *o, const char *text) {
  * mode keeps the plain labels from ui_hierarchy. The cell labels fit the host's 5-character cell (checked with
  * its labelVerbatim). */
 static const char *const T2_LABELS[][3] = {
-    { "cutoff", "T2.CUT", "T2 Cutoff" }, { "resonance", "T2.RES", "T2 Resonance" },
-    { "attack2", "T2.ATK", "T2 Amp Atk" }, { "release2", "T2.REL", "T2 Amp Rel" },
-    { "drive", "T2.DRV", "T2 Drive" }, { "level", "T2.LVL", "T2 Level" },
-    { "wave1", "T2.WV1", "T2 Wave 1" }, { "pulse_width", "T2.PW", "T2 Pulse Width" },
-    { "wave2", "T2.WV2", "T2 Wave 2" }, { "osc2_semi", "T2.SEMI", "T2 Semi" }, { "osc2_tune", "T2.TUNE", "T2 Tune" },
-    { "attack1", "T2.FATK", "T2 Filter Atk" }, { "decay1", "T2.FDCY", "T2 Filter Dcy" },
-    { "sustain1", "T2.FSU", "T2 Filter Sus" }, { "release1", "T2.FRL", "T2 Filter Rel" },
-    { "decay2", "T2.ADCY", "T2 Amp Dcy" }, { "sustain2", "T2.ASU", "T2 Amp Sus" },
-    { "keytrack", "T2.KTRK", "T2 Key Track" }, { "env_int", "T2.EGIN", "T2 EG Int" },
-    { "osc_mix", "T2.MIX", "T2 Osc Mix" }, { "noise_level", "T2.NOIS", "T2 Noise" },
-    { "sync_ring", "T2.SYNC", "T2 Sync / Ring" }, { "filter_type", "T2.FTYP", "T2 Filter Type" },
-    { "portamento", "T2.PORT", "T2 Portamento" }
+    { "cutoff", "L2.CUT", "L2 Cutoff" }, { "resonance", "L2.RES", "L2 Resonance" },
+    { "attack2", "L2.ATK", "L2 Amp Atk" }, { "release2", "L2.REL", "L2 Amp Rel" },
+    { "drive", "L2.DRV", "L2 Drive" }, { "level", "L2.LVL", "L2 Level" },
+    { "wave1", "L2.WV1", "L2 Wave 1" }, { "pulse_width", "L2.PW", "L2 Pulse Width" },
+    { "wave2", "L2.WV2", "L2 Wave 2" }, { "osc2_semi", "L2.SEMI", "L2 Semi" }, { "osc2_tune", "L2.TUNE", "L2 Tune" },
+    { "attack1", "L2.FATK", "L2 Filter Atk" }, { "decay1", "L2.FDCY", "L2 Filter Dcy" },
+    { "sustain1", "L2.FSU", "L2 Filter Sus" }, { "release1", "L2.FRL", "L2 Filter Rel" },
+    { "decay2", "L2.ADCY", "L2 Amp Dcy" }, { "sustain2", "L2.ASU", "L2 Amp Sus" },
+    { "keytrack", "L2.KTRK", "L2 Key Track" }, { "env_int", "L2.EGIN", "L2 EG Int" },
+    { "osc_mix", "L2.MIX", "L2 Osc Mix" }, { "noise_level", "L2.NOIS", "L2 Noise" },
+    { "sync_ring", "L2.SYNC", "L2 Sync / Ring" }, { "filter_type", "L2.FTYP", "L2 Filter Type" },
+    { "voice_assign", "L2.VOIC", "L2 Voice" }, { "portamento", "L2.PORT", "L2 Portamento" }
 };
 
 /* Opens a chain_params entry: key, name and, for a per-timbre control in Layer mode (badge 1 or 2, see
@@ -3308,9 +3326,9 @@ static const char *build_chain_params_json(const synth_engine_t *synth, char *bu
     const char *bank_names[SYX_MAX_BANKS + 1];
     static const char *const VOICE_MODES[2] = { "Single", "Layer" };
     static const char *const VOICE_MODES_SHORT[2] = { "SNGL", "LAYR" }; /* "Single" folds to SIN/GLE */
-    static const char *const TIMBRES[2] = { "Timbre 1", "Timbre 2" };
-    static const char *const TIMBRES_SHORT[2] = { "T1", "T2" };
-    /* Single mode has one timbre: both options say so (two of them, so the stored choice stays a valid index
+    static const char *const TIMBRES[2] = { "Layer 1", "Layer 2" };
+    static const char *const TIMBRES_SHORT[2] = { "L1", "L2" };
+    /* Single mode has one layer: both options say so (two of them, so the stored choice stays a valid index
      * and comes back with Layer) */
     static const char *const TIMBRES_SINGLE[2] = { "N/A (Single)", "N/A (Single)" };
     static const char *const TIMBRES_SINGLE_SHORT[2] = { "N/A", "N/A" };
@@ -3324,8 +3342,8 @@ static const char *build_chain_params_json(const synth_engine_t *synth, char *bu
     json_put_enum(&o, "category", "Category", CATEGORY_NAMES, NULL, 8, 0);
     json_put_patch_enum(&o, synth);
     json_put_enum(&o, "bank_file", "Bank", bank_names, NULL, g_syx_bank_count + 1, 0);
-    json_put_enum(&o, "voice_mode", "Voice Mode", VOICE_MODES, VOICE_MODES_SHORT, 2, 0);
-    json_put_enum(&o, "timbre_edit", "Timbre Edit", badge ? TIMBRES : TIMBRES_SINGLE,
+    json_put_enum(&o, "voice_mode", "Mode", VOICE_MODES, VOICE_MODES_SHORT, 2, 0);
+    json_put_enum(&o, "timbre_edit", "Layer", badge ? TIMBRES : TIMBRES_SINGLE,
                   badge ? TIMBRES_SHORT : TIMBRES_SINGLE_SHORT, 2, 0);
     for (size_t i = 0; i < sizeof SELECTORS / sizeof SELECTORS[0]; i++) {
         const selector_t *s = &SELECTORS[i];
@@ -3361,7 +3379,7 @@ static const char *build_chain_params_json(const synth_engine_t *synth, char *bu
     }
     json_put(&o, "{\"key\":\"arp_playhead\",\"name\":\"Arp Playhead\",\"type\":\"string\",\"access\":\"read\"},");
     json_put(&o, "{\"key\":\"mod_wheel\",\"name\":\"Mod Wheel\",\"short_name\":\"MOD\",\"type\":\"int\",\"min\":0,\"max\":127,\"default\":0},");
-    json_put(&o, "{\"key\":\"timbre_balance\",\"name\":\"Timbre Bal\",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":0.5}");
+    json_put(&o, "{\"key\":\"timbre_balance\",\"name\":\"Layer Bal\",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":0.5}");
     for (int i = 0; i < NUM_PARAMS; i++) {
         if (i == PARAM_VOICE_MODE || i == PARAM_TIMBRE_EDIT || i == PARAM_TIMBRE_BALANCE ||
             find_selector(PARAM_METAS[i].id)) continue;
@@ -3417,86 +3435,94 @@ static int build_state_json(const synth_engine_t *synth, char *tmp, size_t cap, 
 
 /* UI hierarchy served to the host: GENERATED from src/module.json's ui_hierarchy (keep them identical) */
 static const char MK_UI_HIERARCHY[] =
-    "{\"levels\":{\"root\":{\"name\":\"TinyK\",\"label\":\"TinyK\",\"list_param\":\"preset\",\"count_param\":\"preset_count\",\"name_param\":\"pr"
-    "eset_name\",\"params\":[{\"level\":\"perf\",\"label\":\"Perf\"},{\"level\":\"osc\",\"label\":\"Osc/Timbre\"},{\"level\":\"env\",\"label\":\""
-    "Envelopes\"},{\"level\":\"mix\",\"label\":\"Mix/Filter\"},{\"level\":\"fx\",\"label\":\"Effects\"},{\"level\":\"arpset\",\"label\":\"Arp Set"
-    "tings\"},{\"level\":\"steps\",\"label\":\"Arp Steps\"},{\"level\":\"bank\",\"label\":\"Bank\"}],\"knobs\":[]},\"perf\":{\"name\":\"Perf [T1]"
-    "\",\"label\":\"Perf\",\"params\":[{\"key\":\"category\",\"label\":\"Category\",\"type\":\"enum\",\"options\":[\"Trance\",\"Techno/House\",\""
-    "Electronica\",\"DnB/Breaks\",\"Hiphop/Vintage\",\"Retro\",\"SE/Hit\",\"Vocoder\"],\"default\":0},{\"key\":\"patch\",\"label\":\"Program\",\""
-    "short_name\":\"PROG\",\"type\":\"enum\",\"options\":[\"A1\",\"A2\",\"A3\",\"A4\",\"A5\",\"A6\",\"A7\",\"A8\",\"B1\",\"B2\",\"B3\",\"B4\",\"B"
-    "5\",\"B6\",\"B7\",\"B8\"],\"default\":0},{\"key\":\"cutoff\",\"label\":\"Cutoff\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.7"
-    ",\"step\":0.01},{\"key\":\"resonance\",\"label\":\"Resonance\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01},{\""
-    "key\":\"attack2\",\"label\":\"Amp Atk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.01,\"step\":0.01},{\"key\":\"release2\",\"l"
-    "abel\":\"Amp Rel\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01},{\"key\":\"timbre_edit\",\"label\":\"Timbre Edi"
-    "t\",\"type\":\"enum\",\"options\":[\"Timbre 1\",\"Timbre 2\"],\"short_options\":[\"T1\",\"T2\"],\"default\":0},{\"key\":\"arp_on\",\"label\""
-    ":\"Arp\",\"short_name\":\"ARP\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"short_options\":[\"OFF\",\"ON\"],\"default\":0}],\"knobs\":"
-    "[\"category\",\"patch\",\"cutoff\",\"resonance\",\"attack2\",\"release2\",\"timbre_edit\",\"arp_on\"]},\"osc\":{\"name\":\"Osc/Timbre [T1]\""
-    ",\"label\":\"Osc/Timbre\",\"params\":[{\"key\":\"wave1\",\"label\":\"Wave 1\",\"type\":\"enum\",\"options\":[\"Saw\",\"Square\",\"Triangle\""
-    ",\"Sine\",\"Vox\",\"DWGS\",\"Noise\"],\"short_options\":[\"SAW\",\"SQR\",\"TRI\",\"SIN\",\"VOX\",\"DWG\",\"NZ\"],\"default\":0},{\"key\":\"w"
-    "ave2\",\"label\":\"Wave 2\",\"type\":\"enum\",\"options\":[\"Saw\",\"Square\",\"Triangle\"],\"short_options\":[\"SAW\",\"SQR\",\"TRI\"],\"de"
-    "fault\":0},{\"key\":\"pulse_width\",\"label\":\"Pulse Width\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"k"
-    "ey\":\"osc2_semi\",\"label\":\"Semi\",\"type\":\"int\",\"min\":-24,\"max\":24,\"default\":0,\"unit\":\"st\"},{\"key\":\"osc2_tune\",\"label\""
-    ":\"Tune\",\"type\":\"int\",\"min\":-50,\"max\":50,\"default\":0,\"unit\":\"ct\"},{\"key\":\"voice_mode\",\"label\":\"Voice Mode\",\"type\":\""
-    "enum\",\"options\":[\"Single (4-Voice)\",\"Layer (2-Voice)\"],\"short_options\":[\"SNGL\",\"LAYR\"],\"default\":0},{\"key\":\"timbre_balance"
-    "\",\"label\":\"Timbre Bal\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"mod_wheel\",\"label\":\"Mod"
-    " Wheel\",\"short_name\":\"MOD\",\"type\":\"int\",\"min\":0,\"max\":127,\"default\":0}],\"knobs\":[\"wave1\",\"wave2\",\"pulse_width\",\"osc2"
-    "_semi\",\"osc2_tune\",\"voice_mode\",\"timbre_balance\",\"mod_wheel\"]},\"env\":{\"name\":\"Envelopes [T1]\",\"label\":\"Envelopes\",\"param"
-    "s\":[{\"key\":\"attack1\",\"label\":\"Filter Atk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.01,\"step\":0.01},{\"key\":\"dec"
-    "ay1\",\"label\":\"Filter Dcy\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.4,\"step\":0.01},{\"key\":\"sustain1\",\"label\":\"F"
-    "ilter Sus\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"release1\",\"label\":\"Filter Rel\",\"type\""
-    ":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01},{\"key\":\"decay2\",\"label\":\"Amp Dcy\",\"type\":\"float\",\"min\":0.0,\""
-    "max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"sustain2\",\"label\":\"Amp Sus\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":"
-    "0.8,\"step\":0.01},{\"key\":\"keytrack\",\"label\":\"Key Track\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{"
-    "\"key\":\"env_int\",\"label\":\"EG Int\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01}],\"knobs\":[\"attack1\",\""
-    "decay1\",\"sustain1\",\"release1\",\"decay2\",\"sustain2\",\"keytrack\",\"env_int\"]},\"mix\":{\"name\":\"Mix/Filter [T1]\",\"label\":\"Mix/"
-    "Filter\",\"params\":[{\"key\":\"osc_mix\",\"label\":\"Osc Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\""
-    "key\":\"noise_level\",\"label\":\"Noise\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"sync_ring\",\""
-    "label\":\"Sync / Ring\",\"type\":\"enum\",\"options\":[\"Off\",\"Ring\",\"Sync\",\"Ring Sync\"],\"short_options\":[\"OFF\",\"RING\",\"SYNC\""
-    ",\"R.SNC\"],\"default\":0},{\"key\":\"filter_type\",\"label\":\"Filter Type\",\"type\":\"enum\",\"options\":[\"LPF24\",\"LPF12\",\"BPF12\",\""
-    "HPF12\"],\"short_options\":[\"LPF24\",\"LPF12\",\"BPF12\",\"HPF12\"],\"default\":0},{\"key\":\"drive\",\"label\":\"Drive\",\"type\":\"float\""
-    ",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01},{\"key\":\"level\",\"label\":\"Level\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\""
-    "default\":0.9,\"step\":0.01},{\"key\":\"portamento\",\"label\":\"Portamento\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"s"
-    "tep\":0.01}],\"knobs\":[\"osc_mix\",\"noise_level\",\"sync_ring\",\"filter_type\",\"drive\",\"level\",\"portamento\"]},\"fx\":{\"name\":\"Ef"
-    "fects\",\"label\":\"Effects\",\"params\":[{\"key\":\"chorus_mix\",\"label\":\"Chorus Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"defa"
-    "ult\":0.0,\"step\":0.01},{\"key\":\"delay_time\",\"label\":\"Delay Time\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\""
-    ":0.01},{\"key\":\"delay_feedback\",\"label\":\"Delay Fdbk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01},{\"key"
-    "\":\"delay_mix\",\"label\":\"Delay Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"master_vol\",\""
-    "label\":\"Master Vol\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.8,\"step\":0.01,\"short_name\":\"VOL\"},{\"key\":\"pan\",\"l"
-    "abel\":\"Pan\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"lfo1_rate\",\"label\":\"LFO1 Rate\",\"ty"
-    "pe\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01,\"short_name\":\"LFO1\"},{\"key\":\"lfo2_rate\",\"label\":\"LFO2 Rate\""
-    ",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01,\"short_name\":\"LFO2\"}],\"knobs\":[\"chorus_mix\",\"delay_time\""
-    ",\"delay_feedback\",\"delay_mix\",\"master_vol\",\"pan\",\"lfo1_rate\",\"lfo2_rate\"]},\"arpset\":{\"name\":\"Arp Settings\",\"label\":\"Arp"
-    " Settings\",\"params\":[{\"key\":\"arp_type\",\"label\":\"Type\",\"short_name\":\"TYPE\",\"type\":\"enum\",\"options\":[\"UP\",\"DOWN\",\"AL"
-    "T1\",\"ALT2\",\"RANDOM\",\"TRIGGER\"],\"short_options\":[\"UP\",\"DOWN\",\"ALT1\",\"ALT2\",\"RND\",\"TRIG\"],\"default\":0},{\"key\":\"arp_r"
-    "ange\",\"label\":\"Range\",\"short_name\":\"RANGE\",\"type\":\"enum\",\"options\":[\"1 Oct\",\"2 Oct\",\"3 Oct\",\"4 Oct\"],\"short_options\""
-    ":[\"1OCT\",\"2OCT\",\"3OCT\",\"4OCT\"],\"default\":0},{\"key\":\"arp_resolution\",\"label\":\"Resolution\",\"short_name\":\"RESO\",\"type\":"
-    "\"enum\",\"options\":[\"1/24\",\"1/16\",\"1/12\",\"1/8\",\"1/6\",\"1/4\"],\"short_options\":[\"1/24\",\"1/16\",\"1/12\",\"1/8\",\"1/6\",\"1/"
-    "4\"],\"default\":1},{\"key\":\"arp_gate\",\"label\":\"Gate\",\"short_name\":\"GATE\",\"type\":\"int\",\"min\":0,\"max\":100,\"default\":80,\""
-    "unit\":\"%\"},{\"key\":\"arp_swing\",\"label\":\"Swing\",\"short_name\":\"SWING\",\"type\":\"int\",\"min\":-100,\"max\":100,\"default\":0,\""
-    "unit\":\"%\"},{\"key\":\"arp_latch\",\"label\":\"Latch\",\"short_name\":\"LATCH\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"short_opt"
-    "ions\":[\"OFF\",\"ON\"],\"default\":0},{\"key\":\"arp_key_sync\",\"label\":\"Key Sync\",\"short_name\":\"KSYNC\",\"type\":\"enum\",\"options"
-    "\":[\"Off\",\"On\"],\"short_options\":[\"OFF\",\"ON\"],\"default\":0},{\"key\":\"arp_target\",\"label\":\"Target\",\"short_name\":\"TARGT\","
-    "\"type\":\"enum\",\"options\":[\"Both\",\"Timbre 1\",\"Timbre 2\"],\"short_options\":[\"BOTH\",\"T1\",\"T2\"],\"default\":0}],\"knobs\":[\"a"
-    "rp_type\",\"arp_range\",\"arp_resolution\",\"arp_gate\",\"arp_swing\",\"arp_latch\",\"arp_key_sync\",\"arp_target\"]},\"steps\":{\"name\":\""
-    "Arp Steps\",\"label\":\"Arp Steps\",\"params\":[{\"key\":\"arp_step1\",\"label\":\"Step 1\",\"short_name\":\"ST1\",\"type\":\"enum\",\"optio"
-    "ns\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_p"
-    "layhead\"]}},{\"key\":\"arp_step2\",\"label\":\"Step 2\",\"short_name\":\"ST2\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_op"
-    "tions\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step3\""
-    ",\"label\":\"Step 3\",\"short_name\":\"ST3\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"defau"
-    "lt\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step4\",\"label\":\"Step 4\",\"short_name\""
-    ":\"ST4\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:ti"
-    "nyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step5\",\"label\":\"Step 5\",\"short_name\":\"ST5\",\"type\":\"enum\",\"option"
-    "s\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_pl"
-    "ayhead\"]}},{\"key\":\"arp_step6\",\"label\":\"Step 6\",\"short_name\":\"ST6\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_opt"
-    "ions\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step7\","
-    "\"label\":\"Step 7\",\"short_name\":\"ST7\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"defaul"
-    "t\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step8\",\"label\":\"Step 8\",\"short_name\""
-    ":\"ST8\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:ti"
-    "nyk_step\",\"extra_keys\":[\"arp_playhead\"]}}],\"knobs\":[\"arp_step1\",\"arp_step2\",\"arp_step3\",\"arp_step4\",\"arp_step5\",\"arp_step6"
-    "\",\"arp_step7\",\"arp_step8\"]},\"bank\":{\"name\":\"Bank\",\"label\":\"Bank\",\"params\":[{\"key\":\"bank_file\",\"label\":\"Bank\",\"type"
-    "\":\"enum\",\"options\":[\"Built-in\"],\"default\":0},{\"level\":\"bank_list\",\"label\":\"Browse banks\"}],\"knobs\":[\"bank_file\"]},\"ban"
-    "k_list\":{\"name\":\"Banks\",\"label\":\"Select Bank\",\"items_param\":\"bank_list\",\"select_param\":\"bank_file\",\"navigate_to\":\"root\""
-    "}}}";
+    "{\"levels\":{\"root\":{\"name\":\"TinyK\",\"label\":\"TinyK\",\"list_param\":\"preset\",\"count_param\":\"preset_count\",\"name_pa"
+    "ram\":\"preset_name\",\"params\":[{\"level\":\"perf\",\"label\":\"Perf\"},{\"level\":\"osc\",\"label\":\"Osc\"},{\"level\":\"env\""
+    ",\"label\":\"Envelopes\"},{\"level\":\"mix\",\"label\":\"Mix/Filter\"},{\"level\":\"fx\",\"label\":\"Effects\"},{\"level\":\"arpse"
+    "t\",\"label\":\"Arp Settings\"},{\"level\":\"steps\",\"label\":\"Arp Steps\"},{\"level\":\"bank\",\"label\":\"Bank\"}],\"knobs\":["
+    "]},\"perf\":{\"name\":\"Perf\",\"label\":\"Perf\",\"params\":[{\"key\":\"category\",\"label\":\"Category\",\"type\":\"enum\",\"opt"
+    "ions\":[\"Trance\",\"Techno/House\",\"Electronica\",\"DnB/Breaks\",\"Hiphop/Vintage\",\"Retro\",\"SE/Hit\",\"Vocoder\"],\"default"
+    "\":0,\"short_name\":\"CAT\"},{\"key\":\"patch\",\"label\":\"Program\",\"short_name\":\"PROG\",\"type\":\"enum\",\"options\":[\"A1"
+    "\",\"A2\",\"A3\",\"A4\",\"A5\",\"A6\",\"A7\",\"A8\",\"B1\",\"B2\",\"B3\",\"B4\",\"B5\",\"B6\",\"B7\",\"B8\"],\"default\":0},{\"key"
+    "\":\"arp_on\",\"label\":\"Arp\",\"short_name\":\"ARP\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"short_options\":[\"OFF\","
+    "\"ON\"],\"default\":0},{\"key\":\"voice_mode\",\"label\":\"Mode\",\"type\":\"enum\",\"options\":[\"Single\",\"Layer\"],\"short_opt"
+    "ions\":[\"SNGL\",\"LAYR\"],\"default\":0,\"short_name\":\"MODE\"},{\"key\":\"cutoff\",\"label\":\"Cutoff\",\"type\":\"float\",\"mi"
+    "n\":0.0,\"max\":1.0,\"default\":0.7,\"step\":0.01,\"short_name\":\"CUT\"},{\"key\":\"resonance\",\"label\":\"Resonance\",\"type\":"
+    "\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01,\"short_name\":\"RES\"},{\"key\":\"release2\",\"label\":\"Amp Rel"
+    "\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01,\"short_name\":\"AMPREL\"},{\"key\":\"timbre_edit\",\""
+    "label\":\"Layer\",\"type\":\"enum\",\"options\":[\"Layer 1\",\"Layer 2\"],\"short_options\":[\"L1\",\"L2\"],\"default\":0,\"short_"
+    "name\":\"LAYER\"}],\"knobs\":[\"category\",\"patch\",\"arp_on\",\"voice_mode\",\"cutoff\",\"resonance\",\"release2\",\"timbre_edit"
+    "\"]},\"osc\":{\"name\":\"Osc [L1]\",\"label\":\"Osc\",\"params\":[{\"key\":\"wave1\",\"label\":\"Wave 1\",\"type\":\"enum\",\"opti"
+    "ons\":[\"Saw\",\"Square\",\"Triangle\",\"Sine\",\"Vox\",\"DWGS\",\"Noise\"],\"short_options\":[\"SAW\",\"SQR\",\"TRI\",\"SIN\",\"V"
+    "OX\",\"DWG\",\"NZ\"],\"default\":0},{\"key\":\"wave2\",\"label\":\"Wave 2\",\"type\":\"enum\",\"options\":[\"Saw\",\"Square\",\"Tr"
+    "iangle\"],\"short_options\":[\"SAW\",\"SQR\",\"TRI\"],\"default\":0},{\"key\":\"pulse_width\",\"label\":\"Pulse Width\",\"type\":"
+    "\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"osc2_semi\",\"label\":\"Semi\",\"type\":\"int\",\"min"
+    "\":-24,\"max\":24,\"default\":0,\"unit\":\"st\"},{\"key\":\"osc2_tune\",\"label\":\"Tune\",\"type\":\"int\",\"min\":-50,\"max\":50"
+    ",\"default\":0,\"unit\":\"ct\"},{\"key\":\"voice_assign\",\"label\":\"Voice\",\"short_name\":\"VOICE\",\"type\":\"enum\",\"options"
+    "\":[\"Mono\",\"Poly\",\"Unison\"],\"short_options\":[\"MONO\",\"POLY\",\"UNIS\"],\"default\":1},{\"key\":\"timbre_balance\",\"labe"
+    "l\":\"Layer Bal\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01,\"short_name\":\"BAL\"},{\"key\":\"mod_"
+    "wheel\",\"label\":\"Mod Wheel\",\"short_name\":\"MOD\",\"type\":\"int\",\"min\":0,\"max\":127,\"default\":0}],\"knobs\":[\"wave1\""
+    ",\"wave2\",\"pulse_width\",\"osc2_semi\",\"osc2_tune\",\"voice_assign\",\"timbre_balance\",\"mod_wheel\"]},\"env\":{\"name\":\"Env"
+    "elopes [L1]\",\"label\":\"Envelopes\",\"params\":[{\"key\":\"attack1\",\"label\":\"Filter Atk\",\"type\":\"float\",\"min\":0.0,\"m"
+    "ax\":1.0,\"default\":0.01,\"step\":0.01},{\"key\":\"decay1\",\"label\":\"Filter Dcy\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,"
+    "\"default\":0.4,\"step\":0.01},{\"key\":\"sustain1\",\"label\":\"Filter Sus\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default"
+    "\":0.5,\"step\":0.01},{\"key\":\"release1\",\"label\":\"Filter Rel\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\""
+    "step\":0.01},{\"key\":\"decay2\",\"label\":\"Amp Dcy\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{"
+    "\"key\":\"sustain2\",\"label\":\"Amp Sus\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.8,\"step\":0.01},{\"key\":\"ke"
+    "ytrack\",\"label\":\"Key Track\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"env_int\",\""
+    "label\":\"EG Int\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01}],\"knobs\":[\"attack1\",\"decay1\",\""
+    "sustain1\",\"release1\",\"decay2\",\"sustain2\",\"keytrack\",\"env_int\"]},\"mix\":{\"name\":\"Mix/Filter [L1]\",\"label\":\"Mix/F"
+    "ilter\",\"params\":[{\"key\":\"osc_mix\",\"label\":\"Osc Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\""
+    ":0.01},{\"key\":\"noise_level\",\"label\":\"Noise\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"k"
+    "ey\":\"sync_ring\",\"label\":\"Sync / Ring\",\"type\":\"enum\",\"options\":[\"Off\",\"Ring\",\"Sync\",\"Ring Sync\"],\"short_optio"
+    "ns\":[\"OFF\",\"RING\",\"SYNC\",\"R.SNC\"],\"default\":0},{\"key\":\"filter_type\",\"label\":\"Filter Type\",\"type\":\"enum\",\"o"
+    "ptions\":[\"LPF24\",\"LPF12\",\"BPF12\",\"HPF12\"],\"short_options\":[\"LPF24\",\"LPF12\",\"BPF12\",\"HPF12\"],\"default\":0},{\"k"
+    "ey\":\"drive\",\"label\":\"Drive\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01},{\"key\":\"level\",\""
+    "label\":\"Level\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.9,\"step\":0.01},{\"key\":\"portamento\",\"label\":\"Po"
+    "rtamento\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"attack2\",\"label\":\"Amp Atk\",\""
+    "type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.01,\"step\":0.01}],\"knobs\":[\"osc_mix\",\"noise_level\",\"sync_ring\",\"f"
+    "ilter_type\",\"drive\",\"level\",\"portamento\",\"attack2\"]},\"fx\":{\"name\":\"Effects\",\"label\":\"Effects\",\"params\":[{\"ke"
+    "y\":\"chorus_mix\",\"label\":\"Chorus Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"d"
+    "elay_time\",\"label\":\"Delay Time\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01},{\"key\":\"delay_fe"
+    "edback\",\"label\":\"Delay Fdbk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01},{\"key\":\"delay_mix\""
+    ",\"label\":\"Delay Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"master_vol\",\"label"
+    "\":\"Master Vol\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.8,\"step\":0.01,\"short_name\":\"VOL\"},{\"key\":\"pan"
+    "\",\"label\":\"Pan\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"lfo1_rate\",\"label\":\""
+    "LFO1 Rate\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01,\"short_name\":\"LFO1\"},{\"key\":\"lfo2_rate"
+    "\",\"label\":\"LFO2 Rate\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01,\"short_name\":\"LFO2\"}],\"kn"
+    "obs\":[\"chorus_mix\",\"delay_time\",\"delay_feedback\",\"delay_mix\",\"master_vol\",\"pan\",\"lfo1_rate\",\"lfo2_rate\"]},\"arpse"
+    "t\":{\"name\":\"Arp Settings\",\"label\":\"Arp Settings\",\"params\":[{\"key\":\"arp_type\",\"label\":\"Type\",\"short_name\":\"TY"
+    "PE\",\"type\":\"enum\",\"options\":[\"UP\",\"DOWN\",\"ALT1\",\"ALT2\",\"RANDOM\",\"TRIGGER\"],\"short_options\":[\"UP\",\"DOWN\","
+    "\"ALT1\",\"ALT2\",\"RND\",\"TRIG\"],\"default\":0},{\"key\":\"arp_range\",\"label\":\"Range\",\"short_name\":\"RANGE\",\"type\":\""
+    "enum\",\"options\":[\"1 Oct\",\"2 Oct\",\"3 Oct\",\"4 Oct\"],\"short_options\":[\"1OCT\",\"2OCT\",\"3OCT\",\"4OCT\"],\"default\":0"
+    "},{\"key\":\"arp_resolution\",\"label\":\"Resolution\",\"short_name\":\"RESO\",\"type\":\"enum\",\"options\":[\"1/24\",\"1/16\",\""
+    "1/12\",\"1/8\",\"1/6\",\"1/4\"],\"short_options\":[\"1/24\",\"1/16\",\"1/12\",\"1/8\",\"1/6\",\"1/4\"],\"default\":1},{\"key\":\"a"
+    "rp_gate\",\"label\":\"Gate\",\"short_name\":\"GATE\",\"type\":\"int\",\"min\":0,\"max\":100,\"default\":80,\"unit\":\"%\"},{\"key"
+    "\":\"arp_swing\",\"label\":\"Swing\",\"short_name\":\"SWING\",\"type\":\"int\",\"min\":-100,\"max\":100,\"default\":0,\"unit\":\"%"
+    "\"},{\"key\":\"arp_latch\",\"label\":\"Latch\",\"short_name\":\"LATCH\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"short_opt"
+    "ions\":[\"OFF\",\"ON\"],\"default\":0},{\"key\":\"arp_key_sync\",\"label\":\"Key Sync\",\"short_name\":\"KSYNC\",\"type\":\"enum\""
+    ",\"options\":[\"Off\",\"On\"],\"short_options\":[\"OFF\",\"ON\"],\"default\":0},{\"key\":\"arp_target\",\"label\":\"Target\",\"sho"
+    "rt_name\":\"TARGT\",\"type\":\"enum\",\"options\":[\"Both\",\"Layer 1\",\"Layer 2\"],\"short_options\":[\"BOTH\",\"L1\",\"L2\"],\""
+    "default\":0}],\"knobs\":[\"arp_type\",\"arp_range\",\"arp_resolution\",\"arp_gate\",\"arp_swing\",\"arp_latch\",\"arp_key_sync\","
+    "\"arp_target\"]},\"steps\":{\"name\":\"Arp Steps\",\"label\":\"Arp Steps\",\"params\":[{\"key\":\"arp_step1\",\"label\":\"Step 1\""
+    ",\"short_name\":\"ST1\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"vi"
+    "z\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step2\",\"label\":\"Step 2\",\"short_name\""
+    ":\"ST2\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":"
+    "\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step3\",\"label\":\"Step 3\",\"short_name\":\"ST3\",\"typ"
+    "e\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_"
+    "step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step4\",\"label\":\"Step 4\",\"short_name\":\"ST4\",\"type\":\"enum\",\""
+    "options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_"
+    "keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step5\",\"label\":\"Step 5\",\"short_name\":\"ST5\",\"type\":\"enum\",\"options\":[\"Re"
+    "st\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_p"
+    "layhead\"]}},{\"key\":\"arp_step6\",\"label\":\"Step 6\",\"short_name\":\"ST6\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],"
+    "\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{"
+    "\"key\":\"arp_step7\",\"label\":\"Step 7\",\"short_name\":\"ST7\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_option"
+    "s\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_s"
+    "tep8\",\"label\":\"Step 8\",\"short_name\":\"ST8\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\","
+    "\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}}],\"knobs\":[\"arp_step1\",\"ar"
+    "p_step2\",\"arp_step3\",\"arp_step4\",\"arp_step5\",\"arp_step6\",\"arp_step7\",\"arp_step8\"]},\"bank\":{\"name\":\"Bank\",\"labe"
+    "l\":\"Bank\",\"params\":[{\"key\":\"bank_file\",\"label\":\"Bank\",\"type\":\"enum\",\"options\":[\"Built-in\"],\"default\":0},{\""
+    "level\":\"bank_list\",\"label\":\"Browse banks\"}],\"knobs\":[\"bank_file\"]},\"bank_list\":{\"name\":\"Banks\",\"label\":\"Select"
+    " Bank\",\"items_param\":\"bank_list\",\"select_param\":\"bank_file\",\"navigate_to\":\"root\"}}}";
 
 static int v2_get_param(void *instance, const char *key, char *buf, int buf_len) {
     tinyk_instance_t *inst = (tinyk_instance_t*)instance;
@@ -3504,11 +3530,11 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     synth_engine_t *synth = &inst->synth;
 
     if (strcmp(key, "ui_hierarchy") == 0) {
-        /* The per-timbre pages carry the edited timbre in their name ("Perf [T1]"): "[T2]" while Timbre 2 is
+        /* The per-layer pages carry the edited layer in their name ("Osc [L1]"): "[L2]" while Layer 2 is
          * edited. A rename keeps the page on screen: the host re-anchors by level. */
         int n = snprintf(buf, buf_len, "%s", MK_UI_HIERARCHY);
         if (edit_timbre(synth) == 1 && n < buf_len) {
-            for (char *p = strstr(buf, "[T1]"); p; p = strstr(p + 4, "[T1]")) p[2] = '2';
+            for (char *p = strstr(buf, "[L1]"); p; p = strstr(p + 4, "[L1]")) p[2] = '2';
         }
         return n;
     }
@@ -3546,12 +3572,12 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
         return snprintf(buf, buf_len, "%d", synth->voice_mode);
     }
 
-    if (strcmp(key, "timbre_edit") == 0 || strcmp(key, "Timbre Edit") == 0 ||
+    if (strcmp(key, "timbre_edit") == 0 || strcmp(key, "Timbre Edit") == 0 || strcmp(key, "Layer") == 0 ||
         strcmp(key, "Edit") == 0 || strcmp(key, "3") == 0 || strcmp(key, "param_3") == 0) {
         return snprintf(buf, buf_len, "%d", synth->timbre_edit);
     }
 
-    if (strcmp(key, "timbre_balance") == 0 || strcmp(key, "Timbre Bal") == 0 ||
+    if (strcmp(key, "timbre_balance") == 0 || strcmp(key, "Timbre Bal") == 0 || strcmp(key, "Layer Bal") == 0 ||
         strcmp(key, "Balance") == 0 || strcmp(key, "4") == 0 || strcmp(key, "param_4") == 0) {
         return snprintf(buf, buf_len, "%.4f", synth->timbre_balance);
     }

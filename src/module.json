@@ -31,7 +31,7 @@
             },
             {
               "level": "osc",
-              "label": "Osc/Timbre"
+              "label": "Osc"
             },
             {
               "level": "env",
@@ -61,7 +61,7 @@
           "knobs": []
         },
         "perf": {
-          "name": "Perf [T1]",
+          "name": "Perf",
           "label": "Perf",
           "params": [
             {
@@ -78,7 +78,8 @@
                 "SE/Hit",
                 "Vocoder"
               ],
-              "default": 0
+              "default": 0,
+              "short_name": "CAT"
             },
             {
               "key": "patch",
@@ -106,56 +107,6 @@
               "default": 0
             },
             {
-              "key": "cutoff",
-              "label": "Cutoff",
-              "type": "float",
-              "min": 0.0,
-              "max": 1.0,
-              "default": 0.7,
-              "step": 0.01
-            },
-            {
-              "key": "resonance",
-              "label": "Resonance",
-              "type": "float",
-              "min": 0.0,
-              "max": 1.0,
-              "default": 0.2,
-              "step": 0.01
-            },
-            {
-              "key": "attack2",
-              "label": "Amp Atk",
-              "type": "float",
-              "min": 0.0,
-              "max": 1.0,
-              "default": 0.01,
-              "step": 0.01
-            },
-            {
-              "key": "release2",
-              "label": "Amp Rel",
-              "type": "float",
-              "min": 0.0,
-              "max": 1.0,
-              "default": 0.2,
-              "step": 0.01
-            },
-            {
-              "key": "timbre_edit",
-              "label": "Timbre Edit",
-              "type": "enum",
-              "options": [
-                "Timbre 1",
-                "Timbre 2"
-              ],
-              "short_options": [
-                "T1",
-                "T2"
-              ],
-              "default": 0
-            },
-            {
               "key": "arp_on",
               "label": "Arp",
               "short_name": "ARP",
@@ -169,22 +120,82 @@
                 "ON"
               ],
               "default": 0
+            },
+            {
+              "key": "voice_mode",
+              "label": "Mode",
+              "type": "enum",
+              "options": [
+                "Single",
+                "Layer"
+              ],
+              "short_options": [
+                "SNGL",
+                "LAYR"
+              ],
+              "default": 0,
+              "short_name": "MODE"
+            },
+            {
+              "key": "cutoff",
+              "label": "Cutoff",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.7,
+              "step": 0.01,
+              "short_name": "CUT"
+            },
+            {
+              "key": "resonance",
+              "label": "Resonance",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.2,
+              "step": 0.01,
+              "short_name": "RES"
+            },
+            {
+              "key": "release2",
+              "label": "Amp Rel",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.2,
+              "step": 0.01,
+              "short_name": "AMPREL"
+            },
+            {
+              "key": "timbre_edit",
+              "label": "Layer",
+              "type": "enum",
+              "options": [
+                "Layer 1",
+                "Layer 2"
+              ],
+              "short_options": [
+                "L1",
+                "L2"
+              ],
+              "default": 0,
+              "short_name": "LAYER"
             }
           ],
           "knobs": [
             "category",
             "patch",
+            "arp_on",
+            "voice_mode",
             "cutoff",
             "resonance",
-            "attack2",
             "release2",
-            "timbre_edit",
-            "arp_on"
+            "timbre_edit"
           ]
         },
         "osc": {
-          "name": "Osc/Timbre [T1]",
-          "label": "Osc/Timbre",
+          "name": "Osc [L1]",
+          "label": "Osc",
           "params": [
             {
               "key": "wave1",
@@ -254,27 +265,31 @@
               "unit": "ct"
             },
             {
-              "key": "voice_mode",
-              "label": "Voice Mode",
+              "key": "voice_assign",
+              "label": "Voice",
+              "short_name": "VOICE",
               "type": "enum",
               "options": [
-                "Single (4-Voice)",
-                "Layer (2-Voice)"
+                "Mono",
+                "Poly",
+                "Unison"
               ],
               "short_options": [
-                "SNGL",
-                "LAYR"
+                "MONO",
+                "POLY",
+                "UNIS"
               ],
-              "default": 0
+              "default": 1
             },
             {
               "key": "timbre_balance",
-              "label": "Timbre Bal",
+              "label": "Layer Bal",
               "type": "float",
               "min": 0.0,
               "max": 1.0,
               "default": 0.5,
-              "step": 0.01
+              "step": 0.01,
+              "short_name": "BAL"
             },
             {
               "key": "mod_wheel",
@@ -292,13 +307,13 @@
             "pulse_width",
             "osc2_semi",
             "osc2_tune",
-            "voice_mode",
+            "voice_assign",
             "timbre_balance",
             "mod_wheel"
           ]
         },
         "env": {
-          "name": "Envelopes [T1]",
+          "name": "Envelopes [L1]",
           "label": "Envelopes",
           "params": [
             {
@@ -386,7 +401,7 @@
           ]
         },
         "mix": {
-          "name": "Mix/Filter [T1]",
+          "name": "Mix/Filter [L1]",
           "label": "Mix/Filter",
           "params": [
             {
@@ -469,6 +484,15 @@
               "max": 1.0,
               "default": 0.0,
               "step": 0.01
+            },
+            {
+              "key": "attack2",
+              "label": "Amp Atk",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.01,
+              "step": 0.01
             }
           ],
           "knobs": [
@@ -478,7 +502,8 @@
             "filter_type",
             "drive",
             "level",
-            "portamento"
+            "portamento",
+            "attack2"
           ]
         },
         "fx": {
@@ -698,13 +723,13 @@
               "type": "enum",
               "options": [
                 "Both",
-                "Timbre 1",
-                "Timbre 2"
+                "Layer 1",
+                "Layer 2"
               ],
               "short_options": [
                 "BOTH",
-                "T1",
-                "T2"
+                "L1",
+                "L2"
               ],
               "default": 0
             }
