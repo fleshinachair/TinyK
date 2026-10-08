@@ -17,25 +17,25 @@ static const char *active_bank_name(const synth_engine_t *synth) {
     return (b > 0 && b <= g_syx_bank_count) ? g_syx_banks[b - 1].name : "Built-in";
 }
 
+static void category_names(const synth_engine_t *synth, const char *names[8]);
+
 /* --- Program list ---------------------------------------------------------------------------------------------------
  * TinyK has no vocoder (no modulator input), so programs the bank flags as vocoder (Preset.voice_mode 2, decoded from
- * the program's own voice mode byte, not from their slot) are left out of what the instance offers. The playable ones
- * are numbered 0..play_n-1 ("ordinals"). A bank laid out like the factory ones (vocoder programs exactly in the
- * matrix's row 8 on both sides, or none at all) keeps its A.11-B.78 matrix: Category = row, Program = side + column,
- * and the vocoder row is simply not offered (7 categories, 112 programs). Any other bank is numbered P.001...
- * and browsed in groups of 16. A bank without a single synth program keeps all 128 (generic carrier) rather than
- * offering nothing. Per instance, rebuilt on a bank change; the decoded banks stay read-only. */
+ * the program's own voice mode byte, not from their slot) are left out of what the instance offers. Every bank keeps
+ * the hardware matrix: Category = matrix row (Trance ... SE/Hit, row 8 "Other"), Program = the category's playable
+ * programs in matrix order (A side, then B side), each keeping its own A.11-B.88 coordinates and label. A category
+ * holds however many playable programs its row has (0-16); a row without any is not offered, so a factory-layout
+ * bank shows 7 categories and 112 programs. The jog wheel counts the playable programs in matrix order (ordinals,
+ * 0..play_n-1). A bank of nothing but vocoder programs keeps all 128 rather than offering nothing. Per instance,
+ * rebuilt on a bank change; the decoded banks stay read-only. */
 static void rebuild_playlist(synth_engine_t *synth) {
     const struct Preset *pr = active_presets(synth);
-    int n = 0, voc = 0, voc_row8 = 0;
+    int voc = 0, n = 0, ncat = 0;
+    for (int r = 0; r < NUM_PRESETS; r++) if (pr[r].voice_mode == 2) voc++;
+    if (voc >= NUM_PRESETS) voc = 0; /* nothing but vocoder programs: offer them all */
     for (int r = 0; r < NUM_PRESETS; r++) {
-        if (pr[r].voice_mode == 2) {
-            voc++;
-            if (r % 64 >= 56) voc_row8++;
-        }
-    }
-    if (voc >= NUM_PRESETS) voc = voc_row8 = 0; /* nothing but vocoder programs: offer them all */
-    for (int r = 0; r < NUM_PRESETS; r++) {
+        synth->slot_cat[r] = -1;
+        synth->slot_pos[r] = 0;
         if (voc && pr[r].voice_mode == 2) {
             synth->play_ord[r] = -1;
         } else {
@@ -43,9 +43,26 @@ static void rebuild_playlist(synth_engine_t *synth) {
             synth->play_map[n++] = (uint8_t)r;
         }
     }
+    for (int row = 0; row < 8; row++) {
+        int cnt = 0;
+        for (int side = 0; side < 2; side++) {
+            for (int col = 0; col < 8; col++) {
+                int slot = side * 64 + row * 8 + col;
+                if (synth->play_ord[slot] < 0) continue;
+                synth->cat_slot[ncat][cnt] = (uint8_t)slot;
+                synth->slot_cat[slot] = (int8_t)ncat;
+                synth->slot_pos[slot] = (int8_t)cnt;
+                cnt++;
+            }
+        }
+        if (cnt) {
+            synth->cat_row[ncat] = (uint8_t)row;
+            synth->cat_n[ncat] = (uint8_t)cnt;
+            ncat++;
+        }
+    }
     synth->play_n = n;
-    synth->play_std = (voc == 0) || (voc == 16 && voc_row8 == 16);
-    synth->play_ncat = synth->play_std ? (voc ? 7 : 8) : (n + 15) / 16;
+    synth->play_ncat = ncat;
 }
 
 /* The nearest playable slot at or after `raw` (else before it) */
@@ -58,46 +75,42 @@ static int playable_raw(const synth_engine_t *synth, int raw) {
     return 0;
 }
 
+static int category_clamp(const synth_engine_t *synth, int cat) {
+    return cat < 0 ? 0 : (cat > synth->play_ncat - 1 ? synth->play_ncat - 1 : cat);
+}
+
+/* Programs in category `cat` */
 static int category_patch_count(const synth_engine_t *synth, int cat) {
-    if (synth->play_std) return 16;
-    int left = synth->play_n - cat * 16;
-    return left < 1 ? 1 : (left > 16 ? 16 : left);
+    return synth->cat_n[category_clamp(synth, cat)];
 }
 
-/* The slot of Program `patch` (0..15 = side * 8 + column) in Category `cat`, always a playable one */
+/* The slot of position `patch` in category `cat`; both clamp to what exists */
 static int program_raw(const synth_engine_t *synth, int cat, int patch) {
-    if (cat < 0) cat = 0;
-    if (cat > synth->play_ncat - 1) cat = synth->play_ncat - 1;
+    cat = category_clamp(synth, cat);
     if (patch < 0) patch = 0;
-    if (patch > 15) patch = 15;
-    if (synth->play_std) return playable_raw(synth, (patch / 8) * 64 + cat * 8 + patch % 8);
-    int o = cat * 16 + patch;
-    return synth->play_map[o < synth->play_n ? o : synth->play_n - 1];
+    if (patch > synth->cat_n[cat] - 1) patch = synth->cat_n[cat] - 1;
+    return synth->cat_slot[cat][patch];
 }
 
-/* Category and Program (0..15) that address slot `raw` */
+/* Category and position that address slot `raw` (0, 0 for a slot that is not offered) */
 static void program_layout(const synth_engine_t *synth, int raw, int *cat, int *patch) {
-    int o = synth->play_ord[raw];
-    if (synth->play_std || o < 0) {
-        *cat = (raw % 64) / 8;
-        *patch = (raw / 64) * 8 + raw % 8;
-    } else {
-        *cat = o / 16;
-        *patch = o % 16;
-    }
+    int c = synth->slot_cat[raw];
+    *cat = c < 0 ? 0 : c;
+    *patch = c < 0 ? 0 : synth->slot_pos[raw];
 }
 
-/* "A.11 Name" for slot idx of the active bank ("A.11" alone when the bank has no name for it); "P.001 Name" in a
- * bank that is browsed in sequence */
+/* "A3" / "B8": side and column of a slot */
+static void slot_coord(int slot, char *buf, size_t cap) {
+    snprintf(buf, cap, "%c%d", slot >= 64 ? 'B' : 'A', slot % 8 + 1);
+}
+
+/* "A.11 Name" for slot idx of the active bank ("A.11" alone when the bank has no name for it) */
 static int format_preset_name(const synth_engine_t *synth, int idx, char *buf, int buf_len) {
     const char *label = active_presets(synth)[idx].label;
     const char *name = label;
     if ((label[0] == 'A' || label[0] == 'B') && label[1] == '.') { /* label carries its own code: drop it */
         const char *sp = strchr(label, ' ');
         name = sp ? sp + 1 : "";
-    }
-    if (!synth->play_std && synth->play_ord[idx] >= 0) {
-        return snprintf(buf, buf_len, "P.%03d%s%s", synth->play_ord[idx] + 1, *name ? " " : "", name);
     }
     return snprintf(buf, buf_len, "%c.%d%d%s%s", idx >= 64 ? 'B' : 'A', (idx % 64) / 8 + 1, idx % 8 + 1,
                     *name ? " " : "", name);
@@ -938,9 +951,21 @@ void synth_init(synth_engine_t *synth) {
 static void select_program(synth_engine_t *synth, int side, int row, int col) {
     if (side < 0) side = 0;
     if (side > 1) side = 1;
+    if (row < 0) row = 0;
+    if (row > 7) row = 7;
     if (col < 0) col = 0;
     if (col > 7) col = 7;
-    load_preset(synth, program_raw(synth, row, side * 8 + col)); /* sets bank_side, genre_category, program_num */
+    load_preset(synth, side * 64 + row * 8 + col); /* a slot that is not offered loads the next one that is */
+}
+
+/* Position `patch` of category `cat` in the Category / Program lists (sets bank_side, genre_category, program_num) */
+static void select_category_pos(synth_engine_t *synth, int cat, int patch) {
+    load_preset(synth, program_raw(synth, cat, patch));
+}
+
+/* The other bank side, same row and column (or the next program that is offered) */
+static void select_side(synth_engine_t *synth, int side) {
+    load_preset(synth, (side ? 64 : 0) + synth->current_preset % 64);
 }
 
 /* Switches the active bank (0 = built-in, 1..N = .syx files) and reloads the current program from it. */
@@ -952,16 +977,13 @@ static void select_bank_file(synth_engine_t *synth, int b) {
     load_preset(synth, synth->current_preset);
 }
 
-/* Category (matrix row) and per-category program names for the Category / Program controls: each of
- * the 8 categories holds 16 programs, A1..A8 then B1..B8 (bank sides A and B of that row). */
+/* Category (matrix row) names for the Category control; the Program control lists the category's playable
+ * programs, each with its own A1..B8 coordinate (bank sides A and B of that row). */
 static const char *const CATEGORY_NAMES[8] = {
     "Trance", "Techno/House", "Electronica", "DnB/Breaks", "Hiphop/Vintage", "Retro", "SE/Hit", "Vocoder"
 };
-static const char *const PATCH_NAMES[16] = {
-    "A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"
-};
 
-/* Program within the category: 0..15 = side * 8 + column */
+/* Program within the category: its position in the category's list (0..cat_n-1) */
 static int current_patch(const synth_engine_t *synth) {
     return synth->program_num - 1;
 }
@@ -971,6 +993,23 @@ static int current_patch(const synth_engine_t *synth) {
 static int name_index(const char *val, const char *const *names, int n) {
     for (int i = 0; i < n; i++) {
         if (strcmp(val, names[i]) == 0) return i;
+    }
+    return -1;
+}
+
+/* Index of `val` among the offered Category names, or -1 */
+static int category_index_by_name(const synth_engine_t *synth, const char *val) {
+    const char *names[8];
+    category_names(synth, names);
+    return name_index(val, names, synth->play_ncat);
+}
+
+/* Index of `val` ("A3", "B8") among the current category's programs, or -1 */
+static int patch_coord_index(const synth_engine_t *synth, const char *val) {
+    char coord[8];
+    for (int i = 0; i < category_patch_count(synth, synth->genre_category); i++) {
+        slot_coord(program_raw(synth, synth->genre_category, i), coord, sizeof coord);
+        if (strcmp(val, coord) == 0) return i;
     }
     return -1;
 }
@@ -1070,8 +1109,8 @@ static int index_from_value(float val, int max) {
 
 /* Current program number 11..88 */
 static int program_number(const synth_engine_t *synth) {
-    int col = (synth->program_num > 8) ? synth->program_num - 9 : synth->program_num - 1;
-    return (synth->genre_category + 1) * 10 + col + 1;
+    int slot = synth->current_preset;
+    return ((slot % 64) / 8 + 1) * 10 + slot % 8 + 1;
 }
 
 /* Selects program n (11..88) in the current bank. Numbers between rows come from stepping a plain integer
@@ -1082,7 +1121,7 @@ static void set_program_number(synth_engine_t *synth, int n) {
     if (col == 9) { row++; col = 1; }
     if (col == 0) { row--; col = 8; }
     if (row < 1) { row = 1; col = 1; }
-    if (row > synth->play_ncat) { row = synth->play_ncat; col = 8; }
+    if (row > 8) { row = 8; col = 8; }
     select_program(synth, synth->bank_side, row - 1, col - 1);
 }
 
@@ -1177,8 +1216,7 @@ void synth_set_param(synth_engine_t *synth, const char *key, float val) {
     if (strcmp(key, "genre_category") == 0) {
         int g = (val > 1.0f) ? (int)roundf(val) : (int)roundf(val * 7.0f);
         if (g < 0) g = 0;
-        if (g > synth->play_ncat - 1) g = synth->play_ncat - 1;
-        select_program(synth, current_patch(synth) / 8, g, current_patch(synth) % 8);
+        select_category_pos(synth, g, current_patch(synth));
         return;
     }
 
@@ -1186,13 +1224,12 @@ void synth_set_param(synth_engine_t *synth, const char *key, float val) {
         int p = (val >= 1.0f && val <= 16.0f) ? (int)roundf(val) : (1 + (int)roundf(val * 15.0f));
         if (p < 1) p = 1;
         if (p > 16) p = 16;
-        select_program(synth, (p - 1) / 8, synth->genre_category, (p - 1) % 8);
+        select_category_pos(synth, synth->genre_category, p - 1);
         return;
     }
 
     if (strcmp(key, "bank_side") == 0) {
-        int col = (synth->program_num > 8) ? synth->program_num - 9 : synth->program_num - 1;
-        select_program(synth, (val >= 0.5f) ? 1 : 0, synth->genre_category, col);
+        select_side(synth, (val >= 0.5f) ? 1 : 0);
         return;
     }
 
@@ -1202,14 +1239,13 @@ void synth_set_param(synth_engine_t *synth, const char *key, float val) {
     }
 
     if (strcmp(key, "category") == 0) {
-        int patch = current_patch(synth);
-        select_program(synth, patch / 8, index_from_value(val, synth->play_ncat - 1), patch % 8);
+        select_category_pos(synth, index_from_value(val, synth->play_ncat - 1), current_patch(synth));
         return;
     }
 
     if (strcmp(key, "patch") == 0) {
-        int patch = index_from_value(val, 15);
-        select_program(synth, patch / 8, synth->genre_category, patch % 8);
+        select_category_pos(synth, synth->genre_category,
+                            index_from_value(val, category_patch_count(synth, synth->genre_category) - 1));
         return;
     }
 
@@ -3190,8 +3226,7 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
             }
         }
         if (genre < 0) genre = 0;
-        if (genre > synth->play_ncat - 1) genre = synth->play_ncat - 1;
-        select_program(synth, current_patch(synth) / 8, genre, current_patch(synth) % 8);
+        select_category_pos(synth, genre, current_patch(synth));
         return;
     }
 
@@ -3205,7 +3240,7 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         }
         if (p < 1) p = 1;
         if (p > 16) p = 16;
-        select_program(synth, (p - 1) / 8, synth->genre_category, (p - 1) % 8);
+        select_category_pos(synth, synth->genre_category, p - 1);
         return;
     }
 
@@ -3219,8 +3254,7 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
             float f = (float)atof(val);
             side = (f >= 0.5f) ? 1 : 0;
         }
-        int col = (synth->program_num > 8) ? synth->program_num - 9 : synth->program_num - 1;
-        select_program(synth, side, synth->genre_category, col);
+        select_side(synth, side);
         return;
     }
 
@@ -3238,7 +3272,7 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
 
     if (strcmp(key, "category") == 0 || strcmp(key, "patch") == 0) {
         /* option name ("Retro", "B3", "B.12 ARPEJMATR") or index */
-        int byname = (strcmp(key, "category") == 0) ? name_index(val, CATEGORY_NAMES, 8) : name_index(val, PATCH_NAMES, 16);
+        int byname = (strcmp(key, "category") == 0) ? category_index_by_name(synth, val) : patch_coord_index(synth, val);
         if (byname < 0 && strcmp(key, "patch") == 0) byname = patch_label_index(synth, val);
         synth_set_param(synth, key, byname >= 0 ? (float)byname : (float)atof(val));
         return;
@@ -3420,17 +3454,12 @@ static void json_put_enum(json_out_t *o, const char *key, const char *name, cons
 
 /* Program: options are the current category's patch names ("B.12 ARPEJMATR"), which the host shows when
  * the knob is touched or turned; short_options are the codes its 3-character enum square has room for. */
-/* The Category names on offer (synth->play_ncat of them): the matrix rows (the vocoder row only exists in a bank
- * without vocoder programs, where it holds ordinary ones: "Other"), else the program numbers of each group of 16 */
-static void category_names(const synth_engine_t *synth, const char *names[8], char text[8][16]) {
+/* The Category names on offer (synth->play_ncat of them): the matrix row each stands for; row 8 holds ordinary
+ * programs in a bank that does not keep vocoders there: "Other" */
+static void category_names(const synth_engine_t *synth, const char *names[8]) {
     for (int c = 0; c < 8; c++) {
-        if (synth->play_std) {
-            names[c] = (c == 7) ? "Other" : CATEGORY_NAMES[c];
-        } else {
-            int last = (c * 16 + 16 < synth->play_n) ? c * 16 + 16 : synth->play_n;
-            snprintf(text[c], 16, "P.%03d-%03d", c * 16 + 1, last);
-            names[c] = text[c];
-        }
+        int row = c < synth->play_ncat ? synth->cat_row[c] : 7;
+        names[c] = (row == 7) ? "Other" : CATEGORY_NAMES[row];
     }
 }
 
@@ -3445,8 +3474,10 @@ static void json_put_patch_enum(json_out_t *o, const synth_engine_t *synth) {
     }
     json_put(o, "],\"short_options\":[");
     for (int i = 0; i < count; i++) {
+        char coord[8];
         if (i) json_put(o, ",");
-        json_put_string(o, PATCH_NAMES[i]);
+        slot_coord(program_raw(synth, synth->genre_category, i), coord, sizeof coord);
+        json_put_string(o, coord);
     }
     json_put(o, "],\"default\":0},");
 }
@@ -3485,8 +3516,7 @@ static const char *build_chain_params_json(const synth_engine_t *synth, char *bu
 
     json_put(&o, "[");
     const char *cat_names[8];
-    char cat_text[8][16];
-    category_names(synth, cat_names, cat_text);
+    category_names(synth, cat_names);
     json_put_enum(&o, "category", "Category", cat_names, NULL, synth->play_ncat, 0);
     json_put_patch_enum(&o, synth);
     json_put_enum(&o, "bank_file", "Bank", bank_names, NULL, g_syx_bank_count + 1, 0);
@@ -3738,14 +3768,17 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
         return snprintf(buf, buf_len, "%d", synth->play_n);
     }
 
+    if (strcmp(key, "patch_count") == 0) { /* programs in the current category */
+        return snprintf(buf, buf_len, "%d", category_patch_count(synth, synth->genre_category));
+    }
+
     if (strcmp(key, "category_count") == 0) {
         return snprintf(buf, buf_len, "%d", synth->play_ncat);
     }
 
     if (strcmp(key, "category_names") == 0) { /* for the module's own screen: ["Trance", ...] */
         const char *names[8];
-        char text[8][16];
-        category_names(synth, names, text);
+        category_names(synth, names);
         int n = snprintf(buf, buf_len, "[");
         for (int c = 0; c < synth->play_ncat && n < buf_len; c++) n += snprintf(buf + n, buf_len - n, "%s\"%s\"", c ? "," : "", names[c]);
         return n < buf_len ? n + snprintf(buf + n, buf_len - n, "]") : n;

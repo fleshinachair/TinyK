@@ -52,7 +52,7 @@ TinyK reads standard 128-program SysEx bank dumps from both the microKORG and th
 Notes:
 - Program names stored in the dump are shown; otherwise programs are labelled by position (A.11–B.88).
 - Single-program dumps and any file that is not a 128-program microKORG or MS2000 bank dump are skipped.
-- Vocoder programs are left out: TinyK has no modulator input. They are recognised by the program's own voice mode setting, wherever they sit in the bank. A factory-style dump (vocoder programs in the last category row) gives 112 programs in 7 categories, labelled A.11–A.78 and B.11–B.78; a dump without vocoder programs keeps all 128. A bank whose vocoder programs sit elsewhere is numbered P.001… and browsed in groups of 16.
+- Vocoder programs are left out: TinyK has no modulator input. They are recognised by the program's own voice mode setting, wherever they sit in the bank. Every bank keeps its matrix: categories are the 8 program rows and programs keep their A.11–B.88 labels. Each category lists however many playable programs its row has, and a row with none is not offered. A factory-style dump (vocoder programs in the last row) gives 112 programs in 7 categories; a dump without vocoder programs keeps all 128, with the eighth category named "Other".
 - `.syx` files in the repository's `banks/` folder are never committed, packaged or installed: `./scripts/install.sh` leaves the Move's `banks/` folder alone, so a clean install shows only "Built-in". To send your local banks too, run `INSTALL_BANKS=1 ./scripts/install.sh` (it skips `TinyK_Default.syx`, which is the built-in bank).
 
 ## Building from source

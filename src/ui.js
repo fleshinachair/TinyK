@@ -38,7 +38,7 @@ export const PAGES = [
             // Category = matrix row (genre); Program = the row's 16 patches, A1..A8 then B1..B8
             { key: "category",       label: "Category", short: "Cat",  index: true, values: ["Trance", "Techno", "Electr", "DnB", "Hiphop", "Retro", "SE/Hit"], categories: true },
             // Program shows the full patch code and name ("B.12 ARPEJMATR"), see formatValue
-            { key: "patch",          label: "Program",  short: "Prog", index: true, values: ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"], presetName: true },
+            { key: "patch",          label: "Program",  short: "Prog", index: true, values: ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"], presetName: true, patches: true },
             // the program's arpeggiator (stored on / off until changed here)
             { key: "arp_on",         label: "Arp",     short: "Arp",  values: ["Off", "On"] },
             // Single (one layer, 4 voices) or Layer (two layers, 2 voices each)
@@ -205,8 +205,12 @@ export class MicroKorgUI {
     }
 
     // The values of an index control: Category follows the active bank (the engine leaves vocoder programs out, so
-    // the factory layout has 7 categories; other banks are listed in groups of 16)
+    // the factory layout has 7 categories, and a category lists as many programs as it has playable ones)
     valuesOf(paramDef) {
+        if (paramDef.patches && this.host && typeof this.host.getParam === "function") {
+            const n = parseInt(this.host.getParam("patch_count"));
+            if (n >= 1 && n <= paramDef.values.length) return paramDef.values.slice(0, n);
+        }
         if (paramDef.categories && this.host && typeof this.host.getParam === "function") {
             try {
                 const names = JSON.parse(this.host.getParam("category_names"));

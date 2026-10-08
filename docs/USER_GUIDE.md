@@ -51,8 +51,8 @@ Everything you reach for while playing: pick a sound, switch the arpeggiator and
 
 | Enc | Label | Controls | Range / values | Tip |
 |-----|-------|----------|----------------|-----|
-| 1 | CAT | Category | 7 choices: Trance, Techno, Electr, DnB, Hiphop, Retro, SE/Hit. Each is one row of the program matrix (16 programs). Vocoder programs are not offered; banks laid out differently are split into groups of 16 (`P.001-016` ...). | Changing it keeps the Program position, so A1 in Trance becomes A1 in Techno. |
-| 2 | PROG | Program | A1-A8, then B1-B8 inside the category. Touching or turning shows the full patch code and name, e.g. `B.12 ARPEJMATR`. | Category and Program together address every program of the bank; the jog wheel steps through them in order. |
+| 1 | CAT | Category | 7 choices: Trance, Techno, Electr, DnB, Hiphop, Retro, SE/Hit. Each is one row of the program matrix (up to 16 programs). Vocoder programs are not offered, so a category may hold fewer than 16, and a bank without vocoders in the last row gets an eighth category, `Other`. | Changing it keeps the Program position, so A1 in Trance becomes A1 in Techno. |
+| 2 | PROG | Program | The category's programs, A1-A8 then B1-B8, each with its own matrix code (a skipped vocoder leaves a gap in the codes). Touching or turning shows the full patch code and name, e.g. `B.12 ARPEJMATR`. | Category and Program together address every program of the bank; the jog wheel steps through them in order. |
 | 3 | ARP | Arpeggiator on / off | Off / On. Each program stores its own arpeggio; this overrides it until you pick another program. | Shape the pattern on the Arp Settings and Arp Steps pages. |
 | 4 | MODE | Single / Layer | Single: one layer plays all 4 voices. Layer: two layers (L1, L2) play 2 voices each, blended by Layer Bal on Osc. | Switching mode cuts any sounding notes (a short fade, no click). Programs set their own mode when loaded. |
 | 5 | CUT | Filter cutoff | 0-100 % (about 37 Hz up to the 19 kHz ceiling), shown in Hz / kHz. In Layer mode the label reads `L1.CUT` or `L2.CUT`. | Edits the layer chosen by LAYER (encoder 8). |

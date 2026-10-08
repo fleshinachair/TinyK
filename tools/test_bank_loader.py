@@ -140,6 +140,8 @@ def vocoder_banks():
             "C_scattered": with_modes(dump, {extra: 3}),                         # 17, one outside row 8
             "D_allvoc": with_modes(dump, {i: 3 for i in range(128)}),            # nothing but vocoder
             "E_names": with_names(with_modes(dump, {extra: 3}), {i: f"Name {i:03d}" for i in range(128)}),
+            "F_row8a": with_modes(dump, {i: 0 for i in range(120, 128)}),         # row 8 vocoder on the A side only
+            "G_gap": with_modes(dump, {i: 3 for i in list(range(16, 24)) + list(range(80, 88))}),  # row 3 vocoder as well
         }
         for name, d in banks.items():
             open(os.path.join(module_dir, "banks", name + ".syx"), "wb").write(d)
@@ -196,30 +198,58 @@ def vocoder_banks():
               and get("preset") == "127" and get("preset_name").startswith("B.88"),
               f"no vocoder: {get('preset_count')} programs, {get('category_count')} categories, last {get('preset_name')!r}")
 
-        # Vocoder programs in other places: sequential numbering, groups of 16, never a dead program
+        # Vocoder programs in other places: the matrix stays, each category lists the playable programs of its row
+        std_names = ["Trance", "Techno/House", "Electronica", "DnB/Breaks", "Hiphop/Vintage", "Retro", "SE/Hit"]
         put("bank_file", "C_scattered")
         m = meta()
         put("preset", 110)
-        check(get("preset_count") == "111" and get("category_count") == "7"
-              and m["category"]["options"][0] == "P.001-016" and m["category"]["options"][6] == "P.097-111"
-              and get("preset_name").startswith("P.111") and get("category") == "6" and get("patch") == "14",
-              f"scattered vocoder: {get('preset_count')} programs, categories {m['category']['options'][::6]}, last {get('preset_name')!r}")
-        put("category", 6)
+        check(get("preset_count") == "111" and get("category_count") == "7" and m["category"]["options"] == std_names
+              and get("preset_name").startswith("B.78") and get("category") == "6" and get("patch") == "15",
+              f"scattered vocoder: {get('preset_count')} programs, {get('category_count')} categories, last {get('preset_name')!r}")
+        put("category", 0)
         m = meta()
-        check(len(m["patch"]["options"]) == 15 and m["patch"]["options"][0].startswith("P.097")
-              and m["patch"]["short_options"] == [f"{s}{c}" for s in "AB" for c in range(1, 9)][:15],
-              f"the last group lists its {len(m['patch']['options'])} programs")
+        opts = m["patch"]["options"]
+        check(len(opts) == 15 and opts[2].startswith("A.13") and opts[3].startswith("A.15") and opts[14].startswith("B.18")
+              and m["patch"]["short_options"] == ["A1", "A2", "A3", "A5", "A6", "A7", "A8"] + [f"B{c}" for c in range(1, 9)]
+              and get("patch_count") == "15",
+              f"Trance lists its 15 playable programs with their own coordinates: {opts[2][:6]} {opts[3][:6]} ... {m['patch']['short_options'][:5]}")
         put("patch", 15)
-        check(get("preset") == "110", f"Program past the last one clamps to it: ordinal {get('preset')}")
-        raws = set()
+        check(get("patch") == "14" and get("preset_name").startswith("B.18") and get("preset") == "62",
+              f"Program past the category's last clamps to it: {get('preset_name')!r}, ordinal {get('preset')}")
+        names_seen = set()
         for i in range(111):
             put("preset", i)
-            raws.add(get("preset_name").split(" ")[0])
-        check(len(raws) == 111, "every ordinal of the scattered bank is its own program")
+            names_seen.add(get("preset_name").split(" ")[0])
+        check(len(names_seen) == 111 and not any(n.startswith(("A.8", "B.8", "A.14")) for n in names_seen),
+              "every ordinal of the scattered bank is its own matrix program (A.14 and row 8 are not offered)")
         put("bank_file", "E_names")
-        put("preset", 3)  # raw slot 4 (A.15): the flagged A.14 is skipped
-        check(get("preset_name") == "P.004 Name 004" and get("preset_name:2") == "P.003 Name 002",
-              f"names follow the skipped slot: {get('preset_name')!r}, {get('preset_name:2')!r}")
+        put("preset", 3)  # slot 4 (A.15): the flagged A.14 is skipped
+        check(get("preset_name") == "A.15 Name 004" and get("preset_name:2") == "A.13 Name 002",
+              f"matrix names stay: {get('preset_name')!r}, {get('preset_name:2')!r}")
+
+        # Vocoder programs on the A side of row 8 only: B.81-B.88 are ordinary programs in the 8th category
+        put("bank_file", "F_row8a")
+        m = meta()
+        put("category", 7)
+        m = meta()
+        check(get("preset_count") == "120" and get("category_count") == "8" and m["category"]["options"][7] == "Other"
+              and get("patch_count") == "8" and m["patch"]["short_options"] == [f"B{c}" for c in range(1, 9)]
+              and m["patch"]["options"][0].startswith("B.81"),
+              f"half a vocoder row: {get('preset_count')} programs, category 8 'Other' with {get('patch_count')} (first {m['patch']['options'][0][:6]})")
+        put("patch", 20)
+        check(get("preset_name").startswith("B.88") and get("preset") == "119", f"Program past the end -> {get('preset_name')!r}")
+        put("category", 99)
+        check(get("category") == "7", f"Category past the end clamps: {get('category')}")
+
+        # A whole row of vocoder programs in the middle: that category is not offered, the others keep their names
+        put("bank_file", "G_gap")
+        m = meta()
+        check(get("preset_count") == "96" and get("category_count") == "6"
+              and m["category"]["options"] == ["Trance", "Techno/House", "DnB/Breaks", "Hiphop/Vintage", "Retro", "SE/Hit"],
+              f"an empty row is skipped: {get('category_count')} categories {m['category']['options']}")
+        put("category", 2)
+        put("patch", 0)
+        check(get("preset_name").startswith("A.41"), f"third category is the matrix's 4th row: {get('preset_name')!r}")
 
         # A bank of nothing but vocoder programs keeps them all rather than offering nothing
         put("bank_file", "D_allvoc")

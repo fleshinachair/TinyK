@@ -274,8 +274,12 @@ typedef struct {
     int play_n;                 /* playable programs: 112 for a factory-style bank, 128 without vocoders */
     uint8_t play_map[NUM_PRESETS];
     int8_t play_ord[NUM_PRESETS]; /* slot -> ordinal, -1 for a vocoder program */
-    int play_std;               /* 1: the A.11-B.88 matrix layout (rows = categories); 0: sequential groups of 16 */
-    int play_ncat;              /* categories offered: 7 (matrix without the vocoder row), 8, or groups of 16 */
+    int play_ncat;              /* categories offered: the matrix rows (1..8) that hold a playable program */
+    uint8_t cat_row[8];         /* category -> matrix row 0..7 (the category's name) */
+    uint8_t cat_n[8];           /* playable programs in the category (1..16) */
+    uint8_t cat_slot[8][16];    /* category, position -> bank slot, in matrix order (A side then B side) */
+    int8_t slot_cat[NUM_PRESETS]; /* bank slot -> category, -1 for a vocoder program */
+    int8_t slot_pos[NUM_PRESETS]; /* bank slot -> position within its category */
 
     /* Preset State */
     int current_preset;         /* slot in the bank (0..127), never a vocoder program */
