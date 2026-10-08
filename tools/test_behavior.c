@@ -831,6 +831,91 @@ static void test_arp(void) {
     move_plugin_init_v2(NULL);
 }
 
+/* Program change: flush like CC 120 / 123 so nothing hangs or rings into the new sound */
+static double max_step(const int16_t *b, int frames) {
+    double m = 0;
+    for (int ch = 0; ch < 2; ch++)
+        for (int i = 1; i < frames; i++) {
+            double d = fabs((b[i * 2 + ch] - b[(i - 1) * 2 + ch]) / 32768.0);
+            if (d > m) m = d;
+        }
+    return m;
+}
+
+static double peak_in(const int16_t *b, int frames, double t0, double t1) {
+    double m = 0;
+    for (int i = (int)(t0 * SR); i < (int)(t1 * SR) && i < frames; i++)
+        for (int ch = 0; ch < 2; ch++) {
+            double v = fabs(b[i * 2 + ch] / 32768.0);
+            if (v > m) m = v;
+        }
+    return m;
+}
+
+static void test_program_change_flush(void) {
+    printf("\nProgram change flush\n");
+    /* a Poly program and one with another voice assign (Mono or Unison), arpeggiator off in both */
+    int poly = -1, other = -1, delayed = -1;
+    for (int i = 0; i < 128; i++) {
+        synth_init(&S);
+        synth_load_preset(&S, i);
+        if (S.arp.set.on || S.voice_mode) continue;
+        int a = S.timbre_extra[0].assign;
+        if (a == 1 && poly < 0) poly = i;
+        if (a != 1 && other < 0) other = i;
+        if (S.params[PARAM_DELAY_MIX] > 0.4f && S.params[PARAM_DELAY_FEEDBACK] > 0.4f && delayed < 0) delayed = i;
+    }
+    check(poly >= 0 && other >= 0 && delayed >= 0, "found a Poly, a non-Poly and a delay-heavy program");
+    int frames;
+    for (int dir = 0; dir < 2; dir++) {
+        int from = dir ? other : poly, to = dir ? poly : other;
+        fresh(from);
+        midi(0x90, 60, 100);
+        int16_t *a = render(0.4, &frames); free(a);
+        synth_load_preset(&S, to);
+        int16_t *b = render(1.0, &frames);
+        double held = peak_in(b, frames, 0.1, 1.0);
+        free(b);
+        midi(0x80, 60, 0);
+        int16_t *c = render(1.0, &frames);
+        double after = peak_in(c, frames, 0.0, 1.0);
+        free(c);
+        char msg[160];
+        snprintf(msg, sizeof msg, "key held across %d -> %d (assign %d -> %d): silent after the change (peak %.5f), still silent after release (%.5f)",
+                 from, to, dir ? 0 : 1, dir ? 1 : 0, held, after);
+        check(held < 1e-3 && after < 1e-3, msg);
+    }
+    /* delay / Mod FX tails and ringing filters do not carry into the next program */
+    fresh(delayed);
+    midi(0x90, 60, 110);
+    int16_t *a = render(0.5, &frames);
+    double before_slope = max_step(a, frames), before_peak = peak_in(a, frames, 0.2, 0.5);
+    free(a);
+    midi(0x80, 60, 0);
+    a = render(0.05, &frames); free(a);
+    synth_load_preset(&S, other);
+    int16_t *b = render(1.5, &frames);
+    double late = peak_in(b, frames, 0.05, 1.5);
+    double slope = max_step(b, frames);
+    double last = fabs(b[(frames - 1) * 2] / 32768.0);
+    free(b);
+    char msg[200];
+    snprintf(msg, sizeof msg, "delay tail of program %d is gone after the change (peak %.5f after 50 ms, before %.3f)", delayed, late, before_peak);
+    check(late < 1e-3, msg);
+    snprintf(msg, sizeof msg, "flush is click-free: largest sample step %.4f against %.4f while playing; ends at %.5f", slope, before_slope, last);
+    check(slope <= before_slope * 1.05 + 0.002 && last < 1e-3, msg);
+    /* held keys and the arpeggio are dropped with the program: no stuck arpeggio after the change */
+    fresh(20); /* A.21: the program's arpeggiator is on */
+    int ks[2] = { 60, 64 };
+    keys(ks, 2, 1);
+    a = render(0.6, &frames); free(a);
+    synth_load_preset(&S, other);
+    b = render(0.5, &frames);
+    snprintf(msg, sizeof msg, "arpeggiator keys cleared by a program change (held %d, running %d, peak %.5f)", S.arp.held_count, S.arp.running, peak_in(b, frames, 0.1, 0.5));
+    check(S.arp.held_count == 0 && !S.arp.running && peak_in(b, frames, 0.1, 0.5) < 1e-3, msg);
+    free(b);
+}
+
 int main(void) {
     test_layer();
     test_edit_routing();
@@ -841,6 +926,7 @@ int main(void) {
     test_lfo_steps_click_free();
     test_noise_is_white();
     test_arp();
+    test_program_change_flush();
     printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "ALL PASSED", failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;
 }
