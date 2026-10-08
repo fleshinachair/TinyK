@@ -1,16 +1,16 @@
 # TinyK for Ableton Move
 
-A lightweight, microKORG-inspired virtual analog synth engine for Ableton Move, built on the [Schwung](https://github.com/charlesvestal/schwung) module runtime.
+A lightweight virtual analog synth engine in the style of the classic early-2000s dual-oscillator VA synths, for Ableton Move, built on the [Schwung](https://github.com/charlesvestal/schwung) module runtime.
 
 ## Features
 - **4-voice polyphonic / 2-voice dual-layer** virtual analog engine (Single and Layer modes) with authentic Unison voice stacking, detune, and stereo spread.
-- **Full microKORG Arpeggiator Engine:** Authentic 6-type arpeggiator (Up, Down, Alt1, Alt2, Random, Trigger), 1–4 octaves, variable resolution, swing (-100% to +100%), gate length, key sync, and target layer routing.
-- **Dedicated 8-Step Sequencer Page:** Interactive per-step mute/play toggles matching the classic microKORG step pattern matrix.
+- **Classic 6-type arpeggiator engine:** Up, Down, Alt1, Alt2, Random and Trigger patterns with 1–4 octaves, variable resolution, swing (-100% to +100%), gate length, key sync, and target layer routing.
+- **Dedicated 8-Step Sequencer Page:** Interactive per-step mute/play toggles drawn as a 2 x 4 hardware-style LED step matrix.
 - **TPT zero-delay-feedback state-variable filter** (LPF24, LPF12, BPF12, HPF12) with an amp-stage drive circuit, stable from low cutoffs up to 19 kHz at any resonance.
 - **Integrated Mod FX Engine:** Distinct Chorus/Flanger, 3-tap Ensemble, and 6-stage all-pass Phaser algorithms with output DC-blocking.
 - **Virtual Patch matrix and two LFOs per layer**, decoded directly from patch data.
-- **microKORG category navigation:** pick one of 8 categories, then scroll its 16 programs (A1–A8, B1–B8) on a single knob, with the patch name in the header.
-- **Dynamic SysEx bank loader (microKORG & MS2000):** drop microKORG or MS2000 `.syx` bank dumps into the module's `banks/` folder and switch between them by name. Banks are decoded once at start-up, so switching never allocates memory or touches files while audio runs.
+- **Genre category navigation:** pick one of 8 categories, then scroll its 16 programs (A1–A8, B1–B8) on a single knob, with the patch name in the header.
+- **Dynamic SysEx bank loader (microKORG & MS2000 compatible):** drop standard microKORG or MS2000 128-program `.syx` bank dumps into the module's `banks/` folder and switch between them by name. Banks are decoded once at start-up, so switching never allocates memory or touches files while audio runs.
 - **Built-in factory bank:** 128 production-ready performance presets covering classic leads, pads, basses, and arpeggios, playable immediately without external files.
 
 ## Requirements
@@ -35,13 +35,13 @@ If TinyK is listed in the Schwung module catalog, install it from there; updates
 3. Reload a track slot with TinyK (or restart Schwung).
 
 ## Playing
-- **Pages,** in order: **Perf** (Category, Program, Arp, Mode, Cutoff, Resonance, Amp Release, Layer), **Osc** (Wave 1, Wave 2, Pulse Width, Semi, Tune, Voice, Layer Balance, Mod Wheel), **Envelopes** (filter EG, amp decay/sustain, Key Track, EG Int), **Mix/Filter** (Osc Mix, Noise, Sync/Ring, Filter Type, Drive, Level, Portamento, Amp Attack), **Effects** (Chorus, Delay, Master Vol, Pan, LFO rates), **Arp Settings** (Type, Range, Resolution, Gate, Swing, Latch, Key Sync, Target), **Arp Steps** (Step 1-8: Rest / Play, drawn as the microKORG's 2 x 4 step LEDs: hollow = rest, filled = play, the sounding step inverted) and **Bank**. Shift+Click opens Schwung's page picker to jump straight to any page. The Move has no mod wheel, so **Mod Wheel** (0–127) on Osc plays its part for patches that route it; a wheel on an external controller (CC1) works too, and whichever moved last wins. Category picks one of the 8 categories (Trance, Techno/House, Electronica, DnB/Breaks, Hiphop/Vintage, Retro, SE/Hit, Vocoder) and Program its 16 programs (A1–A8, B1–B8); touching or turning Program shows the full code and name, e.g. "B.17 Flashin'Pad". The header shows the current patch name; the jog wheel steps through all 128 programs. The wave knobs show the waveform.
-- **Arpeggiator:** each program plays its own microKORG arpeggio (type, octave range, resolution, gate, swing, step pattern, latch) when its arpeggiator is on, in time with the Move's tempo and, while the transport runs, on its beat grid. **Arp** on the Perf page turns it on or off for the current program, **Arp Settings** changes its type, range, resolution, gate, swing, latch, key sync and target layer, and **Arp Steps** sets which of its 8 steps play, all live (the slot remembers them).
+- **Pages,** in order: **Perf** (Category, Program, Arp, Mode, Cutoff, Resonance, Amp Release, Layer), **Osc** (Wave 1, Wave 2, Pulse Width, Semi, Tune, Voice, Layer Balance, Mod Wheel), **Envelopes** (filter EG, amp decay/sustain, Key Track, EG Int), **Mix/Filter** (Osc Mix, Noise, Sync/Ring, Filter Type, Drive, Level, Portamento, Amp Attack), **Effects** (Chorus, Delay, Master Vol, Pan, LFO rates), **Arp Settings** (Type, Range, Resolution, Gate, Swing, Latch, Key Sync, Target), **Arp Steps** (Step 1-8: Rest / Play, drawn as a 2 x 4 hardware-style LED step matrix: hollow = rest, filled = play, the sounding step inverted) and **Bank**. Shift+Click opens Schwung's page picker to jump straight to any page. The Move has no mod wheel, so **Mod Wheel** (0–127) on Osc plays its part for patches that route it; a wheel on an external controller (CC1) works too, and whichever moved last wins. Category picks one of the 8 categories (Trance, Techno/House, Electronica, DnB/Breaks, Hiphop/Vintage, Retro, SE/Hit, Vocoder) and Program its 16 programs (A1–A8, B1–B8); touching or turning Program shows the full code and name, e.g. "B.17 Flashin'Pad". The header shows the current patch name; the jog wheel steps through all 128 programs. The wave knobs show the waveform.
+- **Arpeggiator:** each program plays its own stored arpeggio (type, octave range, resolution, gate, swing, step pattern, latch) when its arpeggiator is on, in time with the Move's tempo and, while the transport runs, on its beat grid. **Arp** on the Perf page turns it on or off for the current program, **Arp Settings** changes its type, range, resolution, gate, swing, latch, key sync and target layer, and **Arp Steps** sets which of its 8 steps play, all live (the slot remembers them).
 - **Layer mode:** Mode (on Perf) switches between Single (one layer, 4 voices) and Layer (two layers, L1 and L2, 2 voices each). Layer (on Perf) chooses which layer the per-layer knobs edit: the Perf macros (Cutoff, Resonance, Amp Release) and the Osc, Envelopes and Mix/Filter pages. Those three pages show [L1] or [L2] in the header, and the knob labels name the layer: L1.CUT / L2.CUT, L1.RES / L2.RES, and so on. In Single mode there is one layer, so Layer reads N/A and the labels are the plain ones. Voice (on Osc) is the layer's polyphony: Mono, Poly or Unison. Several slots can each run their own TinyK: every instance keeps its own program, bank, edits and voices. See [docs/USER_GUIDE.md](docs/USER_GUIDE.md) for an illustrated tour of all 8 pages.
 - **Bank page:** open **Bank** from the main page. The **Bank** knob shows "Built-in" and the file name of each bank found in `banks/`; **Browse banks** lists them, and picking one returns to the main page. Changing bank keeps the selected category and program.
 
 ## Adding your own banks
-TinyK reads microKORG bank dumps: SysEx files holding all 128 programs, either an *All Program Data* dump (about 37 KB) or an *All Data* dump. Files exported by the microKORG, its editor, or patch-bank collections in that format work.
+TinyK reads standard 128-program SysEx bank dumps from both the microKORG and the MS2000, in either the *All Program Data* format (about 37 KB) or the *All Data* format. Files exported by those instruments, their editors, or patch-bank collections in these formats work.
 
 1. Copy the `.syx` files into the module's `banks/` folder on the Move:
    ```bash
@@ -51,7 +51,7 @@ TinyK reads microKORG bank dumps: SysEx files holding all 128 programs, either a
 
 Notes:
 - Program names stored in the dump are shown; otherwise programs are labelled by position (A.11–B.88).
-- Single-program dumps and any file that is not a 128-program microKORG bank are skipped.
+- Single-program dumps and any file that is not a 128-program microKORG or MS2000 bank dump are skipped.
 - Vocoder programs play with a generic carrier sound: TinyK has no vocoder.
 - `.syx` files in the repository's `banks/` folder are never committed, packaged or installed: `./scripts/install.sh` leaves the Move's `banks/` folder alone, so a clean install shows only "Built-in". To send your local banks too, run `INSTALL_BANKS=1 ./scripts/install.sh` (it skips `TinyK_Default.syx`, which is the built-in bank).
 
