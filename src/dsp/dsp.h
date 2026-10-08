@@ -268,8 +268,17 @@ typedef struct {
     int flush_stage;            /* 0 idle, 1 ducking (clear at silence), 2 coming back */
     float flush_gain;
 
+    /* Programs the active bank offers: vocoder programs (no synth data) are left out. play_map[ordinal] is the bank
+     * slot (0..127) of the ordinal-th playable program; the jog wheel, Category and Program address ordinals.
+     * Rebuilt for the instance whenever its bank changes (rebuild_playlist). */
+    int play_n;                 /* playable programs: 112 for a factory-style bank, 128 without vocoders */
+    uint8_t play_map[NUM_PRESETS];
+    int8_t play_ord[NUM_PRESETS]; /* slot -> ordinal, -1 for a vocoder program */
+    int play_std;               /* 1: the A.11-B.88 matrix layout (rows = categories); 0: sequential groups of 16 */
+    int play_ncat;              /* categories offered: 7 (matrix without the vocoder row), 8, or groups of 16 */
+
     /* Preset State */
-    int current_preset;
+    int current_preset;         /* slot in the bank (0..127), never a vocoder program */
     int bank_side;      /* 0 = Side A, 1 = Side B */
     int genre_category; /* 0..7 */
     int program_num;    /* 1..8 */

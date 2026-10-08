@@ -174,7 +174,7 @@ static void syx_parse_program(const uint8_t *p, int idx, struct Preset *out, cha
     double delay_fb = syx_unit(p[21]);
     syx_make_label(p, idx, label);
     out->label = label;
-    out->voice_mode = (mode_bits == 2) ? 1 : 0;
+    out->voice_mode = (mode_bits == 3) ? 2 : ((mode_bits == 2) ? 1 : 0); /* 2 = vocoder, see presets.h */
     out->chorus_mix = (float)syx_unit(p[24]);
     out->delay_time = (float)syx_unit(p[20]);
     out->delay_feedback = (float)delay_fb;

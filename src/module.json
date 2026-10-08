@@ -75,8 +75,7 @@
                 "DnB/Breaks",
                 "Hiphop/Vintage",
                 "Retro",
-                "SE/Hit",
-                "Vocoder"
+                "SE/Hit"
               ],
               "default": 0,
               "short_name": "CAT"

@@ -916,6 +916,25 @@ static void test_program_change_flush(void) {
     free(b);
 }
 
+/* Output headroom: the shipped engine peaks about 7 dB below full scale (native Move tracks sit around -12..-8 dBFS) */
+static void test_headroom(void) {
+    printf("\nOutput headroom\n");
+    double worst = 0, quietest_loud = 1;
+    int frames, worst_i = 0;
+    for (int i = 0; i < 128; i += 5) {
+        fresh(i);
+        midi(0x90, 60, 127);
+        int16_t *b = render(1.0, &frames);
+        double pk = peak_in(b, frames, 0.0, 1.0);
+        free(b);
+        if (pk > worst) { worst = pk; worst_i = i; }
+        if (pk > 0.05 && pk < quietest_loud) quietest_loud = pk;
+    }
+    char msg[160];
+    snprintf(msg, sizeof msg, "loudest of 26 programs peaks at %.1f dBFS (program %d), at most -6.5 dBFS", 20 * log10(worst), worst_i);
+    check(worst <= 0.475 && worst > 0.2, msg);
+}
+
 int main(void) {
     test_layer();
     test_edit_routing();
@@ -927,6 +946,7 @@ int main(void) {
     test_noise_is_white();
     test_arp();
     test_program_change_flush();
+    test_headroom();
     printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "ALL PASSED", failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;
 }

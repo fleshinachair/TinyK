@@ -323,7 +323,7 @@ def render_header(presets):
     out.append("};\n\n")
     out.append("struct Preset {\n")
     out.append("    const char *label;\n")
-    out.append("    int voice_mode; /* 0 = Single, 1 = Layer */\n")
+    out.append("    int voice_mode; /* 0 = Single, 1 = Layer, 2 = Vocoder (no synth data: left out of the program lists) */\n")
     out.append("    struct TimbreParams t1, t2;\n")
     out.append("    float chorus_mix, delay_time, delay_feedback, delay_mix, delay_sync, modfx_speed, modfx_type;\n")
     out.append("    struct ArpParams arp;\n")
@@ -340,7 +340,7 @@ def render_header(presets):
         label = p["label"].replace("\\", "\\\\").replace('"', '\\"')
         comma = "," if i < len(presets) - 1 else ""
         out.append(f"    /* [{i:3d}] {p['label']} */\n")
-        out.append(f'    {{ "{label}", {int(p["voice_mode"])},\n')
+        out.append(f'    {{ "{label}", {2 if p["mode"] == "vocoder" else int(p["voice_mode"])},\n')
         out.append(f"      {timbres[0]},\n      {timbres[1]},\n      {fx} }}{comma}\n")
 
     out.append("};\n\n#endif /* PRESETS_H */\n")

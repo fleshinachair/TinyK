@@ -11,7 +11,7 @@ TinyK is a microKORG-style virtual analog synth for the Ableton Move (Schwung). 
 
 The Move's display shows a header (page name and the current patch) above a 2 x 4 grid of encoder cells. Each cell has a label, a value and a small bar. The number in brackets under each cell is its encoder (1-4 on the top row, 5-8 below).
 
-- **Jog wheel**: browse all 128 programs. **Shift+Click**: open the page picker and jump to any page. **Shift+jog**: step through pages.
+- **Jog wheel**: browse all the bank's programs (112 in the built-in bank). **Shift+Click**: open the page picker and jump to any page. **Shift+jog**: step through pages.
 - The sound-design pages (**Osc**, **Envelopes**, **Mix/Filter**) show `[L1]` or `[L2]` in the header; in Layer mode their labels read `L1.CUT` / `L2.CUT` and so on.
 - Per-layer values are stored separately, so flipping LAYER between L1 and L2 never changes the other layer.
 - Several Move slots can each run their own TinyK; each keeps its own program, bank and edits.
@@ -31,7 +31,7 @@ The Move's display shows a header (page name and the current patch) above a 2 x 
 
 ## 1. Perf
 
-Everything you reach for while playing: pick a sound, switch the arpeggiator and layer mode, and shape the sound with the three macros. The jog wheel also steps through all 128 programs.
+Everything you reach for while playing: pick a sound, switch the arpeggiator and layer mode, and shape the sound with the three macros. The jog wheel also steps through all the programs of the bank (112 in the built-in bank).
 
 ```
 +-----------------------------------------------+
@@ -51,8 +51,8 @@ Everything you reach for while playing: pick a sound, switch the arpeggiator and
 
 | Enc | Label | Controls | Range / values | Tip |
 |-----|-------|----------|----------------|-----|
-| 1 | CAT | Category | 8 choices: Trance, Techno, Electr, DnB, Hiphop, Retro, SE/Hit, Vocod. Each is one row of the microKORG's program matrix (16 programs). | Changing it keeps the Program position, so A1 in Trance becomes A1 in Techno. |
-| 2 | PROG | Program | A1-A8, then B1-B8 inside the category. Touching or turning shows the full patch code and name, e.g. `B.12 ARPEJMATR`. | Category and Program together address all 128 programs; the jog wheel steps through them in order. |
+| 1 | CAT | Category | 7 choices: Trance, Techno, Electr, DnB, Hiphop, Retro, SE/Hit. Each is one row of the program matrix (16 programs). Vocoder programs are not offered; banks laid out differently are split into groups of 16 (`P.001-016` ...). | Changing it keeps the Program position, so A1 in Trance becomes A1 in Techno. |
+| 2 | PROG | Program | A1-A8, then B1-B8 inside the category. Touching or turning shows the full patch code and name, e.g. `B.12 ARPEJMATR`. | Category and Program together address every program of the bank; the jog wheel steps through them in order. |
 | 3 | ARP | Arpeggiator on / off | Off / On. Each program stores its own arpeggio; this overrides it until you pick another program. | Shape the pattern on the Arp Settings and Arp Steps pages. |
 | 4 | MODE | Single / Layer | Single: one layer plays all 4 voices. Layer: two layers (L1, L2) play 2 voices each, blended by Layer Bal on Osc. | Switching mode cuts any sounding notes (a short fade, no click). Programs set their own mode when loaded. |
 | 5 | CUT | Filter cutoff | 0-100 % (about 37 Hz up to the 19 kHz ceiling), shown in Hz / kHz. In Layer mode the label reads `L1.CUT` or `L2.CUT`. | Edits the layer chosen by LAYER (encoder 8). |
@@ -269,7 +269,7 @@ On the real display each cell is a small picture above its label instead of text
 
 ## 8. Bank
 
-Which set of 128 programs is loaded.
+Which bank of programs is loaded.
 
 ```
 +-----------------------------------------------+

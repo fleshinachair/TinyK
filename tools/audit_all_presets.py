@@ -7,8 +7,8 @@ patches that are silent, faint, click-only, or unstable.
     python tools/audit_all_presets.py 8 9 120    # audit selected preset indices
 
 Categories:
-  SILENT      peak < -45 dBFS
-  VERY QUIET  peak between -45 and -20 dBFS
+  SILENT      peak < -45 dBFS (before the -6.9 dB output headroom)
+  VERY QUIET  peak between -45 and -20 dBFS (same)
   CLICK ONLY  the signal stays within 30 dB of its peak for < 15 ms
   UNSTABLE    non-finite values inside the engine, DC offset > 0.05, or int16 rail hits
 """
@@ -26,7 +26,10 @@ from scipy.io import wavfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 NOTE, HOLD_S, TOTAL_S = 60, 1.5, 2.0
-SILENT_DB, QUIET_DB = -45.0, -20.0
+# The engine ships with TINYK_OUTPUT_HEADROOM 0.45 (-6.9 dB, src/dsp/dsp.c): the level thresholds below are
+# stated at unity and moved by the same amount, so they keep meaning what they did.
+HEADROOM_DB = -6.9
+SILENT_DB, QUIET_DB = -45.0 + HEADROOM_DB, -20.0 + HEADROOM_DB
 CLICK_MS = 15.0
 DC_LIMIT = 0.05
 

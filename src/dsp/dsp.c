@@ -17,13 +17,87 @@ static const char *active_bank_name(const synth_engine_t *synth) {
     return (b > 0 && b <= g_syx_bank_count) ? g_syx_banks[b - 1].name : "Built-in";
 }
 
-/* "A.11 Name" for preset idx of the active bank ("A.11" alone when the bank has no name for it) */
+/* --- Program list ---------------------------------------------------------------------------------------------------
+ * TinyK has no vocoder (no modulator input), so programs the bank flags as vocoder (Preset.voice_mode 2, decoded from
+ * the program's own voice mode byte, not from their slot) are left out of what the instance offers. The playable ones
+ * are numbered 0..play_n-1 ("ordinals"). A bank laid out like the factory ones (vocoder programs exactly in the
+ * matrix's row 8 on both sides, or none at all) keeps its A.11-B.78 matrix: Category = row, Program = side + column,
+ * and the vocoder row is simply not offered (7 categories, 112 programs). Any other bank is numbered P.001...
+ * and browsed in groups of 16. A bank without a single synth program keeps all 128 (generic carrier) rather than
+ * offering nothing. Per instance, rebuilt on a bank change; the decoded banks stay read-only. */
+static void rebuild_playlist(synth_engine_t *synth) {
+    const struct Preset *pr = active_presets(synth);
+    int n = 0, voc = 0, voc_row8 = 0;
+    for (int r = 0; r < NUM_PRESETS; r++) {
+        if (pr[r].voice_mode == 2) {
+            voc++;
+            if (r % 64 >= 56) voc_row8++;
+        }
+    }
+    if (voc >= NUM_PRESETS) voc = voc_row8 = 0; /* nothing but vocoder programs: offer them all */
+    for (int r = 0; r < NUM_PRESETS; r++) {
+        if (voc && pr[r].voice_mode == 2) {
+            synth->play_ord[r] = -1;
+        } else {
+            synth->play_ord[r] = (int8_t)n;
+            synth->play_map[n++] = (uint8_t)r;
+        }
+    }
+    synth->play_n = n;
+    synth->play_std = (voc == 0) || (voc == 16 && voc_row8 == 16);
+    synth->play_ncat = synth->play_std ? (voc ? 7 : 8) : (n + 15) / 16;
+}
+
+/* The nearest playable slot at or after `raw` (else before it) */
+static int playable_raw(const synth_engine_t *synth, int raw) {
+    if (raw < 0) raw = 0;
+    if (raw >= NUM_PRESETS) raw = NUM_PRESETS - 1;
+    if (synth->play_ord[raw] >= 0) return raw;
+    for (int r = raw + 1; r < NUM_PRESETS; r++) if (synth->play_ord[r] >= 0) return r;
+    for (int r = raw - 1; r >= 0; r--) if (synth->play_ord[r] >= 0) return r;
+    return 0;
+}
+
+static int category_patch_count(const synth_engine_t *synth, int cat) {
+    if (synth->play_std) return 16;
+    int left = synth->play_n - cat * 16;
+    return left < 1 ? 1 : (left > 16 ? 16 : left);
+}
+
+/* The slot of Program `patch` (0..15 = side * 8 + column) in Category `cat`, always a playable one */
+static int program_raw(const synth_engine_t *synth, int cat, int patch) {
+    if (cat < 0) cat = 0;
+    if (cat > synth->play_ncat - 1) cat = synth->play_ncat - 1;
+    if (patch < 0) patch = 0;
+    if (patch > 15) patch = 15;
+    if (synth->play_std) return playable_raw(synth, (patch / 8) * 64 + cat * 8 + patch % 8);
+    int o = cat * 16 + patch;
+    return synth->play_map[o < synth->play_n ? o : synth->play_n - 1];
+}
+
+/* Category and Program (0..15) that address slot `raw` */
+static void program_layout(const synth_engine_t *synth, int raw, int *cat, int *patch) {
+    int o = synth->play_ord[raw];
+    if (synth->play_std || o < 0) {
+        *cat = (raw % 64) / 8;
+        *patch = (raw / 64) * 8 + raw % 8;
+    } else {
+        *cat = o / 16;
+        *patch = o % 16;
+    }
+}
+
+/* "A.11 Name" for slot idx of the active bank ("A.11" alone when the bank has no name for it); "P.001 Name" in a
+ * bank that is browsed in sequence */
 static int format_preset_name(const synth_engine_t *synth, int idx, char *buf, int buf_len) {
     const char *label = active_presets(synth)[idx].label;
     const char *name = label;
     if ((label[0] == 'A' || label[0] == 'B') && label[1] == '.') { /* label carries its own code: drop it */
         const char *sp = strchr(label, ' ');
         name = sp ? sp + 1 : "";
+    }
+    if (!synth->play_std && synth->play_ord[idx] >= 0) {
+        return snprintf(buf, buf_len, "P.%03d%s%s", synth->play_ord[idx] + 1, *name ? " " : "", name);
     }
     return snprintf(buf, buf_len, "%c.%d%d%s%s", idx >= 64 ? 'B' : 'A', (idx % 64) / 8 + 1, idx % 8 + 1,
                     *name ? " " : "", name);
@@ -656,10 +730,10 @@ static void load_preset_from(synth_engine_t *synth, const struct Preset *p, int 
 
     flush_for_program(synth);
     synth->current_preset = index;
-    int bank_side = index / 64;
-    int genre_category = (index % 64) / 8;
-    int slot_in_bank = index % 8;
-    int program_num = (bank_side == 0) ? (slot_in_bank + 1) : (slot_in_bank + 9);
+    int genre_category, patch;
+    program_layout(synth, index, &genre_category, &patch);
+    int bank_side = patch / 8;
+    int program_num = patch + 1;
 
     synth->bank_side = bank_side;
     synth->genre_category = genre_category;
@@ -758,6 +832,7 @@ static void load_preset_from(synth_engine_t *synth, const struct Preset *p, int 
 static void load_preset(synth_engine_t *synth, int index) {
     if (index < 0) index = 0;
     if (index >= 128) index = 127;
+    index = playable_raw(synth, index); /* a vocoder program is never loaded: the next playable one is */
     load_preset_from(synth, &active_presets(synth)[index], index);
 }
 
@@ -837,6 +912,7 @@ void synth_init(synth_engine_t *synth) {
     }
 
     /* Initialize to Default Preset 0 (A.11 Saw Lead) */
+    rebuild_playlist(synth);
     load_preset(synth, 0);
     arp_reset(&synth->arp);
 
@@ -862,14 +938,9 @@ void synth_init(synth_engine_t *synth) {
 static void select_program(synth_engine_t *synth, int side, int row, int col) {
     if (side < 0) side = 0;
     if (side > 1) side = 1;
-    if (row < 0) row = 0;
-    if (row > 7) row = 7;
     if (col < 0) col = 0;
     if (col > 7) col = 7;
-    synth->bank_side = side;
-    synth->genre_category = row;
-    synth->program_num = side ? col + 9 : col + 1;
-    load_preset(synth, side * 64 + row * 8 + col);
+    load_preset(synth, program_raw(synth, row, side * 8 + col)); /* sets bank_side, genre_category, program_num */
 }
 
 /* Switches the active bank (0 = built-in, 1..N = .syx files) and reloads the current program from it. */
@@ -877,6 +948,7 @@ static void select_bank_file(synth_engine_t *synth, int b) {
     if (b < 0) b = 0;
     if (b > g_syx_bank_count) b = g_syx_bank_count;
     synth->bank_file = b;
+    rebuild_playlist(synth);
     load_preset(synth, synth->current_preset);
 }
 
@@ -894,10 +966,6 @@ static int current_patch(const synth_engine_t *synth) {
     return synth->program_num - 1;
 }
 
-/* Preset index of Program `patch` (0..15) in Category `category` (0..7) */
-static int patch_preset(int category, int patch) {
-    return (patch / 8) * 64 + category * 8 + patch % 8;
-}
 
 /* Index of `val` in names[], or -1 */
 static int name_index(const char *val, const char *const *names, int n) {
@@ -910,8 +978,8 @@ static int name_index(const char *val, const char *const *names, int n) {
 /* Index of `val` among the current category's Program labels ("B.12 ARPEJMATR"), or -1 */
 static int patch_label_index(const synth_engine_t *synth, const char *val) {
     char label[48];
-    for (int i = 0; i < 16; i++) {
-        format_preset_name(synth, patch_preset(synth->genre_category, i), label, sizeof label);
+    for (int i = 0; i < category_patch_count(synth, synth->genre_category); i++) {
+        format_preset_name(synth, program_raw(synth, synth->genre_category, i), label, sizeof label);
         if (strcmp(val, label) == 0) return i;
     }
     return -1;
@@ -1014,7 +1082,7 @@ static void set_program_number(synth_engine_t *synth, int n) {
     if (col == 9) { row++; col = 1; }
     if (col == 0) { row--; col = 8; }
     if (row < 1) { row = 1; col = 1; }
-    if (row > 8) { row = 8; col = 8; }
+    if (row > synth->play_ncat) { row = synth->play_ncat; col = 8; }
     select_program(synth, synth->bank_side, row - 1, col - 1);
 }
 
@@ -1109,12 +1177,8 @@ void synth_set_param(synth_engine_t *synth, const char *key, float val) {
     if (strcmp(key, "genre_category") == 0) {
         int g = (val > 1.0f) ? (int)roundf(val) : (int)roundf(val * 7.0f);
         if (g < 0) g = 0;
-        if (g > 7) g = 7;
-        synth->genre_category = g;
-        int bank_offset = (synth->program_num > 8) ? 64 : 0;
-        int slot_in_bank = (synth->program_num > 8) ? (synth->program_num - 9) : (synth->program_num - 1);
-        int preset_index = bank_offset + (synth->genre_category * 8) + slot_in_bank;
-        load_preset(synth, preset_index);
+        if (g > synth->play_ncat - 1) g = synth->play_ncat - 1;
+        select_program(synth, current_patch(synth) / 8, g, current_patch(synth) % 8);
         return;
     }
 
@@ -1122,11 +1186,7 @@ void synth_set_param(synth_engine_t *synth, const char *key, float val) {
         int p = (val >= 1.0f && val <= 16.0f) ? (int)roundf(val) : (1 + (int)roundf(val * 15.0f));
         if (p < 1) p = 1;
         if (p > 16) p = 16;
-        synth->program_num = p;
-        int bank_offset = (synth->program_num > 8) ? 64 : 0;
-        int slot_in_bank = (synth->program_num > 8) ? (synth->program_num - 9) : (synth->program_num - 1);
-        int preset_index = bank_offset + (synth->genre_category * 8) + slot_in_bank;
-        load_preset(synth, preset_index);
+        select_program(synth, (p - 1) / 8, synth->genre_category, (p - 1) % 8);
         return;
     }
 
@@ -1143,7 +1203,7 @@ void synth_set_param(synth_engine_t *synth, const char *key, float val) {
 
     if (strcmp(key, "category") == 0) {
         int patch = current_patch(synth);
-        select_program(synth, patch / 8, index_from_value(val, 7), patch % 8);
+        select_program(synth, patch / 8, index_from_value(val, synth->play_ncat - 1), patch % 8);
         return;
     }
 
@@ -1165,7 +1225,7 @@ void synth_set_param(synth_engine_t *synth, const char *key, float val) {
 
     if (strcmp(key, "preset") == 0) {
         /* 0..127; "1" is preset 1 (not a 1/127 fraction): the host's preset browser sends indices */
-        load_preset(synth, index_from_value(val, 127));
+        load_preset(synth, synth->play_map[index_from_value(val, synth->play_n - 1)]); /* an ordinal, see rebuild_playlist */
         return;
     }
 
@@ -1247,7 +1307,7 @@ float synth_get_param(const synth_engine_t *synth, const char *key) {
         return (float)current_patch(synth);
     }
     if (strcmp(key, "preset") == 0) {
-        return (float)synth->current_preset / (float)(NUM_PRESETS - 1);
+        return (float)synth->play_ord[synth->current_preset] / (float)(NUM_PRESETS - 1);
     }
     if (strcmp(key, "voice_assign") == 0) {
         return (float)synth->timbre_extra[edit_timbre(synth)].assign / 2.0f;
@@ -1849,6 +1909,14 @@ void synth_all_notes_off(synth_engine_t *synth) {
         adsr_gate_off(&v->amp_env);
     }
 }
+
+/* Output headroom: the last gain stage, after the Mod FX, delay, DC blockers, master volume and the soft-knee limiter, so
+ * every drive and saturation curve upstream is untouched. The synth peaks near 0 dBFS, native Move instruments are
+ * staged around -12..-8 dBFS: -6.9 dB brings a TinyK track level with them. The calibration tools build the engine
+ * with -DTINYK_OUTPUT_HEADROOM=1.0f to keep comparing against the VST takes at unity. */
+#ifndef TINYK_OUTPUT_HEADROOM
+#define TINYK_OUTPUT_HEADROOM 0.45f
+#endif
 
 /* Soft-knee saturation / tanh master limiter to guarantee no digital wrap-around clipping */
 static inline float soft_knee_limiter(float x) {
@@ -2707,8 +2775,8 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
         float pre_lim_l = out_l * master_vol_p * pan_l;
         float pre_lim_r = out_r * master_vol_p * pan_r;
 
-        float lim_l = soft_knee_limiter(pre_lim_l);
-        float lim_r = soft_knee_limiter(pre_lim_r);
+        float lim_l = soft_knee_limiter(pre_lim_l) * TINYK_OUTPUT_HEADROOM;
+        float lim_r = soft_knee_limiter(pre_lim_r) * TINYK_OUTPUT_HEADROOM;
 
         int32_t sample_l = (int32_t)(lim_l * 32767.0f);
         int32_t sample_r = (int32_t)(lim_r * 32767.0f);
@@ -3024,6 +3092,7 @@ static void apply_state(synth_engine_t *synth, const char *json) {
         }
     }
     synth->bank_file = b; /* a bank no longer on the Move falls back to Built-in; the saved values below still apply */
+    rebuild_playlist(synth);
     int preset = state_number(json, "preset", &f) ? clampi((int)lroundf(f), 0, NUM_PRESETS - 1) : 0;
     synth_all_notes_off(synth);
     load_preset(synth, preset);
@@ -3121,12 +3190,8 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
             }
         }
         if (genre < 0) genre = 0;
-        if (genre > 7) genre = 7;
-        synth->genre_category = genre;
-        int bank_offset = (synth->program_num > 8) ? 64 : 0;
-        int slot_in_bank = (synth->program_num > 8) ? (synth->program_num - 9) : (synth->program_num - 1);
-        int preset_index = bank_offset + (synth->genre_category * 8) + slot_in_bank;
-        load_preset(synth, preset_index);
+        if (genre > synth->play_ncat - 1) genre = synth->play_ncat - 1;
+        select_program(synth, current_patch(synth) / 8, genre, current_patch(synth) % 8);
         return;
     }
 
@@ -3140,11 +3205,7 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         }
         if (p < 1) p = 1;
         if (p > 16) p = 16;
-        synth->program_num = p;
-        int bank_offset = (synth->program_num > 8) ? 64 : 0;
-        int slot_in_bank = (synth->program_num > 8) ? (synth->program_num - 9) : (synth->program_num - 1);
-        int preset_index = bank_offset + (synth->genre_category * 8) + slot_in_bank;
-        load_preset(synth, preset_index);
+        select_program(synth, (p - 1) / 8, synth->genre_category, (p - 1) % 8);
         return;
     }
 
@@ -3359,16 +3420,31 @@ static void json_put_enum(json_out_t *o, const char *key, const char *name, cons
 
 /* Program: options are the current category's patch names ("B.12 ARPEJMATR"), which the host shows when
  * the knob is touched or turned; short_options are the codes its 3-character enum square has room for. */
+/* The Category names on offer (synth->play_ncat of them): the matrix rows (the vocoder row only exists in a bank
+ * without vocoder programs, where it holds ordinary ones: "Other"), else the program numbers of each group of 16 */
+static void category_names(const synth_engine_t *synth, const char *names[8], char text[8][16]) {
+    for (int c = 0; c < 8; c++) {
+        if (synth->play_std) {
+            names[c] = (c == 7) ? "Other" : CATEGORY_NAMES[c];
+        } else {
+            int last = (c * 16 + 16 < synth->play_n) ? c * 16 + 16 : synth->play_n;
+            snprintf(text[c], 16, "P.%03d-%03d", c * 16 + 1, last);
+            names[c] = text[c];
+        }
+    }
+}
+
 static void json_put_patch_enum(json_out_t *o, const synth_engine_t *synth) {
     char label[48];
+    int count = category_patch_count(synth, synth->genre_category);
     json_put(o, "{\"key\":\"patch\",\"name\":\"Program\",\"type\":\"enum\",\"options\":[");
-    for (int i = 0; i < 16; i++) {
+    for (int i = 0; i < count; i++) {
         if (i) json_put(o, ",");
-        format_preset_name(synth, patch_preset(synth->genre_category, i), label, sizeof label);
+        format_preset_name(synth, program_raw(synth, synth->genre_category, i), label, sizeof label);
         json_put_string(o, label);
     }
     json_put(o, "],\"short_options\":[");
-    for (int i = 0; i < 16; i++) {
+    for (int i = 0; i < count; i++) {
         if (i) json_put(o, ",");
         json_put_string(o, PATCH_NAMES[i]);
     }
@@ -3408,7 +3484,10 @@ static const char *build_chain_params_json(const synth_engine_t *synth, char *bu
     for (int i = 0; i < g_syx_bank_count; i++) bank_names[i + 1] = g_syx_banks[i].name;
 
     json_put(&o, "[");
-    json_put_enum(&o, "category", "Category", CATEGORY_NAMES, NULL, 8, 0);
+    const char *cat_names[8];
+    char cat_text[8][16];
+    category_names(synth, cat_names, cat_text);
+    json_put_enum(&o, "category", "Category", cat_names, NULL, synth->play_ncat, 0);
     json_put_patch_enum(&o, synth);
     json_put_enum(&o, "bank_file", "Bank", bank_names, NULL, g_syx_bank_count + 1, 0);
     json_put_enum(&o, "voice_mode", "Mode", VOICE_MODES, VOICE_MODES_SHORT, 2, 0);
@@ -3509,89 +3588,89 @@ static const char MK_UI_HIERARCHY[] =
     ",\"label\":\"Envelopes\"},{\"level\":\"mix\",\"label\":\"Mix/Filter\"},{\"level\":\"fx\",\"label\":\"Effects\"},{\"level\":\"arpse"
     "t\",\"label\":\"Arp Settings\"},{\"level\":\"steps\",\"label\":\"Arp Steps\"},{\"level\":\"bank\",\"label\":\"Bank\"}],\"knobs\":["
     "]},\"perf\":{\"name\":\"Perf\",\"label\":\"Perf\",\"params\":[{\"key\":\"category\",\"label\":\"Category\",\"type\":\"enum\",\"opt"
-    "ions\":[\"Trance\",\"Techno/House\",\"Electronica\",\"DnB/Breaks\",\"Hiphop/Vintage\",\"Retro\",\"SE/Hit\",\"Vocoder\"],\"default"
-    "\":0,\"short_name\":\"CAT\"},{\"key\":\"patch\",\"label\":\"Program\",\"short_name\":\"PROG\",\"type\":\"enum\",\"options\":[\"A1"
-    "\",\"A2\",\"A3\",\"A4\",\"A5\",\"A6\",\"A7\",\"A8\",\"B1\",\"B2\",\"B3\",\"B4\",\"B5\",\"B6\",\"B7\",\"B8\"],\"default\":0},{\"key"
-    "\":\"arp_on\",\"label\":\"Arp\",\"short_name\":\"ARP\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"short_options\":[\"OFF\","
-    "\"ON\"],\"default\":0},{\"key\":\"voice_mode\",\"label\":\"Mode\",\"type\":\"enum\",\"options\":[\"Single\",\"Layer\"],\"short_opt"
-    "ions\":[\"SNGL\",\"LAYR\"],\"default\":0,\"short_name\":\"MODE\"},{\"key\":\"cutoff\",\"label\":\"Cutoff\",\"type\":\"float\",\"mi"
-    "n\":0.0,\"max\":1.0,\"default\":0.7,\"step\":0.01,\"short_name\":\"CUT\"},{\"key\":\"resonance\",\"label\":\"Resonance\",\"type\":"
-    "\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01,\"short_name\":\"RES\"},{\"key\":\"release2\",\"label\":\"Amp Rel"
-    "\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01,\"short_name\":\"REL\"},{\"key\":\"timbre_edit\",\"lab"
-    "el\":\"Layer\",\"type\":\"enum\",\"options\":[\"Layer 1\",\"Layer 2\"],\"short_options\":[\"L1\",\"L2\"],\"default\":0,\"short_nam"
-    "e\":\"LAYER\"}],\"knobs\":[\"category\",\"patch\",\"arp_on\",\"voice_mode\",\"cutoff\",\"resonance\",\"release2\",\"timbre_edit\"]"
-    "},\"osc\":{\"name\":\"Osc [L1]\",\"label\":\"Osc\",\"params\":[{\"key\":\"wave1\",\"label\":\"Wave 1\",\"type\":\"enum\",\"options"
-    "\":[\"Saw\",\"Square\",\"Triangle\",\"Sine\",\"Vox\",\"DWGS\",\"Noise\"],\"short_options\":[\"SAW\",\"SQR\",\"TRI\",\"SIN\",\"VOX"
-    "\",\"DWG\",\"NZ\"],\"default\":0},{\"key\":\"wave2\",\"label\":\"Wave 2\",\"type\":\"enum\",\"options\":[\"Saw\",\"Square\",\"Tria"
-    "ngle\"],\"short_options\":[\"SAW\",\"SQR\",\"TRI\"],\"default\":0},{\"key\":\"pulse_width\",\"label\":\"Pulse Width\",\"type\":\"f"
-    "loat\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"osc2_semi\",\"label\":\"Semi\",\"type\":\"int\",\"min\":-"
-    "24,\"max\":24,\"default\":0,\"unit\":\"st\"},{\"key\":\"osc2_tune\",\"label\":\"Tune\",\"type\":\"int\",\"min\":-50,\"max\":50,\"d"
-    "efault\":0,\"unit\":\"ct\"},{\"key\":\"voice_assign\",\"label\":\"Voice\",\"short_name\":\"VOICE\",\"type\":\"enum\",\"options\":["
-    "\"Mono\",\"Poly\",\"Unison\"],\"short_options\":[\"MONO\",\"POLY\",\"UNIS\"],\"default\":1},{\"key\":\"timbre_balance\",\"label\":"
-    "\"Layer Bal\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01,\"short_name\":\"BAL\"},{\"key\":\"mod_whee"
-    "l\",\"label\":\"Mod Wheel\",\"short_name\":\"MOD\",\"type\":\"int\",\"min\":0,\"max\":127,\"default\":0}],\"knobs\":[\"wave1\",\"w"
-    "ave2\",\"pulse_width\",\"osc2_semi\",\"osc2_tune\",\"voice_assign\",\"timbre_balance\",\"mod_wheel\"]},\"env\":{\"name\":\"Envelop"
-    "es [L1]\",\"label\":\"Envelopes\",\"params\":[{\"key\":\"attack1\",\"label\":\"Filter Atk\",\"type\":\"float\",\"min\":0.0,\"max\""
-    ":1.0,\"default\":0.01,\"step\":0.01},{\"key\":\"decay1\",\"label\":\"Filter Dcy\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"def"
-    "ault\":0.4,\"step\":0.01},{\"key\":\"sustain1\",\"label\":\"Filter Sus\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0."
-    "5,\"step\":0.01},{\"key\":\"release1\",\"label\":\"Filter Rel\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step"
-    "\":0.01},{\"key\":\"decay2\",\"label\":\"Amp Dcy\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"ke"
-    "y\":\"sustain2\",\"label\":\"Amp Sus\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.8,\"step\":0.01},{\"key\":\"keytra"
-    "ck\",\"label\":\"Key Track\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"env_int\",\"labe"
-    "l\":\"EG Int\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01}],\"knobs\":[\"attack1\",\"decay1\",\"sust"
-    "ain1\",\"release1\",\"decay2\",\"sustain2\",\"keytrack\",\"env_int\"]},\"mix\":{\"name\":\"Mix/Filter [L1]\",\"label\":\"Mix/Filte"
-    "r\",\"params\":[{\"key\":\"osc_mix\",\"label\":\"Osc Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.0"
-    "1},{\"key\":\"noise_level\",\"label\":\"Noise\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\""
-    ":\"sync_ring\",\"label\":\"Sync / Ring\",\"type\":\"enum\",\"options\":[\"Off\",\"Ring\",\"Sync\",\"Ring Sync\"],\"short_options\""
-    ":[\"OFF\",\"RING\",\"SYNC\",\"R.SNC\"],\"default\":0},{\"key\":\"filter_type\",\"label\":\"Filter Type\",\"type\":\"enum\",\"optio"
-    "ns\":[\"LPF24\",\"LPF12\",\"BPF12\",\"HPF12\"],\"short_options\":[\"LPF24\",\"LPF12\",\"BPF12\",\"HPF12\"],\"default\":0},{\"key\""
-    ":\"drive\",\"label\":\"Drive\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01},{\"key\":\"level\",\"labe"
-    "l\":\"Level\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.9,\"step\":0.01},{\"key\":\"portamento\",\"label\":\"Portam"
-    "ento\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"attack2\",\"label\":\"Amp Atk\",\"type"
-    "\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.01,\"step\":0.01}],\"knobs\":[\"osc_mix\",\"noise_level\",\"sync_ring\",\"filte"
-    "r_type\",\"drive\",\"level\",\"portamento\",\"attack2\"]},\"fx\":{\"name\":\"Effects\",\"label\":\"Effects\",\"params\":[{\"key\":"
-    "\"chorus_mix\",\"label\":\"Chorus Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"delay"
-    "_time\",\"label\":\"Delay Time\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01},{\"key\":\"delay_feedba"
-    "ck\",\"label\":\"Delay Fdbk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01},{\"key\":\"delay_mix\",\"l"
-    "abel\":\"Delay Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"master_vol\",\"label\":"
-    "\"Master Vol\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.8,\"step\":0.01,\"short_name\":\"VOL\"},{\"key\":\"pan\","
-    "\"label\":\"Pan\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"lfo1_rate\",\"label\":\"LFO"
-    "1 Rate\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01,\"short_name\":\"LFO1\"},{\"key\":\"lfo2_rate\","
-    "\"label\":\"LFO2 Rate\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01,\"short_name\":\"LFO2\"}],\"knobs"
-    "\":[\"chorus_mix\",\"delay_time\",\"delay_feedback\",\"delay_mix\",\"master_vol\",\"pan\",\"lfo1_rate\",\"lfo2_rate\"]},\"arpset\""
-    ":{\"name\":\"Arp Settings\",\"label\":\"Arp Settings\",\"params\":[{\"key\":\"arp_type\",\"label\":\"Type\",\"short_name\":\"TYPE"
-    "\",\"type\":\"enum\",\"options\":[\"UP\",\"DOWN\",\"ALT1\",\"ALT2\",\"RANDOM\",\"TRIGGER\"],\"short_options\":[\"UP\",\"DOWN\",\"A"
-    "LT1\",\"ALT2\",\"RND\",\"TRIG\"],\"default\":0},{\"key\":\"arp_range\",\"label\":\"Range\",\"short_name\":\"RANGE\",\"type\":\"enu"
-    "m\",\"options\":[\"1 Oct\",\"2 Oct\",\"3 Oct\",\"4 Oct\"],\"short_options\":[\"1OCT\",\"2OCT\",\"3OCT\",\"4OCT\"],\"default\":0},{"
-    "\"key\":\"arp_resolution\",\"label\":\"Resolution\",\"short_name\":\"RESO\",\"type\":\"enum\",\"options\":[\"1/24\",\"1/16\",\"1/1"
-    "2\",\"1/8\",\"1/6\",\"1/4\"],\"short_options\":[\"1/24\",\"1/16\",\"1/12\",\"1/8\",\"1/6\",\"1/4\"],\"default\":1},{\"key\":\"arp_"
-    "gate\",\"label\":\"Gate\",\"short_name\":\"GATE\",\"type\":\"int\",\"min\":0,\"max\":100,\"default\":80,\"unit\":\"%\"},{\"key\":"
-    "\"arp_swing\",\"label\":\"Swing\",\"short_name\":\"SWING\",\"type\":\"int\",\"min\":-100,\"max\":100,\"default\":0,\"unit\":\"%\"}"
-    ",{\"key\":\"arp_latch\",\"label\":\"Latch\",\"short_name\":\"LATCH\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"short_option"
-    "s\":[\"OFF\",\"ON\"],\"default\":0},{\"key\":\"arp_key_sync\",\"label\":\"Key Sync\",\"short_name\":\"KSYNC\",\"type\":\"enum\",\""
-    "options\":[\"Off\",\"On\"],\"short_options\":[\"OFF\",\"ON\"],\"default\":0},{\"key\":\"arp_target\",\"label\":\"Target\",\"short_"
-    "name\":\"TARGT\",\"type\":\"enum\",\"options\":[\"Both\",\"Layer 1\",\"Layer 2\"],\"short_options\":[\"BOTH\",\"L1\",\"L2\"],\"def"
-    "ault\":0}],\"knobs\":[\"arp_type\",\"arp_range\",\"arp_resolution\",\"arp_gate\",\"arp_swing\",\"arp_latch\",\"arp_key_sync\",\"ar"
-    "p_target\"]},\"steps\":{\"name\":\"Arp Steps\",\"label\":\"Arp Steps\",\"params\":[{\"key\":\"arp_step1\",\"label\":\"Step 1\",\"s"
-    "hort_name\":\"ST1\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":"
-    "{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step2\",\"label\":\"Step 2\",\"short_name\":\"S"
-    "T2\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"cus"
-    "tom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step3\",\"label\":\"Step 3\",\"short_name\":\"ST3\",\"type\":"
-    "\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step"
-    "\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step4\",\"label\":\"Step 4\",\"short_name\":\"ST4\",\"type\":\"enum\",\"opti"
-    "ons\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys"
-    "\":[\"arp_playhead\"]}},{\"key\":\"arp_step5\",\"label\":\"Step 5\",\"short_name\":\"ST5\",\"type\":\"enum\",\"options\":[\"Rest\""
-    ",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playh"
-    "ead\"]}},{\"key\":\"arp_step6\",\"label\":\"Step 6\",\"short_name\":\"ST6\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"sh"
-    "ort_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key"
-    "\":\"arp_step7\",\"label\":\"Step 7\",\"short_name\":\"ST7\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":["
-    "\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step8"
-    "\",\"label\":\"Step 8\",\"short_name\":\"ST8\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLA"
-    "Y\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}}],\"knobs\":[\"arp_step1\",\"arp_ste"
-    "p2\",\"arp_step3\",\"arp_step4\",\"arp_step5\",\"arp_step6\",\"arp_step7\",\"arp_step8\"]},\"bank\":{\"name\":\"Bank\",\"label\":"
-    "\"Bank\",\"params\":[{\"key\":\"bank_file\",\"label\":\"Bank\",\"type\":\"enum\",\"options\":[\"Built-in\"],\"default\":0},{\"leve"
-    "l\":\"bank_list\",\"label\":\"Browse banks\"}],\"knobs\":[\"bank_file\"]},\"bank_list\":{\"name\":\"Banks\",\"label\":\"Select Ban"
-    "k\",\"items_param\":\"bank_list\",\"select_param\":\"bank_file\",\"navigate_to\":\"root\"}}}";
+    "ions\":[\"Trance\",\"Techno/House\",\"Electronica\",\"DnB/Breaks\",\"Hiphop/Vintage\",\"Retro\",\"SE/Hit\"],\"default\":0,\"short_"
+    "name\":\"CAT\"},{\"key\":\"patch\",\"label\":\"Program\",\"short_name\":\"PROG\",\"type\":\"enum\",\"options\":[\"A1\",\"A2\",\"A3"
+    "\",\"A4\",\"A5\",\"A6\",\"A7\",\"A8\",\"B1\",\"B2\",\"B3\",\"B4\",\"B5\",\"B6\",\"B7\",\"B8\"],\"default\":0},{\"key\":\"arp_on\","
+    "\"label\":\"Arp\",\"short_name\":\"ARP\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"short_options\":[\"OFF\",\"ON\"],\"defau"
+    "lt\":0},{\"key\":\"voice_mode\",\"label\":\"Mode\",\"type\":\"enum\",\"options\":[\"Single\",\"Layer\"],\"short_options\":[\"SNGL"
+    "\",\"LAYR\"],\"default\":0,\"short_name\":\"MODE\"},{\"key\":\"cutoff\",\"label\":\"Cutoff\",\"type\":\"float\",\"min\":0.0,\"max"
+    "\":1.0,\"default\":0.7,\"step\":0.01,\"short_name\":\"CUT\"},{\"key\":\"resonance\",\"label\":\"Resonance\",\"type\":\"float\",\"m"
+    "in\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01,\"short_name\":\"RES\"},{\"key\":\"release2\",\"label\":\"Amp Rel\",\"type\":\""
+    "float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01,\"short_name\":\"REL\"},{\"key\":\"timbre_edit\",\"label\":\"Layer\""
+    ",\"type\":\"enum\",\"options\":[\"Layer 1\",\"Layer 2\"],\"short_options\":[\"L1\",\"L2\"],\"default\":0,\"short_name\":\"LAYER\"}"
+    "],\"knobs\":[\"category\",\"patch\",\"arp_on\",\"voice_mode\",\"cutoff\",\"resonance\",\"release2\",\"timbre_edit\"]},\"osc\":{\"n"
+    "ame\":\"Osc [L1]\",\"label\":\"Osc\",\"params\":[{\"key\":\"wave1\",\"label\":\"Wave 1\",\"type\":\"enum\",\"options\":[\"Saw\",\""
+    "Square\",\"Triangle\",\"Sine\",\"Vox\",\"DWGS\",\"Noise\"],\"short_options\":[\"SAW\",\"SQR\",\"TRI\",\"SIN\",\"VOX\",\"DWG\",\"NZ"
+    "\"],\"default\":0},{\"key\":\"wave2\",\"label\":\"Wave 2\",\"type\":\"enum\",\"options\":[\"Saw\",\"Square\",\"Triangle\"],\"short"
+    "_options\":[\"SAW\",\"SQR\",\"TRI\"],\"default\":0},{\"key\":\"pulse_width\",\"label\":\"Pulse Width\",\"type\":\"float\",\"min\":"
+    "0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"osc2_semi\",\"label\":\"Semi\",\"type\":\"int\",\"min\":-24,\"max\":24,"
+    "\"default\":0,\"unit\":\"st\"},{\"key\":\"osc2_tune\",\"label\":\"Tune\",\"type\":\"int\",\"min\":-50,\"max\":50,\"default\":0,\"u"
+    "nit\":\"ct\"},{\"key\":\"voice_assign\",\"label\":\"Voice\",\"short_name\":\"VOICE\",\"type\":\"enum\",\"options\":[\"Mono\",\"Pol"
+    "y\",\"Unison\"],\"short_options\":[\"MONO\",\"POLY\",\"UNIS\"],\"default\":1},{\"key\":\"timbre_balance\",\"label\":\"Layer Bal\","
+    "\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01,\"short_name\":\"BAL\"},{\"key\":\"mod_wheel\",\"label\":"
+    "\"Mod Wheel\",\"short_name\":\"MOD\",\"type\":\"int\",\"min\":0,\"max\":127,\"default\":0}],\"knobs\":[\"wave1\",\"wave2\",\"pulse"
+    "_width\",\"osc2_semi\",\"osc2_tune\",\"voice_assign\",\"timbre_balance\",\"mod_wheel\"]},\"env\":{\"name\":\"Envelopes [L1]\",\"la"
+    "bel\":\"Envelopes\",\"params\":[{\"key\":\"attack1\",\"label\":\"Filter Atk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default"
+    "\":0.01,\"step\":0.01},{\"key\":\"decay1\",\"label\":\"Filter Dcy\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.4,\"s"
+    "tep\":0.01},{\"key\":\"sustain1\",\"label\":\"Filter Sus\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.0"
+    "1},{\"key\":\"release1\",\"label\":\"Filter Rel\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01},{\"key"
+    "\":\"decay2\",\"label\":\"Amp Dcy\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"sustain2"
+    "\",\"label\":\"Amp Sus\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.8,\"step\":0.01},{\"key\":\"keytrack\",\"label\""
+    ":\"Key Track\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"env_int\",\"label\":\"EG Int\""
+    ",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01}],\"knobs\":[\"attack1\",\"decay1\",\"sustain1\",\"relea"
+    "se1\",\"decay2\",\"sustain2\",\"keytrack\",\"env_int\"]},\"mix\":{\"name\":\"Mix/Filter [L1]\",\"label\":\"Mix/Filter\",\"params\""
+    ":[{\"key\":\"osc_mix\",\"label\":\"Osc Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\""
+    "noise_level\",\"label\":\"Noise\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"sync_ring\""
+    ",\"label\":\"Sync / Ring\",\"type\":\"enum\",\"options\":[\"Off\",\"Ring\",\"Sync\",\"Ring Sync\"],\"short_options\":[\"OFF\",\"RI"
+    "NG\",\"SYNC\",\"R.SNC\"],\"default\":0},{\"key\":\"filter_type\",\"label\":\"Filter Type\",\"type\":\"enum\",\"options\":[\"LPF24"
+    "\",\"LPF12\",\"BPF12\",\"HPF12\"],\"short_options\":[\"LPF24\",\"LPF12\",\"BPF12\",\"HPF12\"],\"default\":0},{\"key\":\"drive\",\""
+    "label\":\"Drive\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01},{\"key\":\"level\",\"label\":\"Level\""
+    ",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.9,\"step\":0.01},{\"key\":\"portamento\",\"label\":\"Portamento\",\"type"
+    "\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"attack2\",\"label\":\"Amp Atk\",\"type\":\"float\","
+    "\"min\":0.0,\"max\":1.0,\"default\":0.01,\"step\":0.01}],\"knobs\":[\"osc_mix\",\"noise_level\",\"sync_ring\",\"filter_type\",\"dr"
+    "ive\",\"level\",\"portamento\",\"attack2\"]},\"fx\":{\"name\":\"Effects\",\"label\":\"Effects\",\"params\":[{\"key\":\"chorus_mix"
+    "\",\"label\":\"Chorus Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"delay_time\",\"la"
+    "bel\":\"Delay Time\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01},{\"key\":\"delay_feedback\",\"label"
+    "\":\"Delay Fdbk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01},{\"key\":\"delay_mix\",\"label\":\"Del"
+    "ay Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"master_vol\",\"label\":\"Master Vol"
+    "\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.8,\"step\":0.01,\"short_name\":\"VOL\"},{\"key\":\"pan\",\"label\":\"P"
+    "an\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"lfo1_rate\",\"label\":\"LFO1 Rate\",\"ty"
+    "pe\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01,\"short_name\":\"LFO1\"},{\"key\":\"lfo2_rate\",\"label\":\"L"
+    "FO2 Rate\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01,\"short_name\":\"LFO2\"}],\"knobs\":[\"chorus_"
+    "mix\",\"delay_time\",\"delay_feedback\",\"delay_mix\",\"master_vol\",\"pan\",\"lfo1_rate\",\"lfo2_rate\"]},\"arpset\":{\"name\":\""
+    "Arp Settings\",\"label\":\"Arp Settings\",\"params\":[{\"key\":\"arp_type\",\"label\":\"Type\",\"short_name\":\"TYPE\",\"type\":\""
+    "enum\",\"options\":[\"UP\",\"DOWN\",\"ALT1\",\"ALT2\",\"RANDOM\",\"TRIGGER\"],\"short_options\":[\"UP\",\"DOWN\",\"ALT1\",\"ALT2\""
+    ",\"RND\",\"TRIG\"],\"default\":0},{\"key\":\"arp_range\",\"label\":\"Range\",\"short_name\":\"RANGE\",\"type\":\"enum\",\"options"
+    "\":[\"1 Oct\",\"2 Oct\",\"3 Oct\",\"4 Oct\"],\"short_options\":[\"1OCT\",\"2OCT\",\"3OCT\",\"4OCT\"],\"default\":0},{\"key\":\"arp"
+    "_resolution\",\"label\":\"Resolution\",\"short_name\":\"RESO\",\"type\":\"enum\",\"options\":[\"1/24\",\"1/16\",\"1/12\",\"1/8\","
+    "\"1/6\",\"1/4\"],\"short_options\":[\"1/24\",\"1/16\",\"1/12\",\"1/8\",\"1/6\",\"1/4\"],\"default\":1},{\"key\":\"arp_gate\",\"lab"
+    "el\":\"Gate\",\"short_name\":\"GATE\",\"type\":\"int\",\"min\":0,\"max\":100,\"default\":80,\"unit\":\"%\"},{\"key\":\"arp_swing\""
+    ",\"label\":\"Swing\",\"short_name\":\"SWING\",\"type\":\"int\",\"min\":-100,\"max\":100,\"default\":0,\"unit\":\"%\"},{\"key\":\"a"
+    "rp_latch\",\"label\":\"Latch\",\"short_name\":\"LATCH\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"short_options\":[\"OFF\","
+    "\"ON\"],\"default\":0},{\"key\":\"arp_key_sync\",\"label\":\"Key Sync\",\"short_name\":\"KSYNC\",\"type\":\"enum\",\"options\":[\""
+    "Off\",\"On\"],\"short_options\":[\"OFF\",\"ON\"],\"default\":0},{\"key\":\"arp_target\",\"label\":\"Target\",\"short_name\":\"TARG"
+    "T\",\"type\":\"enum\",\"options\":[\"Both\",\"Layer 1\",\"Layer 2\"],\"short_options\":[\"BOTH\",\"L1\",\"L2\"],\"default\":0}],\""
+    "knobs\":[\"arp_type\",\"arp_range\",\"arp_resolution\",\"arp_gate\",\"arp_swing\",\"arp_latch\",\"arp_key_sync\",\"arp_target\"]},"
+    "\"steps\":{\"name\":\"Arp Steps\",\"label\":\"Arp Steps\",\"params\":[{\"key\":\"arp_step1\",\"label\":\"Step 1\",\"short_name\":"
+    "\"ST1\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\""
+    "custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step2\",\"label\":\"Step 2\",\"short_name\":\"ST2\",\"type"
+    "\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_s"
+    "tep\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step3\",\"label\":\"Step 3\",\"short_name\":\"ST3\",\"type\":\"enum\",\"o"
+    "ptions\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_k"
+    "eys\":[\"arp_playhead\"]}},{\"key\":\"arp_step4\",\"label\":\"Step 4\",\"short_name\":\"ST4\",\"type\":\"enum\",\"options\":[\"Res"
+    "t\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_pl"
+    "ayhead\"]}},{\"key\":\"arp_step5\",\"label\":\"Step 5\",\"short_name\":\"ST5\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],"
+    "\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{"
+    "\"key\":\"arp_step6\",\"label\":\"Step 6\",\"short_name\":\"ST6\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_option"
+    "s\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_s"
+    "tep7\",\"label\":\"Step 7\",\"short_name\":\"ST7\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\","
+    "\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step8\",\"label"
+    "\":\"Step 8\",\"short_name\":\"ST8\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"def"
+    "ault\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}}],\"knobs\":[\"arp_step1\",\"arp_step2\",\"arp"
+    "_step3\",\"arp_step4\",\"arp_step5\",\"arp_step6\",\"arp_step7\",\"arp_step8\"]},\"bank\":{\"name\":\"Bank\",\"label\":\"Bank\",\""
+    "params\":[{\"key\":\"bank_file\",\"label\":\"Bank\",\"type\":\"enum\",\"options\":[\"Built-in\"],\"default\":0},{\"level\":\"bank_"
+    "list\",\"label\":\"Browse banks\"}],\"knobs\":[\"bank_file\"]},\"bank_list\":{\"name\":\"Banks\",\"label\":\"Select Bank\",\"items"
+    "_param\":\"bank_list\",\"select_param\":\"bank_file\",\"navigate_to\":\"root\"}}}";
 
 static int v2_get_param(void *instance, const char *key, char *buf, int buf_len) {
     tinyk_instance_t *inst = (tinyk_instance_t*)instance;
@@ -3651,12 +3730,25 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
         return snprintf(buf, buf_len, "%.4f", synth->timbre_balance);
     }
 
-    if (strcmp(key, "preset") == 0) {
-        return snprintf(buf, buf_len, "%d", synth->current_preset);
+    if (strcmp(key, "preset") == 0) { /* the jog wheel's index: the program's ordinal among the playable ones */
+        return snprintf(buf, buf_len, "%d", synth->play_ord[synth->current_preset]);
     }
 
-    if (strcmp(key, "preset_count") == 0) {
-        return snprintf(buf, buf_len, "%d", 128);
+    if (strcmp(key, "preset_count") == 0) { /* playable programs: vocoder programs are not offered */
+        return snprintf(buf, buf_len, "%d", synth->play_n);
+    }
+
+    if (strcmp(key, "category_count") == 0) {
+        return snprintf(buf, buf_len, "%d", synth->play_ncat);
+    }
+
+    if (strcmp(key, "category_names") == 0) { /* for the module's own screen: ["Trance", ...] */
+        const char *names[8];
+        char text[8][16];
+        category_names(synth, names, text);
+        int n = snprintf(buf, buf_len, "[");
+        for (int c = 0; c < synth->play_ncat && n < buf_len; c++) n += snprintf(buf + n, buf_len - n, "%s\"%s\"", c ? "," : "", names[c]);
+        return n < buf_len ? n + snprintf(buf + n, buf_len - n, "]") : n;
     }
 
     if (strcmp(key, "preset_name") == 0 || strcmp(key, "patch_in_bank") == 0 || strcmp(key, "program_name") == 0) {
@@ -3707,9 +3799,9 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
     }
 
     if (strncmp(key, "preset_name:", 12) == 0) {
-        int idx = atoi(key + 12);
-        if (idx >= 0 && idx < 128) {
-            return format_preset_name(synth, idx, buf, buf_len);
+        int idx = atoi(key + 12); /* an ordinal, like preset */
+        if (idx >= 0 && idx < synth->play_n) {
+            return format_preset_name(synth, synth->play_map[idx], buf, buf_len);
         }
         return -1;
     }
