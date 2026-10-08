@@ -262,6 +262,12 @@ typedef struct {
     float phaser_ap[2][6];      /* phaser all-pass stage states, per channel */
     float phaser_fb[2];
 
+    /* Program-change flush: sounding voices are killed with a fade (synth_all_notes_off), and while audio is still
+     * sounding the output ducks to silence, the effect memories are cleared there and the output comes back. */
+    float out_level;            /* decaying peak of the output, tells whether anything is audible */
+    int flush_stage;            /* 0 idle, 1 ducking (clear at silence), 2 coming back */
+    float flush_gain;
+
     /* Preset State */
     int current_preset;
     int bank_side;      /* 0 = Side A, 1 = Side B */

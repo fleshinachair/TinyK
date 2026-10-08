@@ -607,10 +607,54 @@ static int arp_param_index(const char *key);
 static int arp_param_get(const synth_engine_t *synth, int i);
 static void arp_param_set(synth_engine_t *synth, int i, int v);
 
+/* A program change flushes the engine like CC 120 / 123 and clears what could ring into the new sound.
+ * Held keys, key stacks and the arpeggiator (steps, held chord, latch queue) are dropped by synth_all_notes_off;
+ * the sounding voices fade over KILL_RELEASE_S and each wipes its filter state and envelopes when it ends (zeroing
+ * them under a sounding voice would be a step); idle voices are wiped here. The effect memories (Mod FX line,
+ * phaser, delay line and its feedback filter, DC blockers) are cleared at once when nothing is audible, else
+ * the output ducks over FLUSH_FADE_S, they are cleared at silence and the output comes back (no click). */
+#define FLUSH_FADE_S 0.006f
+#define FLUSH_AUDIBLE 0.0001f
+static void flush_effects(synth_engine_t *synth) {
+    memset(synth->chorus_buf_l, 0, sizeof(synth->chorus_buf_l));
+    memset(synth->chorus_buf_r, 0, sizeof(synth->chorus_buf_r));
+    memset(synth->delay_buf_l, 0, sizeof(synth->delay_buf_l));
+    memset(synth->delay_buf_r, 0, sizeof(synth->delay_buf_r));
+    synth->delay_filter_l = synth->delay_filter_r = 0.0f;
+    memset(synth->phaser_ap, 0, sizeof(synth->phaser_ap));
+    synth->phaser_fb[0] = synth->phaser_fb[1] = 0.0f;
+    synth->dc_x[0] = synth->dc_x[1] = synth->dc_y[0] = synth->dc_y[1] = 0.0f;
+    synth->out_dc_x[0] = synth->out_dc_x[1] = synth->out_dc_y[0] = synth->out_dc_y[1] = 0.0f;
+}
+
+static void flush_for_program(synth_engine_t *synth) {
+    synth_all_notes_off(synth);
+    for (int i = 0; i < NUM_VOICES; i++) {
+        voice_t *v = &synth->voices[i];
+        if (v->active && v->amp_env.stage != ENV_IDLE) continue; /* fading out, wiped when it ends */
+        v->active = false;
+        v->gate = false;
+        v->kill = false;
+        v->amp_env.stage = ENV_IDLE;
+        v->amp_env.value = 0.0f;
+        v->filter_env.stage = ENV_IDLE;
+        v->filter_env.value = 0.0f;
+        v->filter_svf[0].s1 = v->filter_svf[0].s2 = 0.0f;
+        v->filter_svf[1].s1 = v->filter_svf[1].s2 = 0.0f;
+    }
+    if (synth->out_level > FLUSH_AUDIBLE) {
+        if (synth->flush_stage == 0) synth->flush_gain = 1.0f;
+        synth->flush_stage = 1;
+    } else {
+        flush_effects(synth);
+    }
+}
+
 /* Load patch data into the active engine and voices; index is the bank slot it occupies */
 static void load_preset_from(synth_engine_t *synth, const struct Preset *p, int index) {
     float saved_timbre_balance = (synth->params[PARAM_TIMBRE_BALANCE] > 0.0f) ? synth->params[PARAM_TIMBRE_BALANCE] : synth->timbre_balance;
 
+    flush_for_program(synth);
     synth->current_preset = index;
     int bank_side = index / 64;
     int genre_category = (index % 64) / 8;
@@ -2631,6 +2675,31 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
             synth->out_dc_y[1] = yr;
             out_l = yl;
             out_r = yr;
+        }
+
+        {
+            float lvl = fmaxf(fabsf(out_l), fabsf(out_r));
+            synth->out_level = (lvl > synth->out_level) ? lvl : synth->out_level * 0.9999f;
+        }
+        if (synth->flush_stage) { /* program-change flush, see flush_for_program */
+            float step = 1.0f / (FLUSH_FADE_S * fs);
+            if (synth->flush_stage == 1) {
+                synth->flush_gain -= step;
+                if (synth->flush_gain <= 0.0f) {
+                    synth->flush_gain = 0.0f;
+                    flush_effects(synth);
+                    synth->out_level = 0.0f;
+                    synth->flush_stage = 2;
+                }
+            } else {
+                synth->flush_gain += step;
+                if (synth->flush_gain >= 1.0f) {
+                    synth->flush_gain = 1.0f;
+                    synth->flush_stage = 0;
+                }
+            }
+            out_l *= synth->flush_gain;
+            out_r *= synth->flush_gain;
         }
 
         DIAG_CHECK(out_l);
