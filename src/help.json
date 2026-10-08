@@ -31,7 +31,7 @@
             "  Layer",
             "Enc 5 CUT: cutoff",
             "Enc 6 RES: resonance",
-            "Enc 7 AMPREL: amp rel",
+            "Enc 7 REL: amp release",
             "Enc 8 LAYER: L1 / L2",
             "  (N/A in Single)"
           ]

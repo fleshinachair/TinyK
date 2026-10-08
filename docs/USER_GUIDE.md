@@ -18,7 +18,7 @@ The Move's display shows a header (page name and the current patch) above a 2 x 
 
 | # | Page | Encoders |
 |---|------|----------|
-| 1 | [Perf](#1-perf) | Cat, Prog, Arp, Mode, Cut, Res, AmpRel, Layer |
+| 1 | [Perf](#1-perf) | Cat, Prog, Arp, Mode, Cut, Res, Rel, Layer |
 | 2 | [Osc](#2-osc) | Wave 1, Wave 2, Pulse Width, Semi, Tune, Voice, Layer Bal, Mod Wheel |
 | 3 | [Envelopes](#3-envelopes) | Filter A/D/S/R, Amp D/S, Key Track, EG Int |
 | 4 | [Mix/Filter](#4-mixfilter) | Osc Mix, Noise, Sync/Ring, Filter Type, Drive, Level, Portamento, Amp Atk |
@@ -57,11 +57,11 @@ Everything you reach for while playing: pick a sound, switch the arpeggiator and
 | 4 | MODE | Single / Layer | Single: one layer plays all 4 voices. Layer: two layers (L1, L2) play 2 voices each, blended by Layer Bal on Osc. | Switching mode cuts any sounding notes (a short fade, no click). Programs set their own mode when loaded. |
 | 5 | CUT | Filter cutoff | 0-100 % (about 37 Hz up to the 19 kHz ceiling), shown in Hz / kHz. In Layer mode the label reads `L1.CUT` or `L2.CUT`. | Edits the layer chosen by LAYER (encoder 8). |
 | 6 | RES | Filter resonance | 0-100 %. Label `L1.RES` / `L2.RES` in Layer mode. | Low settings are flat; high settings ring around the cutoff. |
-| 7 | AMPREL | Amp envelope release | 0-100 %: how long a note fades after the key is released. Label `L1.REL` / `L2.REL` in Layer mode. | Amp Attack is on Mix/Filter, Amp Decay / Sustain on Envelopes. |
+| 7 | REL | Amp envelope release | 0-100 %: how long a note fades after the key is released. Label `L1.REL` / `L2.REL` in Layer mode. | Amp Attack is on Mix/Filter, Amp Decay / Sustain on Envelopes. |
 | 8 | LAYER | Which layer the per-layer knobs edit | Layer mode: `L1` or `L2`. Single mode: reads `N/A` (there is only one layer). | The choice is remembered while you flip between Single and Layer. |
 
 - Make a sound brighter or darker without leaving this page: Cut and Res are the two knobs you will use most.
-- In Layer mode, set LAYER to L2, tweak Cut / Res / AmpRel, then switch back: L1 keeps its own values.
+- In Layer mode, set LAYER to L2, tweak Cut / Res / Rel, then switch back: L1 keeps its own values.
 
 ---
 
@@ -166,7 +166,7 @@ Oscillator balance, filter type, drive and output level of the layer being edite
 | 7 | PORTA | Portamento | 0-100 %: glide time between notes. | Most useful with Voice set to Mono. |
 | 8 | ATK | Amp attack | 0-100 %. | Short for plucks, long for pads. |
 
-- Amp Release is on Perf (AMPREL); Amp Decay and Sustain are on Envelopes.
+- Amp Release is on Perf (REL); Amp Decay and Sustain are on Envelopes.
 
 ---
 
@@ -263,7 +263,7 @@ On the real display each cell is a small picture above its label instead of text
 | 1-4 | ST1-ST4 | Steps 1-4 (top row) | Rest / Play. | Hollow box = Rest, filled box = Play. |
 | 5-8 | ST5-ST8 | Steps 5-8 (bottom row) | Rest / Play. | The sounding step is drawn inverted (a lit block with the box cut out). Steps beyond the pattern length are dotted; turning one extends the pattern. |
 
-- The playhead refreshes a few times per second rather than on every step.
+- The canvas interpolates between Schwung reads using local step-time prediction, keeping the playhead in sync with every 16th step in real time.
 
 ---
 
@@ -290,12 +290,12 @@ Which set of 128 programs is loaded.
 | Enc | Label | Controls | Range / values | Tip |
 |-----|-------|----------|----------------|-----|
 | 1 | BANK | Bank | `Built-in` or any microKORG / MS2000 `.syx` bank found in the module's `banks/` folder when the slot started. | Changing bank keeps the current program number. |
-| - | Browse banks | Bank list | Opens a list of all banks to pick from with the jog wheel. | Put `.syx` files in `banks/` on the Move and reload the slot to see them. |
+| - | Browse banks | Bank list | A menu entry under the Bank knob, not an encoder. Select it on the Bank page and click the jog wheel to open the list; turn the jog wheel to highlight a bank and click to pick it. You return to the main page afterwards. | Turning the Bank knob (encoder 1) switches banks without opening the list. Put `.syx` files in `banks/` on the Move and reload the slot to see them. |
 
 ---
 
 ## Quick tips
 
-- Start from a program in Perf, then use Cut / Res / AmpRel to shape it before diving into the other pages.
+- Start from a program in Perf, then use Cut / Res / Rel to shape it before diving into the other pages.
 - For layered sounds: set MODE to Layer, set LAYER to L2, change its wave on Osc, then blend with Layer Bal.
 - Programs that load their own arpeggio start with ARP on; turn it off on Perf if you want to play them directly.

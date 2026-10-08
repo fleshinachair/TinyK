@@ -159,7 +159,7 @@ def host_api():
         check(hier == manifest["capabilities"]["ui_hierarchy"], "engine ui_hierarchy == module.json ui_hierarchy")
         levels = hier["levels"]
         # Sound design first (Perf, Osc, Envelopes, Mix/Filter, Effects), then the arpeggiator, then Bank;
-        # Perf is Option B: Cat, Prog, Arp, Mode, Cutoff, Res, AmpRel, Layer; Mode and Layer sit on Perf next to the
+        # Perf is Option B: Cat, Prog, Arp, Mode, Cutoff, Res, Rel, Layer; Mode and Layer sit on Perf next to the
         # per-layer macros they switch, Voice (Mono / Poly / Unison) is on Osc and Amp Atk on Mix/Filter
         pages = {"perf": ("Perf", ["category", "patch", "arp_on", "voice_mode", "cutoff", "resonance", "release2", "timbre_edit"]),
                  "osc": ("Osc [L1]", ["wave1", "wave2", "pulse_width", "osc2_semi", "osc2_tune", "voice_assign",

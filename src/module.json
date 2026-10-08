@@ -164,7 +164,7 @@
               "max": 1.0,
               "default": 0.2,
               "step": 0.01,
-              "short_name": "AMPREL"
+              "short_name": "REL"
             },
             {
               "key": "timbre_edit",
