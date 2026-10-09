@@ -3,7 +3,7 @@
   "name": "TinyK",
   "abbrev": "TINYK",
   "version": "0.9.0",
-  "description": "4-voice polyphonic virtual analog synth inspired by 2000s dual-oscillator VA engine",
+  "description": "8-voice polyphonic virtual analog synth inspired by 2000s dual-oscillator VA engine",
   "author": "Mathew Taylor",
   "license": "MIT",
   "dsp": "dsp.so",
@@ -34,12 +34,16 @@
               "label": "Osc"
             },
             {
-              "level": "env",
-              "label": "Envelopes"
+              "level": "filter",
+              "label": "Filter"
             },
             {
-              "level": "mix",
-              "label": "Mix/Filter"
+              "level": "amp",
+              "label": "Amp"
+            },
+            {
+              "level": "mod",
+              "label": "Mod"
             },
             {
               "level": "fx",
@@ -136,36 +140,6 @@
               "short_name": "MODE"
             },
             {
-              "key": "cutoff",
-              "label": "Cutoff",
-              "type": "float",
-              "min": 0.0,
-              "max": 1.0,
-              "default": 0.7,
-              "step": 0.01,
-              "short_name": "CUT"
-            },
-            {
-              "key": "resonance",
-              "label": "Resonance",
-              "type": "float",
-              "min": 0.0,
-              "max": 1.0,
-              "default": 0.2,
-              "step": 0.01,
-              "short_name": "RES"
-            },
-            {
-              "key": "release2",
-              "label": "Amp Rel",
-              "type": "float",
-              "min": 0.0,
-              "max": 1.0,
-              "default": 0.2,
-              "step": 0.01,
-              "short_name": "REL"
-            },
-            {
               "key": "timbre_edit",
               "label": "Layer",
               "type": "enum",
@@ -179,6 +153,42 @@
               ],
               "default": 0,
               "short_name": "LAYER"
+            },
+            {
+              "key": "voice_assign",
+              "label": "Voice",
+              "short_name": "VOICE",
+              "type": "enum",
+              "options": [
+                "Mono",
+                "Poly",
+                "Unison"
+              ],
+              "short_options": [
+                "MONO",
+                "POLY",
+                "UNIS"
+              ],
+              "default": 1
+            },
+            {
+              "key": "portamento",
+              "label": "Portamento",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.0,
+              "step": 0.01
+            },
+            {
+              "key": "timbre_balance",
+              "label": "Layer Bal",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.5,
+              "step": 0.01,
+              "short_name": "BAL"
             }
           ],
           "knobs": [
@@ -186,10 +196,10 @@
             "patch",
             "arp_on",
             "voice_mode",
-            "cutoff",
-            "resonance",
-            "release2",
-            "timbre_edit"
+            "timbre_edit",
+            "voice_assign",
+            "portamento",
+            "timbre_balance"
           ]
         },
         "osc": {
@@ -221,6 +231,163 @@
               "default": 0
             },
             {
+              "key": "osc1_ctrl1",
+              "label": "Control 1",
+              "short_name": "CTL1",
+              "type": "int",
+              "min": 0,
+              "max": 127,
+              "default": 0
+            },
+            {
+              "key": "dwgs_wave",
+              "label": "DWGS Wave",
+              "short_name": "DWGS",
+              "type": "enum",
+              "options": [
+                "1 SynSine1",
+                "2 SynSine2",
+                "3 SynSine3",
+                "4 SynSine4",
+                "5 SynSine5",
+                "6 SynSine6",
+                "7 SynSine7",
+                "8 SynBass1",
+                "9 SynBass2",
+                "10 SynBass3",
+                "11 SynBass4",
+                "12 SynBass5",
+                "13 SynBass6",
+                "14 SynBass7",
+                "15 SynWave1",
+                "16 SynWave2",
+                "17 SynWave3",
+                "18 SynWave4",
+                "19 SynWave5",
+                "20 SynWave6",
+                "21 SynWave7",
+                "22 SynWave8",
+                "23 SynWave9",
+                "24 5thWave1",
+                "25 5thWave2",
+                "26 5thWave3",
+                "27 Digi1",
+                "28 Digi2",
+                "29 Digi3",
+                "30 Digi4",
+                "31 Digi5",
+                "32 Digi6",
+                "33 Digi7",
+                "34 Digi8",
+                "35 Endless",
+                "36 E.Piano1",
+                "37 E.Piano2",
+                "38 E.Piano3",
+                "39 E.Piano4",
+                "40 Organ1",
+                "41 Organ2",
+                "42 Organ3",
+                "43 Organ4",
+                "44 Organ5",
+                "45 Organ6",
+                "46 Organ7",
+                "47 Clav1",
+                "48 Clav2",
+                "49 Guitar1",
+                "50 Guitar2",
+                "51 Guitar3",
+                "52 Bass1",
+                "53 Bass2",
+                "54 Bass3",
+                "55 Bass4",
+                "56 Bass5",
+                "57 Bell1",
+                "58 Bell2",
+                "59 Bell3",
+                "60 Bell4",
+                "61 Voice1",
+                "62 Voice2",
+                "63 Voice3",
+                "64 Voice4"
+              ],
+              "short_options": [
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "7",
+                "8",
+                "9",
+                "10",
+                "11",
+                "12",
+                "13",
+                "14",
+                "15",
+                "16",
+                "17",
+                "18",
+                "19",
+                "20",
+                "21",
+                "22",
+                "23",
+                "24",
+                "25",
+                "26",
+                "27",
+                "28",
+                "29",
+                "30",
+                "31",
+                "32",
+                "33",
+                "34",
+                "35",
+                "36",
+                "37",
+                "38",
+                "39",
+                "40",
+                "41",
+                "42",
+                "43",
+                "44",
+                "45",
+                "46",
+                "47",
+                "48",
+                "49",
+                "50",
+                "51",
+                "52",
+                "53",
+                "54",
+                "55",
+                "56",
+                "57",
+                "58",
+                "59",
+                "60",
+                "61",
+                "62",
+                "63",
+                "64"
+              ],
+              "default": 0
+            },
+            {
+              "key": "osc1_ctrl2",
+              "label": "Control 2",
+              "short_name": "CTL2",
+              "type": "int",
+              "min": 0,
+              "max": 127,
+              "default": 0
+            },
+            {
               "key": "wave2",
               "label": "Wave 2",
               "type": "enum",
@@ -237,13 +404,22 @@
               "default": 0
             },
             {
-              "key": "pulse_width",
-              "label": "Pulse Width",
-              "type": "float",
-              "min": 0.0,
-              "max": 1.0,
-              "default": 0.0,
-              "step": 0.01
+              "key": "sync_ring",
+              "label": "Sync / Ring",
+              "type": "enum",
+              "options": [
+                "Off",
+                "Ring",
+                "Sync",
+                "Ring Sync"
+              ],
+              "short_options": [
+                "OFF",
+                "RING",
+                "SYNC",
+                "R.SNC"
+              ],
+              "default": 0
             },
             {
               "key": "osc2_semi",
@@ -264,57 +440,77 @@
               "unit": "ct"
             },
             {
-              "key": "voice_assign",
-              "label": "Voice",
-              "short_name": "VOICE",
-              "type": "enum",
-              "options": [
-                "Mono",
-                "Poly",
-                "Unison"
-              ],
-              "short_options": [
-                "MONO",
-                "POLY",
-                "UNIS"
-              ],
-              "default": 1
-            },
-            {
-              "key": "timbre_balance",
-              "label": "Layer Bal",
+              "key": "osc_mix",
+              "label": "Osc Mix",
               "type": "float",
               "min": 0.0,
               "max": 1.0,
               "default": 0.5,
-              "step": 0.01,
-              "short_name": "BAL"
-            },
-            {
-              "key": "mod_wheel",
-              "label": "Mod Wheel",
-              "short_name": "MOD",
-              "type": "int",
-              "min": 0,
-              "max": 127,
-              "default": 0
+              "step": 0.01
             }
           ],
           "knobs": [
             "wave1",
+            "osc1_ctrl1",
+            "osc1_ctrl2",
             "wave2",
-            "pulse_width",
+            "sync_ring",
             "osc2_semi",
             "osc2_tune",
-            "voice_assign",
-            "timbre_balance",
-            "mod_wheel"
+            "osc_mix"
           ]
         },
-        "env": {
-          "name": "Envelopes [L1]",
-          "label": "Envelopes",
+        "filter": {
+          "name": "Filter [L1]",
+          "label": "Filter",
           "params": [
+            {
+              "key": "filter_type",
+              "label": "Filter Type",
+              "type": "enum",
+              "options": [
+                "LPF24",
+                "LPF12",
+                "BPF12",
+                "HPF12"
+              ],
+              "short_options": [
+                "LPF24",
+                "LPF12",
+                "BPF12",
+                "HPF12"
+              ],
+              "default": 0
+            },
+            {
+              "key": "cutoff",
+              "label": "Cutoff",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.7,
+              "step": 0.01,
+              "short_name": "CUT"
+            },
+            {
+              "key": "resonance",
+              "label": "Resonance",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.2,
+              "step": 0.01,
+              "short_name": "RES"
+            },
+            {
+              "key": "env_int",
+              "label": "EG Int",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.5,
+              "step": 0.01
+            },
             {
               "key": "attack1",
               "label": "Filter Atk",
@@ -350,6 +546,73 @@
               "max": 1.0,
               "default": 0.2,
               "step": 0.01
+            }
+          ],
+          "knobs": [
+            "filter_type",
+            "cutoff",
+            "resonance",
+            "env_int",
+            "attack1",
+            "decay1",
+            "sustain1",
+            "release1"
+          ]
+        },
+        "amp": {
+          "name": "Amp [L1]",
+          "label": "Amp",
+          "params": [
+            {
+              "key": "noise_level",
+              "label": "Noise",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.0,
+              "step": 0.01
+            },
+            {
+              "key": "level",
+              "label": "Level",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.9,
+              "step": 0.01
+            },
+            {
+              "key": "drive",
+              "label": "Distortion",
+              "short_name": "DIST",
+              "type": "enum",
+              "options": [
+                "Off",
+                "On"
+              ],
+              "short_options": [
+                "OFF",
+                "ON"
+              ],
+              "default": 0
+            },
+            {
+              "key": "pan",
+              "label": "Pan",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.5,
+              "step": 0.01
+            },
+            {
+              "key": "attack2",
+              "label": "Amp Attack",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.01,
+              "step": 0.01
             },
             {
               "key": "decay2",
@@ -370,139 +633,75 @@
               "step": 0.01
             },
             {
-              "key": "keytrack",
-              "label": "Key Track",
-              "type": "float",
-              "min": 0.0,
-              "max": 1.0,
-              "default": 0.5,
-              "step": 0.01
-            },
-            {
-              "key": "env_int",
-              "label": "EG Int",
-              "type": "float",
-              "min": 0.0,
-              "max": 1.0,
-              "default": 0.5,
-              "step": 0.01
-            }
-          ],
-          "knobs": [
-            "attack1",
-            "decay1",
-            "sustain1",
-            "release1",
-            "decay2",
-            "sustain2",
-            "keytrack",
-            "env_int"
-          ]
-        },
-        "mix": {
-          "name": "Mix/Filter [L1]",
-          "label": "Mix/Filter",
-          "params": [
-            {
-              "key": "osc_mix",
-              "label": "Osc Mix",
-              "type": "float",
-              "min": 0.0,
-              "max": 1.0,
-              "default": 0.5,
-              "step": 0.01
-            },
-            {
-              "key": "noise_level",
-              "label": "Noise",
-              "type": "float",
-              "min": 0.0,
-              "max": 1.0,
-              "default": 0.0,
-              "step": 0.01
-            },
-            {
-              "key": "sync_ring",
-              "label": "Sync / Ring",
-              "type": "enum",
-              "options": [
-                "Off",
-                "Ring",
-                "Sync",
-                "Ring Sync"
-              ],
-              "short_options": [
-                "OFF",
-                "RING",
-                "SYNC",
-                "R.SNC"
-              ],
-              "default": 0
-            },
-            {
-              "key": "filter_type",
-              "label": "Filter Type",
-              "type": "enum",
-              "options": [
-                "LPF24",
-                "LPF12",
-                "BPF12",
-                "HPF12"
-              ],
-              "short_options": [
-                "LPF24",
-                "LPF12",
-                "BPF12",
-                "HPF12"
-              ],
-              "default": 0
-            },
-            {
-              "key": "drive",
-              "label": "Drive",
+              "key": "release2",
+              "label": "Amp Rel",
               "type": "float",
               "min": 0.0,
               "max": 1.0,
               "default": 0.2,
-              "step": 0.01
-            },
+              "step": 0.01,
+              "short_name": "REL"
+            }
+          ],
+          "knobs": [
+            "noise_level",
+            "level",
+            "drive",
+            "pan",
+            "attack2",
+            "decay2",
+            "sustain2",
+            "release2"
+          ]
+        },
+        "mod": {
+          "name": "Mod",
+          "label": "Mod",
+          "params": [
             {
-              "key": "level",
-              "label": "Level",
+              "key": "lfo1_rate",
+              "label": "LFO1 Rate",
               "type": "float",
               "min": 0.0,
               "max": 1.0,
-              "default": 0.9,
-              "step": 0.01
+              "default": 0.3,
+              "step": 0.01,
+              "short_name": "LFO1"
             },
             {
-              "key": "portamento",
-              "label": "Portamento",
+              "key": "lfo2_rate",
+              "label": "LFO2 Rate",
               "type": "float",
               "min": 0.0,
               "max": 1.0,
-              "default": 0.0,
-              "step": 0.01
+              "default": 0.3,
+              "step": 0.01,
+              "short_name": "LFO2"
             },
             {
-              "key": "attack2",
-              "label": "Amp Atk",
+              "key": "mod_wheel",
+              "label": "Mod Wheel",
+              "short_name": "MOD",
+              "type": "int",
+              "min": 0,
+              "max": 127,
+              "default": 0
+            },
+            {
+              "key": "keytrack",
+              "label": "Filter Key Trk",
               "type": "float",
               "min": 0.0,
               "max": 1.0,
-              "default": 0.01,
+              "default": 0.5,
               "step": 0.01
             }
           ],
           "knobs": [
-            "osc_mix",
-            "noise_level",
-            "sync_ring",
-            "filter_type",
-            "drive",
-            "level",
-            "portamento",
-            "attack2"
+            "lfo1_rate",
+            "lfo2_rate",
+            "mod_wheel",
+            "keytrack"
           ]
         },
         "fx": {
@@ -510,13 +709,57 @@
           "label": "Effects",
           "params": [
             {
+              "key": "modfx_type",
+              "label": "Mod FX Type",
+              "short_name": "FX",
+              "type": "enum",
+              "options": [
+                "Chorus/Flanger",
+                "Ensemble",
+                "Phaser"
+              ],
+              "short_options": [
+                "CHO",
+                "ENS",
+                "PHS"
+              ],
+              "default": 0
+            },
+            {
+              "key": "modfx_speed",
+              "label": "Mod FX Speed",
+              "short_name": "SPEED",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.3,
+              "step": 0.01
+            },
+            {
               "key": "chorus_mix",
-              "label": "Chorus Mix",
+              "label": "Mod FX Depth",
               "type": "float",
               "min": 0.0,
               "max": 1.0,
               "default": 0.0,
               "step": 0.01
+            },
+            {
+              "key": "delay_type",
+              "label": "Delay Type",
+              "short_name": "D.TYP",
+              "type": "enum",
+              "options": [
+                "Stereo",
+                "Cross",
+                "L/R"
+              ],
+              "short_options": [
+                "ST",
+                "CRS",
+                "L/R"
+              ],
+              "default": 0
             },
             {
               "key": "delay_time",
@@ -554,46 +797,17 @@
               "default": 0.8,
               "step": 0.01,
               "short_name": "VOL"
-            },
-            {
-              "key": "pan",
-              "label": "Pan",
-              "type": "float",
-              "min": 0.0,
-              "max": 1.0,
-              "default": 0.5,
-              "step": 0.01
-            },
-            {
-              "key": "lfo1_rate",
-              "label": "LFO1 Rate",
-              "type": "float",
-              "min": 0.0,
-              "max": 1.0,
-              "default": 0.3,
-              "step": 0.01,
-              "short_name": "LFO1"
-            },
-            {
-              "key": "lfo2_rate",
-              "label": "LFO2 Rate",
-              "type": "float",
-              "min": 0.0,
-              "max": 1.0,
-              "default": 0.3,
-              "step": 0.01,
-              "short_name": "LFO2"
             }
           ],
           "knobs": [
+            "modfx_type",
+            "modfx_speed",
             "chorus_mix",
+            "delay_type",
             "delay_time",
             "delay_feedback",
             "delay_mix",
-            "master_vol",
-            "pan",
-            "lfo1_rate",
-            "lfo2_rate"
+            "master_vol"
           ]
         },
         "arpset": {

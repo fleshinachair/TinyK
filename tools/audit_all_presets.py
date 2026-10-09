@@ -28,7 +28,7 @@ ROOT = os.path.dirname(HERE)
 NOTE, HOLD_S, TOTAL_S = 60, 1.5, 2.0
 # The engine ships with TINYK_OUTPUT_HEADROOM 0.45 (-6.9 dB, src/dsp/dsp.c): the level thresholds below are
 # stated at unity and moved by the same amount, so they keep meaning what they did.
-HEADROOM_DB = -6.9
+HEADROOM_DB = -10.0   # TINYK_MIX_GAIN 0.35 x TINYK_OUTPUT_HEADROOM 0.9
 SILENT_DB, QUIET_DB = -45.0 + HEADROOM_DB, -20.0 + HEADROOM_DB
 CLICK_MS = 15.0
 DC_LIMIT = 0.05
