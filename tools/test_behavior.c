@@ -473,9 +473,12 @@ static void test_lfo_steps_click_free(void) {
         free(b);
     }
     char what[128];
-    snprintf(what, sizeof what, "worst HF burst L %.1f / R %.1f dB vs %.1f / %.1f unmodulated (within 5 dB)",
+    /* The shipped output level is low (voice trim 0.35, headroom 0.48), so int16 quantization noise is a larger part of
+     * the 1 ms second-difference than it was at the old level: the unmodulated take stays at the floor and the burst
+     * measure drifts up by up to ~6 dB with no change in the modulation. A real gain-step click was tens of dB. */
+    snprintf(what, sizeof what, "worst HF burst L %.1f / R %.1f dB vs %.1f / %.1f unmodulated (within 8 dB)",
              worst[0], worst[1], plain[0], plain[1]);
-    check(worst[0] < plain[0] + 5.0 && worst[1] < plain[1] + 5.0, what);
+    check(worst[0] < plain[0] + 8.0 && worst[1] < plain[1] + 8.0, what);
 }
 
 /* The audible noise is white after the brightness tilt: for white noise the first difference carries exactly
@@ -916,23 +919,64 @@ static void test_program_change_flush(void) {
     free(b);
 }
 
-/* Output headroom: the shipped engine peaks about 7 dB below full scale (native Move tracks sit around -12..-8 dBFS) */
+static int cmp_double(const void *a, const void *b) {
+    double x = *(const double *)a, y = *(const double *)b;
+    return (x > y) - (x < y);
+}
+
+/* Output level and dynamics: a full-velocity 3-note chord on 26 programs. The voice-mix trim keeps chords out of hard
+ * saturation (median crest ~10 dB; it was ~7 dB with peaks pinned on the limiter ceiling) and the 0.48 output headroom
+ * puts the loudest program (the mono A.42 bass) near -6.6 dBFS and the median chord near -13 dBFS peak (native Move
+ * tracks sit around -12..-8 dBFS) */
 static void test_headroom(void) {
-    printf("\nOutput headroom\n");
-    double worst = 0, quietest_loud = 1;
-    int frames, worst_i = 0;
+    printf("\nOutput level and dynamics (chord 48/52/55, full velocity)\n");
+    double worst = 0, rms_db[26], crest_db[26];
+    int frames, worst_i = 0, n = 0;
     for (int i = 0; i < 128; i += 5) {
         fresh(i);
-        midi(0x90, 60, 127);
-        int16_t *b = render(1.0, &frames);
-        double pk = peak_in(b, frames, 0.0, 1.0);
+        midi(0x90, 48, 127);
+        midi(0x90, 52, 127);
+        midi(0x90, 55, 127);
+        int16_t *b = render(2.0, &frames);
+        double pk = peak_in(b, frames, 0.5, 2.0), sum = 0;
+        int a = (int)(0.5 * SR), z = (int)(2.0 * SR), cnt = 0;
+        for (int k = a; k < z && k < frames; k++)
+            for (int ch = 0; ch < 2; ch++) {
+                double v = b[k * 2 + ch] / 32768.0;
+                sum += v * v;
+                cnt++;
+            }
         free(b);
+        double rms = cnt ? sqrt(sum / cnt) : 0;
         if (pk > worst) { worst = pk; worst_i = i; }
-        if (pk > 0.05 && pk < quietest_loud) quietest_loud = pk;
+        if (rms > 1e-3) { /* skip silent programs */
+            rms_db[n] = 20 * log10(rms);
+            crest_db[n] = 20 * log10(pk / rms);
+            n++;
+        }
     }
-    char msg[160];
-    snprintf(msg, sizeof msg, "loudest of 26 programs peaks at %.1f dBFS (program %d), at most -6.5 dBFS", 20 * log10(worst), worst_i);
-    check(worst <= 0.475 && worst > 0.2, msg);
+    qsort(rms_db, n, sizeof(double), cmp_double);
+    qsort(crest_db, n, sizeof(double), cmp_double);
+    double med_rms = rms_db[n / 2], med_crest = crest_db[n / 2], max_rms = rms_db[n - 1];
+    printf("  %d sounding programs: median RMS %.1f dBFS, max RMS %.1f dBFS, median crest %.1f dB\n", n, med_rms, max_rms, med_crest);
+    char msg[200];
+    snprintf(msg, sizeof msg, "loudest program peaks at %.1f dBFS (program %d), within -6..-12 dBFS", 20 * log10(worst), worst_i);
+    check(worst <= 0.501 && worst >= 0.25, msg);
+    snprintf(msg, sizeof msg, "median chord RMS %.1f dBFS is at most -21 dBFS", med_rms);
+    check(med_rms <= -21.0, msg);
+    snprintf(msg, sizeof msg, "loudest program RMS %.1f dBFS is at most -11 dBFS", max_rms);
+    check(max_rms <= -11.0, msg);
+    snprintf(msg, sizeof msg, "median crest factor %.1f dB keeps dynamics (at least 9 dB)", med_crest);
+    check(med_crest >= 9.0, msg);
+
+    /* Mono patches do not split across voices: program 25 (A.42 Techstep Ring Bass) on one note must stay under -6 dBFS */
+    fresh(25);
+    midi(0x90, 36, 127);
+    int16_t *b = render(2.0, &frames);
+    double mono_pk = peak_in(b, frames, 0.0, 2.0);
+    free(b);
+    snprintf(msg, sizeof msg, "program 25 single note peaks at %.1f dBFS, at most -6 dBFS", 20 * log10(mono_pk));
+    check(mono_pk <= 0.501 && mono_pk > 0.05, msg);
 }
 
 int main(void) {

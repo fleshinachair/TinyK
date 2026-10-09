@@ -26,10 +26,13 @@ from scipy.io import wavfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 NOTE, HOLD_S, TOTAL_S = 60, 1.5, 2.0
-# The engine ships with TINYK_OUTPUT_HEADROOM 0.45 (-6.9 dB, src/dsp/dsp.c): the level thresholds below are
-# stated at unity and moved by the same amount, so they keep meaning what they did.
-HEADROOM_DB = -6.9
-SILENT_DB, QUIET_DB = -45.0 + HEADROOM_DB, -20.0 + HEADROOM_DB
+# The engine ships with TINYK_OUTPUT_HEADROOM 0.48 (-6.4 dB) and TINYK_VOICE_TRIM 0.35 (-9.1 dB, ahead of the tanh
+# voice-mix soft clip) in src/dsp/dsp.c. The level thresholds below are stated at unity and moved by both: the quiet
+# and silent limits matter for patches in the soft clip's linear region, where the trim lowers them by its full
+# amount (A.53 SilkLead: -22.5 dBFS before, -30.9 after). Loud patches fall by less, so they stay well above these.
+HEADROOM_DB = -6.4
+VOICE_TRIM_DB = -9.1
+SILENT_DB, QUIET_DB = -45.0 + HEADROOM_DB + VOICE_TRIM_DB, -20.0 + HEADROOM_DB + VOICE_TRIM_DB
 CLICK_MS = 15.0
 DC_LIMIT = 0.05
 

@@ -1948,10 +1948,21 @@ void synth_all_notes_off(synth_engine_t *synth) {
 
 /* Output headroom: the last gain stage, after the Mod FX, delay, DC blockers, master volume and the soft-knee limiter, so
  * every drive and saturation curve upstream is untouched. The synth peaks near 0 dBFS, native Move instruments are
- * staged around -12..-8 dBFS: -6.9 dB brings a TinyK track level with them. The calibration tools build the engine
+ * staged around -12..-8 dBFS peak. Mono patches (e.g. A.42 Techstep Ring Bass, program 25) do not split across voices
+ * and hit the limiter on a single note, so the pad is set for them: 0.48 (-6.4 dB) here, together with the voice trim
+ * below (-9.1 dB before the soft clip), puts the hottest program's chord peak near -6.6 dBFS and a typical one near
+ * -13 dBFS, with the dynamics kept (median crest ~11 dB). The calibration tools build the engine
  * with -DTINYK_OUTPUT_HEADROOM=1.0f to keep comparing against the VST takes at unity. */
 #ifndef TINYK_OUTPUT_HEADROOM
-#define TINYK_OUTPUT_HEADROOM 0.45f
+#define TINYK_OUTPUT_HEADROOM 0.48f
+#endif
+
+/* Gain applied to the summed voice mix just before its tanh soft clip: lower values keep stacked voices out of
+ * saturation (more crest factor, less RMS) without touching the output headroom. 1.0 = original behaviour; the
+ * shipped 0.35 (-9.1 dB) keeps chords out of hard saturation (median crest ~11 dB instead of ~7). The calibration
+ * tools build with -DTINYK_VOICE_TRIM=1.0f -DTINYK_OUTPUT_HEADROOM=1.0f to compare against the VST takes. */
+#ifndef TINYK_VOICE_TRIM
+#define TINYK_VOICE_TRIM 0.35f
 #endif
 
 /* Soft-knee saturation / tanh master limiter to guarantee no digital wrap-around clipping */
@@ -2697,8 +2708,8 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
         }
 
         /* Soft-clip the voice mix so stacked voices and layered timbres saturate smoothly */
-        voice_sum_l = soft_clip(voice_sum_l);
-        voice_sum_r = soft_clip(voice_sum_r);
+        voice_sum_l = soft_clip(voice_sum_l * TINYK_VOICE_TRIM);
+        voice_sum_r = soft_clip(voice_sum_r * TINYK_VOICE_TRIM);
 
         /* 4. Mod FX (Chorus/Flanger, Ensemble or Phaser: modfx_process) */
         float chorus_l = voice_sum_l;
