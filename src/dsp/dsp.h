@@ -13,13 +13,16 @@ extern "C" {
 #define MOVE_PLUGIN_API_VERSION_2 2
 #define MOVE_SAMPLE_RATE          44100
 #define MOVE_FRAMES_PER_BLOCK     128
-#define NUM_VOICES                4
+#ifndef NUM_VOICES
+#define NUM_VOICES                8   /* the hardware has 4 (2 per timbre in Layer mode); KORG's plug-in plays far more */
+#endif
+#define UNISON_STACK              4   /* voices a Unison note stacks (measured on the plug-in, in both modes) */
 #define NUM_PARAMS                35
 #define NUM_PRESETS               128
 
 /* Max buffer sizes for static allocation */
 #define DELAY_BUFFER_SIZE         88200  /* 2.0 seconds @ 44.1 kHz: tempo-synced delays up to 1/1 at 120 BPM */
-#define DELAY_FREE_MAX_SAMPLES    44100  /* the free (unsynced) delay time range: up to 1 s */
+enum { DELAY_TYPE_STEREO = 0, DELAY_TYPE_CROSS, DELAY_TYPE_LR };
 #define CHORUS_BUFFER_SIZE        2048   /* ~46 ms @ 44.1 kHz */
 #define WAVETABLE_SIZE            1024   /* Single-cycle table for Vox / DWGS oscillators */
 
@@ -80,7 +83,7 @@ typedef enum {
     OSC1_WAVE_TRIANGLE,
     OSC1_WAVE_SINE,
     OSC1_WAVE_VOX,    /* Formant-style wavetable */
-    OSC1_WAVE_DWGS,   /* Digital waveform wavetable, selected by timbre_extra.dwgs */
+    OSC1_WAVE_DWGS,   /* Digital waveform (dwgs_waves.h), selected by timbre_extra.dwgs */
     OSC1_WAVE_NOISE,
     OSC1_WAVE_COUNT
 } osc1_wave_t;
@@ -125,7 +128,9 @@ typedef struct {
     env_stage_t stage;
     float value;
     float target;
-    float rate;
+    float rate;             /* the attack's step per sample */
+    float pos;              /* progress through the current stage, 0..1 */
+    float from;             /* the level a release started from */
 } adsr_t;
 
 /* LFO State */
@@ -139,8 +144,8 @@ typedef struct {
 
 /* State-Variable Filter (SVF) State */
 typedef struct {
-    float s1;
-    float s2;
+    double s1;  /* double: at full resonance and a low cutoff the damping per sample is ~1e-6 of the state, */
+    double s2;  /* under a float's resolution, and the ring died where the plug-in's goes on for seconds */
 } svf_t;
 
 /* Voice State */
@@ -157,6 +162,10 @@ typedef struct {
 
     /* Oscillators */
     float osc1_phase;
+    int osc1_cycle;         /* which period of a multi-period DWGS table osc1_phase is in */
+    float flt_shelf_x1, flt_shelf_y1; /* the low-pass types' treble shelf (one pole, one zero) */
+    float pan_pos;          /* where the voice is heard, -1 .. +1: follows its pan target at a limited rate */
+    int pan_fresh;          /* 1 until the first sample: pan_pos then starts on the target */
     float osc2_phase;
     float sub_phase;
 
@@ -171,6 +180,7 @@ typedef struct {
 
     /* Filter 2-pole SVF states (2 stages for up to 4-pole / 24dB) */
     svf_t filter_svf[2];
+    svf_t noise_svf;        /* the Noise oscillator's own low-pass */
 
     /* Unison: this voice's detune (cents) and stereo place (-1..+1) in the stack, and its share of the level */
     float unison_cents;
@@ -181,6 +191,7 @@ typedef struct {
      * vel_gain is the velocity as heard, gliding to velocity so a steal or retrigger never steps the level; kill is
      * an all-notes-off fade (a fast release) instead of a cut */
     int declick_pos;
+    float flt_kick;         /* the note-on kick still to give the filter (signed, about 1), 0 once given */
     float vel_gain;
     bool kill;
 } voice_t;
@@ -189,7 +200,9 @@ typedef struct {
 typedef struct {
     float transpose_semi;   /* Timbre transpose + tune, in semitones */
     float noise_level;      /* 0..1 white noise in the mixer */
-    float level;            /* 0..1 overall timbre level (osc levels x amp level) */
+    float level;            /* 0..1 overall timbre level (osc levels x amp level): the Level knob's value */
+    float lvl_osc1, lvl_osc2, lvl_amp; /* the three level knobs themselves, 0..1 (what the engine plays) */
+    float mix_seen, level_seen;        /* the Osc Mix / Level knob values those were last set from (NaN = adopt) */
     float dwgs;             /* 0..1 -> DWGS waveform 0..63 */
     float osc1_ctrl[2];     /* Osc 1 Control 1 / 2 (raw / 127); for Sine: cross-mod depth / LFO1 modulation of it */
     int assign;             /* voice assign: 0 Mono, 1 Poly, 2 Unison */
@@ -240,6 +253,14 @@ typedef struct {
     float delay_filter_l;
     float delay_filter_r;
     int delay_active;       /* 0 while the delay line is bypassed (depth 0) */
+    int delay_type;         /* DELAY_TYPE_STEREO / CROSS / LR (program byte 22) */
+
+    /* EQ, after the delay: band 0 = Low shelf, 1 = Hi shelf. Frequency index 0..29, gain -12..+12 dB */
+    int eq_freq[2];
+    int eq_gain[2];
+    int eq_key;             /* the settings eq_coef was computed for; 0 = not yet */
+    float eq_coef[2][5];    /* b0, b1, b2, a1, a2 per band */
+    float eq_z[2][2][2];    /* [band][channel]: transposed direct form II state */
 
     /* DC blocker state (L/R) on the voice mix */
     float dc_x[2];
@@ -250,6 +271,7 @@ typedef struct {
     float tilt_x1[2];
     float tilt_y1[2];
     float noise_x1, noise_y1;  /* inverse-tilt state of the audible noise */
+    float noise_lp;            /* and its low-pass */
 
     float chorus_buf_l[CHORUS_BUFFER_SIZE];
     float chorus_buf_r[CHORUS_BUFFER_SIZE];
@@ -261,6 +283,9 @@ typedef struct {
     float modfx_speed;          /* 0..1 */
     float phaser_ap[2][6];      /* phaser all-pass stage states, per channel */
     float phaser_fb[2];
+    float phaser_coef[3][5]; /* notch, notch, peak: b0 b1 b2 a1 a2, refreshed every 16 samples */
+    float phaser_floor;
+    int phaser_tick;
 
     /* Program-change flush: sounding voices are killed with a fade (synth_all_notes_off), and while audio is still
      * sounding the output ducks to silence, the effect memories are cleared there and the output comes back. */
@@ -287,7 +312,7 @@ typedef struct {
     int genre_category; /* 0..7 */
     int program_num;    /* 1..8 */
 
-    /* Voice Mode: 0 = Single (4-Voice), 1 = Layer (2-Voice) */
+    /* Voice Mode: 0 = Single (all voices), 1 = Layer (half per timbre) */
     int voice_mode;
 
     /* Timbre editing & balance */
@@ -296,7 +321,7 @@ typedef struct {
     float timbre_params[2][NUM_PARAMS]; /* Independent timbre parameter states */
     timbre_extra_t timbre_extra[2];
 
-    /* Cached Vox/DWGS wavetables, rebuilt when the selection changes */
+    /* Cached Vox wavetable per timbre, built on first use (the DWGS tables are shared, see dsp.c) */
     float wavetable[2][WAVETABLE_SIZE];
     int wavetable_key[2];
 
@@ -448,7 +473,7 @@ typedef struct {
     float decay_scale;
     float release_scale;
     float mixer_trim;         /* gain after the oscillators are summed */
-    float delay_send_scale;   /* delay repeats added = depth * scale */
+    float delay_send_scale;   /* unused: the delay's level follows the VST's depth curve (delay_gain) */
     float patch_cutoff_octaves; /* virtual patch -> cutoff at intensity 63, full source, in octaves (VST: >= ~10, set to the knob span) */
     float patch_pitch_scale;  /* virtual patch -> pitch / osc2 pitch at intensity 63, in semitones (VST: 24.1 measured) */
     float lfo_tempo_bpm;      /* tempo when the host gives none (renders, tests, hosts without get_bpm) */
@@ -460,9 +485,8 @@ typedef struct {
     float bpf_cutoff_octaves; /* BPF12 centre = base * 2^(knob * bpf_cutoff_octaves + bpf_cutoff_offset) */
     float bpf_cutoff_offset;  /* octaves */
     float dist_ceiling;       /* distortion soft-clip level (output = ceiling * tanh(gain * x / ceiling)) */
-    float noise_tilt_db;      /* audible noise is pre-shaped by the inverse of a shelf this high (tilt_hz corner), so it
-                               * keeps tilt_db - noise_tilt_db of the tilt's top: 13.8 fits A.21's off-beat hat to the
-                               * VST (ref_a21_timbre2_drum_c3: hat 8.7 dB under the kick; 26.7 = white left it 21 under) */
+    float noise_tilt_db;      /* unused: the audible noise now takes the whole inverse tilt and a low-pass of its own
+                               * (NOISE_LP_HZ), measured band by band; kept so the calibration tools still load */
     float xmod_semitones;     /* synced Sine cross-mod: Osc 1 pitch offset per unit of depth (ctrl1 + ctrl2 * LFO1),
                                * semitones; 0 = off. Fitted on the A.21 T2 takes (sine_xmod_ratio in dsp.c) */
     float xmod_offset_semitones; /* ...and the offset at depth 0 */

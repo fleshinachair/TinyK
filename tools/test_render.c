@@ -156,6 +156,12 @@ TK_EXPORT int tinyk_render(int preset, int note, double gate_s, double total_s, 
     return render_float(preset, NULL, note, gate_s, total_s, out_lr, max_frames);
 }
 
+/* The EQ of the external patches rendered next (struct EqParams floats, EQ_FIELDS order); flat by default */
+static struct EqParams patch_eq = { 0.0f, 0.5f, 0.0f, 0.5f };
+static float patch_delay_type = 0.0f;
+/* eq: the 4 EQ_FIELDS floats, then the delay type (0, 0.5, 1) */
+TK_EXPORT void tinyk_set_patch_eq(const float *eq) { memcpy(&patch_eq, eq, sizeof patch_eq); patch_delay_type = eq[4]; }
+
 /* As tinyk_render, but plays an external patch: t1/t2 hold the 26 struct TimbreParams floats in
  * declaration order, fx the 7 FX floats (chorus_mix, delay_time, delay_feedback, delay_mix, delay_sync, modfx_speed, modfx_type). */
 TK_EXPORT int tinyk_render_patch(int slot, int voice_mode, const float *t1, const float *t2, const float *fx,
@@ -174,6 +180,8 @@ TK_EXPORT int tinyk_render_patch(int slot, int voice_mode, const float *t1, cons
     p.delay_sync = fx[4];
     p.modfx_speed = fx[5];
     p.modfx_type = fx[6];
+    p.eq = patch_eq;
+    p.delay_type = patch_delay_type;
     return render_float(slot, &p, note, gate_s, total_s, out_lr, max_frames);
 #else
     (void)slot; (void)voice_mode; (void)t1; (void)t2; (void)fx; (void)note; (void)gate_s; (void)total_s;
@@ -254,6 +262,8 @@ TK_EXPORT int tinyk_render_patch_events(int slot, int voice_mode, const float *t
     p.delay_sync = fx[4];
     p.modfx_speed = fx[5];
     p.modfx_type = fx[6];
+    p.eq = patch_eq;
+    p.delay_type = patch_delay_type;
 
     int16_t *tmp = calloc((size_t)frames * 2, sizeof(int16_t));
     if (!tmp) return -1;

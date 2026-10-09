@@ -3,28 +3,57 @@
  *
  * Handles 128x64 OLED display rendering and 8 hardware encoders
  * across the parameter pages (the same pages as the module.json ui_hierarchy):
- *   PERF:         Category, Program, Arp, Mode (Single / Layer), Cutoff, Res, Amp Release, Layer (L1 / L2)
- *   OSC:          Wave1, Wave2, Pulse Width, Semi, Tune, Voice (Mono / Poly / Unison), Layer Balance, Mod Wheel
- *   ENVELOPES:    Filter Atk/Dcy/Sus/Rel, Amp Dcy/Sus, Key Track, EG Int
- *   MIX / FILTER: Osc Mix, Noise, Sync/Ring, Filter Type, Drive, Level, Portamento, Amp Attack
- *   EFFECTS:      Chorus Mix, Delay Time/Feedback/Mix, Master Vol, Pan, LFO1/LFO2 Rate
+ *   PERF:         Category, Program, Arp, Mode (Single / Layer), Layer (L1 / L2), Voice (Mono / Poly / Unison),
+ *                 Portamento, Layer Balance
+ *   OSC:          Wave1, Control 1 (or the DWGS wave while Wave1 is DWGS), Control 2, Wave2, Sync/Ring, Semi, Tune, Osc Mix
+ *   FILTER:       Type, Cutoff, Res, EG Int, Filter Atk/Dcy/Sus/Rel
+ *   AMP:          Noise, Level, Distortion, Pan, Amp Atk/Dcy/Sus/Rel
+ *   MOD:          LFO1 / LFO2 Rate, Mod Wheel, Filter Key Track
+ *   EFFECTS:      Mod FX Type/Speed/Depth, Delay Type/Time/Feedback/Mix, Master Vol
  *   ARP SETTINGS: Type, Range, Resolution, Gate, Swing, Latch, Key Sync, Target
  *   ARP STEPS:    Step 1..8 of the arpeggiator's pattern (Rest / Play), drawn as the microKORG's 2 x 4 step LEDs
  *                 (hollow = Rest, filled = Play, inverted = sounding, dotted = past the pattern's length), as
  *                 canvas.js draws them on the Schwung param pages
  *   BANK:         the active bank file
  * The per-layer controls edit the layer selected by Layer on Perf (in Layer mode): in Layer mode their labels
- * name it ("L1.CUT" / "L2.CUT", pages marked `layerLabels`) and the sound-design pages (Osc, Envelopes,
- * Mix / Filter, marked `layerBadge`) show [L1] or [L2] in the header. Single mode has one layer: plain labels,
+ * name it ("L1.CUT" / "L2.CUT", pages marked `layerLabels`) and the sound-design pages (Osc, Filter,
+ * Amp, marked `layerBadge`) show [L1] or [L2] in the header. Single mode has one layer: plain labels,
  * [L1], and Layer reads "N/A". "Voice" means polyphony only (Mono / Poly / Unison).
  */
 
-// Cutoff knob -> Hz, the engine's measured mapping (cutoff_base_hz * 2^(knob * cutoff_octaves))
+// Cutoff knob -> Hz, the engine's measured mapping (knob_fc in dsp.c): 32.67 Hz doubling every 12.03 knob steps
+// to knob 70, then levelling off (the coefficient table, read as Hz at 44.1 kHz)
 const cutoffHz = (v) => {
-    const hz = 37.46 * Math.pow(2, v * 10.61);
+    const k = Math.max(0, Math.min(1, v)) * 127;
+    const K = [70, 80, 85, 90, 95, 100, 105, 110], FC = [0.2606, 0.4192, 0.5141, 0.6054, 0.7006, 0.7959, 0.8804, 0.9140];
+    let hz;
+    if (k < 70) hz = 32.67 * Math.pow(2, k * 10.56 / 127);
+    else {
+        let fc = FC[7];
+        for (let i = 1; i < 8; i++) if (k <= K[i]) { fc = FC[i - 1] + (FC[i] - FC[i - 1]) * (k - K[i - 1]) / (K[i] - K[i - 1]); break; }
+        hz = fc * 44100 / (2 * Math.PI);
+    }
     return hz >= 1000 ? `${(hz / 1000).toFixed(1)}k` : `${Math.round(hz)}Hz`;
 };
 const pct = (v) => `${Math.round(v * 100)}%`;
+// LFO rate as the engine plays it (LFO_RATE_HZ in dsp.c: the microKORG's curve, measured every 8 knob steps)
+const LFO_RATE_HZ = [0.0157, 0.09, 0.1696, 0.2502, 0.8302, 1.7502, 2.7506, 3.75, 4.9978, 8.1793, 12.9755, 20.5917, 32.7045, 51.9048, 82.4155, 130.8, 196.0];
+const lfoHz = (v) => {
+    const k = Math.max(0, Math.min(1, v)) * 127;
+    const i = Math.min(15, Math.floor(k / 8));
+    const hz = k >= 120 ? LFO_RATE_HZ[15] + (LFO_RATE_HZ[16] - LFO_RATE_HZ[15]) * (k - 120) / 7
+        : LFO_RATE_HZ[i] + (LFO_RATE_HZ[i + 1] - LFO_RATE_HZ[i]) * (k / 8 - i);
+    return hz < 10 ? `${hz.toFixed(2)}Hz` : `${Math.round(hz)}Hz`;
+};
+// Delay Time as the engine plays it (delay_time_s in dsp.c: the microKORG's curve, 14 ms .. 1.64 s; a tempo-synced
+// program steps note values instead, which this readout does not show)
+const delayMs = (v) => {
+    const k = Math.max(0, Math.min(1, v)) * 127;
+    const frac = k <= 64 ? 0.01 + 0.15 * k / 64 : k <= 110 ? 0.16 + 0.24 * (k - 64) / 46
+        : k <= 120 ? 0.40 + 0.02 * (k - 110) : k <= 125 ? 0.60 + 0.04 * (k - 120) : 1.0 + 0.2 * (k - 126);
+    const ms = frac * 65536 / 48;
+    return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(2)}s`;
+};
 const bipolar = (v) => `${Math.round((v - 0.5) * 200)}%`;
 const signed = (unit) => (v) => `${v > 0 ? "+" : ""}${Math.round(v)}${unit}`;
 
@@ -41,13 +70,14 @@ export const PAGES = [
             { key: "patch",          label: "Program",  short: "Prog", index: true, values: ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"], presetName: true, patches: true },
             // the program's arpeggiator (stored on / off until changed here)
             { key: "arp_on",         label: "Arp",     short: "Arp",  values: ["Off", "On"] },
-            // Single (one layer, 4 voices) or Layer (two layers, 2 voices each)
+            // Single (one layer, 8 voices) or Layer (two layers, 4 voices each)
             { key: "voice_mode",     label: "Mode",    short: "Mode", values: ["Single", "Layer"] },
-            { key: "cutoff",         label: "Cutoff",  short: "Cut",  l2: "L2.CUT", format: cutoffHz },
-            { key: "resonance",      label: "Res",     short: "Res",  l2: "L2.RES", format: pct },
-            { key: "release2",       label: "AmpRel",  short: "Rel",  l2: "L2.REL", format: pct },
             // which layer the per-layer controls edit (Layer mode; "N/A" in Single)
-            { key: "timbre_edit",    label: "Layer",   short: "Layer", values: ["L1", "L2"] }
+            { key: "timbre_edit",    label: "Layer",   short: "Layer", values: ["L1", "L2"] },
+            // the layer's polyphony (Mono / Poly / Unison), its glide, and the layers' balance
+            { key: "voice_assign",   label: "Voice",   short: "Voice", l2: "L2.VOIC", index: true, values: ["Mono", "Poly", "Unison"] },
+            { key: "portamento",     label: "Porta",   short: "Porta", l2: "L2.PORT", format: pct },
+            { key: "timbre_balance", label: "LayerBal", short: "Bal",  format: (v) => `${Math.round((1 - v) * 100)}:${Math.round(v * 100)}` }
         ]
     },
     {
@@ -57,62 +87,75 @@ export const PAGES = [
         layerBadge: true,
         params: [
             { key: "wave1",          label: "Wave1",   short: "Wav1", l2: "L2.WV1", index: true, values: ["SAW", "SQR", "TRI", "SIN", "VOX", "DWG", "NZ"] },
+            // Osc 1's Control 1 (0..127; what it does depends on the wave); while Wave 1 is DWGS this encoder
+            // picks the DWGS waveform (1..64) instead: see slotDef
+            { key: "osc1_ctrl1",     label: "Ctrl1",   short: "Ctl1", l2: "L2.CT1", int: [0, 127], format: (v) => `${Math.round(v)}`,
+              dwgs: { key: "dwgs_wave", label: "DWGS", short: "DWGS", l2: "L2.DWGS", int: [0, 63], format: (v) => `${Math.round(v) + 1}` } },
+            { key: "osc1_ctrl2",     label: "Ctrl2",   short: "Ctl2", l2: "L2.CT2", int: [0, 127], format: (v) => `${Math.round(v)}` },
             { key: "wave2",          label: "Wave2",   short: "Wav2", l2: "L2.WV2", index: true, values: ["SAW", "SQR", "TRI"] },
-            { key: "pulse_width",    label: "Width",   short: "PulW", l2: "L2.PW",  format: (v) => `${Math.round(50 + 45 * v)}%` },
+            // option indices, in the hardware's order (the engine remaps Sync / Ring to its own)
+            { key: "sync_ring",      label: "SyncR",   short: "SyncR", l2: "L2.SYNC", index: true, values: ["OFF", "RING", "SYNC", "R.SNC"] },
             { key: "osc2_semi",      label: "Semi",    short: "Semi", l2: "L2.SEMI", int: [-24, 24], format: signed("st") },
             { key: "osc2_tune",      label: "Tune",    short: "Tune", l2: "L2.TUNE", int: [-50, 50], format: signed("ct") },
-            // the layer's polyphony (Mono / Poly / Unison), and the layers' balance
-            { key: "voice_assign",   label: "Voice",   short: "Voice", l2: "L2.VOIC", index: true, values: ["Mono", "Poly", "Unison"] },
-            { key: "timbre_balance", label: "LayerBal", short: "Bal",  format: (v) => `${Math.round((1 - v) * 100)}:${Math.round(v * 100)}` },
+            { key: "osc_mix",        label: "Mix",     short: "Mix",  l2: "L2.MIX",  format: pct }
+        ]
+    },
+    {
+        id: "filter",
+        name: "FILTER",
+        layerLabels: true,
+        layerBadge: true,
+        params: [
+            { key: "filter_type", label: "Type",   short: "Type",  l2: "L2.FTYP", index: true, values: ["LPF24", "LPF12", "BPF12", "HPF12"] },
+            { key: "cutoff",      label: "Cutoff", short: "Cut",   l2: "L2.CUT",  format: cutoffHz },
+            { key: "resonance",   label: "Res",    short: "Res",   l2: "L2.RES",  format: pct },
+            { key: "env_int",     label: "EG Int", short: "EGInt", l2: "L2.EGIN", format: bipolar },
+            { key: "attack1",     label: "FltAtk", short: "FAtk",  l2: "L2.FATK", format: pct },
+            { key: "decay1",      label: "FltDcy", short: "FDcy",  l2: "L2.FDCY", format: pct },
+            { key: "sustain1",    label: "FltSus", short: "FSus",  l2: "L2.FSU",  format: pct },
+            { key: "release1",    label: "FltRel", short: "FRel",  l2: "L2.FRL",  format: pct }
+        ]
+    },
+    {
+        id: "amp",
+        name: "AMP",
+        layerLabels: true,
+        layerBadge: true,
+        params: [
+            { key: "noise_level", label: "Noise",  short: "Noise", l2: "L2.NOIS", format: pct },
+            { key: "level",       label: "Level",  short: "Level", l2: "L2.LVL",  format: pct },
+            { key: "drive",       label: "Dist",   short: "Dist",  l2: "L2.DIST", index: true, values: ["OFF", "ON"] },
+            { key: "pan",         label: "Pan",    short: "Pan",   format: (v) => v < 0.48 ? `L${Math.round((0.5 - v) * 200)}` : (v > 0.52 ? `R${Math.round((v - 0.5) * 200)}` : "C") },
+            { key: "attack2",     label: "AmpAtk", short: "AAtk",  l2: "L2.ATK",  format: pct },
+            { key: "decay2",      label: "AmpDcy", short: "ADcy",  l2: "L2.ADCY", format: pct },
+            { key: "sustain2",    label: "AmpSus", short: "ASus",  l2: "L2.ASU",  format: pct },
+            { key: "release2",    label: "AmpRel", short: "ARel",  l2: "L2.REL",  format: pct }
+        ]
+    },
+    {
+        id: "mod",
+        name: "MOD",
+        layerLabels: true,
+        params: [
+            { key: "lfo1_rate",   label: "LFO1",   short: "LFO1",  format: lfoHz },
+            { key: "lfo2_rate",   label: "LFO2",   short: "LFO2",  format: lfoHz },
             // stands in for the mod wheel the Move lacks: virtual patch source 7, same as CC1
-            { key: "mod_wheel",      label: "ModWhl",  short: "MOD",   int: [0, 127], format: (v) => `${Math.round(v)}` }
-        ]
-    },
-    {
-        id: "env",
-        name: "ENVELOPES",
-        layerLabels: true,
-        layerBadge: true,
-        params: [
-            { key: "attack1",     label: "FltAtk", short: "FAtk", l2: "L2.FATK", format: pct },
-            { key: "decay1",      label: "FltDcy", short: "FDcy", l2: "L2.FDCY", format: pct },
-            { key: "sustain1",    label: "FltSus", short: "FSus", l2: "L2.FSU",  format: pct },
-            { key: "release1",    label: "FltRel", short: "FRel", l2: "L2.FRL",  format: pct },
-            { key: "decay2",      label: "AmpDcy", short: "ADcy", l2: "L2.ADCY", format: pct },
-            { key: "sustain2",    label: "AmpSus", short: "ASus", l2: "L2.ASU",  format: pct },
-            { key: "keytrack",    label: "KeyTr",  short: "KeyTr", l2: "L2.KTRK", format: bipolar },
-            { key: "env_int",     label: "EG Int", short: "EGInt", l2: "L2.EGIN", format: bipolar }
-        ]
-    },
-    {
-        id: "mix",
-        name: "MIX / FILTER",
-        layerLabels: true,
-        layerBadge: true,
-        params: [
-            { key: "osc_mix",     label: "Mix",   short: "Mix",   l2: "L2.MIX",  format: pct },
-            { key: "noise_level", label: "Noise", short: "Noise", l2: "L2.NOIS", format: pct },
-            // option indices, in the hardware's order (the engine remaps Sync / Ring to its own)
-            { key: "sync_ring",   label: "SyncR", short: "SyncR", l2: "L2.SYNC", index: true, values: ["OFF", "RING", "SYNC", "R.SNC"] },
-            { key: "filter_type", label: "Type",  short: "Type",  l2: "L2.FTYP", index: true, values: ["LPF24", "LPF12", "BPF12", "HPF12"] },
-            { key: "drive",       label: "Drive", short: "Drive", l2: "L2.DRV", format: pct },
-            { key: "level",       label: "Level", short: "Level", l2: "L2.LVL",  format: pct },
-            { key: "portamento",  label: "Porta", short: "Porta", l2: "L2.PORT", format: pct },
-            { key: "attack2",     label: "AmpAtk", short: "Atk",  l2: "L2.ATK",  format: pct }
+            { key: "mod_wheel",   label: "ModWhl", short: "MOD",   int: [0, 127], format: (v) => `${Math.round(v)}` },
+            { key: "keytrack",    label: "KeyTr",  short: "KeyTr", l2: "L2.KTRK", format: bipolar }
         ]
     },
     {
         id: "fx",
         name: "EFFECTS",
         params: [
-            { key: "chorus_mix",  label: "Chor",  short: "Chor",  format: pct },
-            { key: "delay_time",  label: "Time",  short: "Time",  format: (v) => `${Math.round(v * 1000)}ms` },
+            { key: "modfx_type",  label: "ModFX", short: "FX",    index: true, values: ["CHO", "ENS", "PHS"] },
+            { key: "modfx_speed", label: "Speed", short: "Speed", format: pct },
+            { key: "chorus_mix",  label: "Depth", short: "Depth", format: pct },
+            { key: "delay_type",  label: "D.Typ", short: "D.Typ", index: true, values: ["ST", "CRS", "L/R"] },
+            { key: "delay_time",  label: "Time",  short: "Time",  format: delayMs },
             { key: "delay_feedback",label: "Fdbk",short: "Fdbk",  format: pct },
             { key: "delay_mix",   label: "D.Mix", short: "D.Mix", format: pct },
-            { key: "master_vol",  label: "Vol",   short: "Vol",   format: pct },
-            { key: "pan",         label: "Pan",   short: "Pan",   format: (v) => v < 0.48 ? `L${Math.round((0.5 - v) * 200)}` : (v > 0.52 ? `R${Math.round((v - 0.5) * 200)}` : "C") },
-            { key: "lfo1_rate",   label: "LFO1",  short: "LFO1",  format: (v) => `${(0.05 * Math.pow(600, v)).toFixed(1)}Hz` },
-            { key: "lfo2_rate",   label: "LFO2",  short: "LFO2",  format: (v) => `${(0.05 * Math.pow(600, v)).toFixed(1)}Hz` }
+            { key: "master_vol",  label: "Vol",   short: "Vol",   format: pct }
         ]
     },
     {
@@ -204,6 +247,12 @@ export class MicroKorgUI {
         return this.state.params[key] ?? 0.5;
     }
 
+    // The control an encoder slot holds right now: the Osc page's third encoder is the DWGS waveform while
+    // Wave 1 (index 5) is DWGS, Pulse Width otherwise, as on the host's Osc page
+    slotDef(paramDef) {
+        return (paramDef && paramDef.dwgs && Math.round(this.getParam("wave1")) === 5) ? paramDef.dwgs : paramDef;
+    }
+
     // The values of an index control: Category follows the active bank (the engine leaves vocoder programs out, so
     // the factory layout has 7 categories, and a category lists as many programs as it has playable ones)
     valuesOf(paramDef) {
@@ -224,7 +273,7 @@ export class MicroKorgUI {
     onEncoder(index, delta) {
         if (index < 0 || index >= 8) return;
         const page = PAGES[this.currentPageIndex];
-        const paramDef = page.params[index];
+        const paramDef = this.slotDef(page.params[index]);
         if (!paramDef) return;
 
         if (paramDef.key === "bank_file") {
@@ -451,7 +500,7 @@ export class MicroKorgUI {
         const colWidth = 32; // 128 / 4 = 32 pixels per column
 
         for (let i = 0; i < 8; i++) {
-            const paramDef = page.params[i];
+            const paramDef = this.slotDef(page.params[i]);
             if (!paramDef) continue;
 
             const val = this.getParam(paramDef.key);

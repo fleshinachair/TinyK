@@ -86,12 +86,14 @@ static void test_layer(void) {
         if (S.voices[v].active && S.voices[v].is_timbre_2 == 0) a++;
         if (S.voices[v].active && S.voices[v].is_timbre_2 == 1) b++;
     }
-    check(a == 1 && b == 2, "one note-on starts one Timbre 1 voice (Poly) and both Timbre 2 voices (A.11 T2 is Unison)");
+    check(a == 1 && b == UNISON_STACK, "one note-on starts one Timbre 1 voice (Poly) and Timbre 2's unison stack (A.11 T2 is Unison)");
 
     double e[3][2];
     float balances[3] = {0.0f, 0.5f, 1.0f};
     for (int k = 0; k < 3; k++) {
         fresh(0);
+        synth_set_param(&S, "delay_mix", 0.0f); /* pan alone: no stereo FX */
+        synth_set_param(&S, "chorus_mix", 0.0f);
         /* the patch routes off: A.11's Timbre 1 has LFO1 -> pan, which would swing a 1 s render either way */
         for (int t = 0; t < 2; t++)
             for (int p = 0; p < 4; p++) S.timbre_extra[t].patch_int[p] = 0.0f;
@@ -112,7 +114,10 @@ static void test_layer(void) {
     char what[128];
     double lean0 = 10.0 * log10(e[0][0] / (e[0][1] + 1e-12)), lean2 = 10.0 * log10(e[2][0] / (e[2][1] + 1e-12));
     snprintf(what, sizeof what, "timbre pans from the patch (A.11: both centred): Timbre 1 alone leans %+.2f dB, Timbre 2 %+.2f dB", lean0, lean2);
-    check(fabs(lean0) < 1.0 && fabs(lean2) < 1.0, what);
+    /* a linear balance, as on the plug-in: a timbre at pan p (-1..+1) leans 20 log10((1 - p) / (1 + p)) dB */
+    double want0 = 20.0 * log10((1.0 - S.timbre_extra[0].pan) / (1.0 + S.timbre_extra[0].pan));
+    double want2 = 20.0 * log10((1.0 - S.timbre_extra[1].pan) / (1.0 + S.timbre_extra[1].pan));
+    check(fabs(lean0 - want0) < 0.3 && fabs(lean2 - want2) < 0.3, what);
     check(e[1][0] + e[1][1] > 0, "balance 0.5: both play");
 }
 
@@ -164,6 +169,8 @@ static void open_voice(void) {
     synth_set_param(&S, "delay_mix", 0.0f);
     synth_set_param(&S, "chorus_mix", 0.0f);
     synth_set_param(&S, "osc_mix", 0.0f);
+    synth_set_param(&S, "voice_assign", 0.5f); /* Poly: one voice, whatever the program's assign */
+    synth_set_param(&S, "drive", 0.0f);
     synth_set_param(&S, "attack2", 0.0f);
     synth_set_param(&S, "decay2", 0.0f);
     synth_set_param(&S, "sustain2", 1.0f);
@@ -209,10 +216,11 @@ static void test_envelopes(void) {
     printf("  knob      attack(s)  decay(-20dB,s)  release(-20dB,s)\n");
     for (int k = 0; k < 5; k++) printf("  %.2f   %10.3f  %14.3f  %16.3f\n", knob[k], att[k], dec[k], rel[k]);
 
-    check(att[0] >= 0 && att[0] < 0.03, "attack 0.0 is an instant stab (< 30 ms)");
+    /* 10 ms windows, and the onset fade takes the first 4.5 ms: the 0.9 point lands in the second or third */
+    check(att[0] >= 0 && att[0] <= 0.03, "attack 0.0 is an instant stab (<= 30 ms)");
     check(att[4] > 6.0, "attack 1.0 is a slow swell (> 6 s)");
     check(att[1] < att[2] && att[2] < att[3] && att[3] < att[4], "attack time rises monotonically across the knob");
-    check(att[2] > 0.05 && att[2] < 0.4, "attack mid-knob is ~0.1 s (not clustered at an extreme)");
+    check(att[2] > 0.45 && att[2] < 0.75, "attack mid-knob is ~0.6 s (the plug-in: 90 % at 0.61 s)");
     check(dec[0] >= 0 && dec[0] < 0.05, "decay 0.0 is a short pluck (< 50 ms)");
     check(dec[4] > 5.0, "decay 1.0 is very long (> 5 s)");
     check(dec[1] < dec[2] && dec[2] < dec[3] && dec[3] < dec[4], "decay time rises monotonically across the knob");
@@ -283,7 +291,12 @@ static void test_patch_sources(void) {
     patch_voice(PATCH_SRC_MOD_WHEEL, PATCH_DST_CUTOFF, -35);
     midi(0xB0, 1, 127);
     int16_t *wheel = play(0.4, &n);
-    check(brightness(wheel, n) < 0.8 * brightness(rest, n), "mod wheel up with -35 -> cutoff closes (B.11 patch 2)");
+    /* -35 at full source is 0.73 octave down on the plug-in's patch -> cutoff scale (1.59 octaves at +-63) */
+    {
+        char msg[128];
+        snprintf(msg, sizeof msg, "mod wheel up with -35 -> cutoff closes (B.11 patch 2): brightness x %.2f", brightness(wheel, n) / brightness(rest, n));
+        check(brightness(wheel, n) < 0.93 * brightness(rest, n), msg);
+    }
     free(rest); free(off); free(wheel);
 
     patch_voice(PATCH_SRC_PITCH_BEND, PATCH_DST_CUTOFF, 40);
@@ -300,8 +313,8 @@ static void test_patch_sources(void) {
     int16_t *pan = play(0.4, &n);
     double db = 10.0 * log10(energy(pan, n, 1) / (energy(pan, n, 0) + 1e-12));
     char what[96];
-    snprintf(what, sizeof what, "pan +20 at full source swings %.1f dB (6..9 dB wanted)", db);
-    check(db > 6.0 && db < 9.0, what);
+    snprintf(what, sizeof what, "pan +20 at full source swings %.1f dB (the plug-in: 8.6)", db);
+    check(db > 7.5 && db < 9.2, what); /* the output limiter takes a little off the louder side */
     free(pan);
 }
 
@@ -472,10 +485,14 @@ static void test_lfo_steps_click_free(void) {
         dst[1] = worst_hf_burst_db(b, n, 1, 0.2);
         free(b);
     }
-    char what[128];
-    snprintf(what, sizeof what, "worst HF burst L %.1f / R %.1f dB vs %.1f / %.1f unmodulated (within 5 dB)",
+    /* At +63 the pan swings from one side fully to the other (the measured depth and the linear pan law), so
+     * a side falls silent between steps and its bursts stand far above its own local level whatever the
+     * smoothing. The bound is the plug-in's own figure for S&H -> pan +63 by this measure, -9.1 dB (-18.4
+     * unmodulated), with 2 dB of margin: the steps may not be harder than the plug-in's 2 ms crossings. */
+    char what[160];
+    snprintf(what, sizeof what, "worst HF burst L %.1f / R %.1f dB (%.1f / %.1f unmodulated; the plug-in: -9.1, bound -7)",
              worst[0], worst[1], plain[0], plain[1]);
-    check(worst[0] < plain[0] + 5.0 && worst[1] < plain[1] + 5.0, what);
+    check(worst[0] < -7.0 && worst[1] < -7.0, what);
 }
 
 /* The audible noise is white after the brightness tilt: for white noise the first difference carries exactly
@@ -485,7 +502,10 @@ static void test_noise_is_white(void) {
     printf("\nNoise spectrum after the brightness tilt:\n");
     open_voice();
     synth_set_param(&S, "wave1", 1.0f);               /* Noise */
-    synth_set_param(&S, "filter_type", 1.0f / 3.0f);  /* LPF12 */
+    synth_set_param(&S, "filter_type", 1.0f);         /* 12HPF at cutoff 0: the flat path */
+    synth_set_param(&S, "cutoff", 0.0f);
+    S.timbre_extra[0].osc1_ctrl[0] = 1.0f;            /* the Noise oscillator's own low-pass open, no resonance */
+    S.timbre_extra[0].osc1_ctrl[1] = 0.0f;
     synth_note_on(&S, 60, 100);
     int n;
     int16_t *b = render(1.0, &n);
@@ -496,8 +516,9 @@ static void test_noise_is_white(void) {
         d += (x - p) * (x - p);
     }
     char what[96];
+    /* the plug-in's noise rolls off above 3 kHz (about 1.25 here); the tilt left on it would read above 2.6 */
     snprintf(what, sizeof what, "first-difference / signal energy %.2f (white noise 2.00; top-heavy > 2.6)", d / e);
-    check(d / e > 1.2 && d / e < 2.6, what);
+    check(d / e > 0.9 && d / e < 1.7, what);
     free(b);
 }
 
@@ -931,8 +952,8 @@ static void test_headroom(void) {
         if (pk > 0.05 && pk < quietest_loud) quietest_loud = pk;
     }
     char msg[160];
-    snprintf(msg, sizeof msg, "loudest of 26 programs peaks at %.1f dBFS (program %d), at most -6.5 dBFS", 20 * log10(worst), worst_i);
-    check(worst <= 0.475 && worst > 0.2, msg);
+    snprintf(msg, sizeof msg, "loudest of 26 programs peaks at %.1f dBFS (program %d), at most -0.9 dBFS", 20 * log10(worst), worst_i);
+    check(worst <= 0.905 && worst > 0.1, msg);
 }
 
 int main(void) {

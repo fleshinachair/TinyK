@@ -313,27 +313,35 @@ def host_api():
               f"Banks page items: {items}")
         hier = json.loads(get("ui_hierarchy"))
         manifest = json.load(open(os.path.join(cal.ROOT, "src", "module.json"), encoding="utf-8"))
-        check(hier == manifest["capabilities"]["ui_hierarchy"], "engine ui_hierarchy == module.json ui_hierarchy")
+        # the engine serves the manifest's hierarchy with one of the Osc page's Control 1 / DWGS entries cut
+        want = json.loads(json.dumps(manifest["capabilities"]["ui_hierarchy"]))
+        osc_params = hier["levels"]["osc"]["params"]
+        dwgs_on = any(p.get("key") == "dwgs_wave" for p in osc_params)
+        want["levels"]["osc"]["params"] = [p for p in want["levels"]["osc"]["params"]
+                                           if p.get("key") != ("osc1_ctrl1" if dwgs_on else "dwgs_wave")]
+        if dwgs_on:
+            want["levels"]["osc"]["knobs"][1] = "dwgs_wave"
+        check(hier == want, "engine ui_hierarchy == module.json ui_hierarchy (one of Control 1 / DWGS on the Osc page)")
         levels = hier["levels"]
-        # Sound design first (Perf, Osc, Envelopes, Mix/Filter, Effects), then the arpeggiator, then Bank;
-        # Perf is Option B: Cat, Prog, Arp, Mode, Cutoff, Res, Rel, Layer; Mode and Layer sit on Perf next to the
-        # per-layer macros they switch, Voice (Mono / Poly / Unison) is on Osc and Amp Atk on Mix/Filter
-        pages = {"perf": ("Perf", ["category", "patch", "arp_on", "voice_mode", "cutoff", "resonance", "release2", "timbre_edit"]),
-                 "osc": ("Osc [L1]", ["wave1", "wave2", "pulse_width", "osc2_semi", "osc2_tune", "voice_assign",
-                                      "timbre_balance", "mod_wheel"]),
-                 "env": ("Envelopes [L1]", ["attack1", "decay1", "sustain1", "release1", "decay2", "sustain2", "keytrack", "env_int"]),
-                 "mix": ("Mix/Filter [L1]", ["osc_mix", "noise_level", "sync_ring", "filter_type", "drive", "level", "portamento",
-                                              "attack2"]),
-                 "fx": ("Effects", ["chorus_mix", "delay_time", "delay_feedback", "delay_mix", "master_vol", "pan",
-                                    "lfo1_rate", "lfo2_rate"]),
+        # One page per section of the instrument (Perf, Osc, Filter, Amp, Mod, Effects), then the arpeggiator, then
+        # Bank. Filter and Amp each carry their own envelope; the Osc page's second knob is Control 1, or the DWGS
+        # selector while Wave 1 is DWGS (the manifest lists both entries, the engine serves one: checked below).
+        pages = {"perf": ("Perf", ["category", "patch", "arp_on", "voice_mode", "timbre_edit", "voice_assign", "portamento",
+                                   "timbre_balance"]),
+                 "osc": ("Osc [L1]", ["wave1", "osc1_ctrl1", "osc1_ctrl2", "wave2", "sync_ring", "osc2_semi", "osc2_tune", "osc_mix"]),
+                 "filter": ("Filter [L1]", ["filter_type", "cutoff", "resonance", "env_int", "attack1", "decay1", "sustain1", "release1"]),
+                 "amp": ("Amp [L1]", ["noise_level", "level", "drive", "pan", "attack2", "decay2", "sustain2", "release2"]),
+                 "mod": ("Mod", ["lfo1_rate", "lfo2_rate", "mod_wheel", "keytrack"]),
+                 "fx": ("Effects", ["modfx_type", "modfx_speed", "chorus_mix", "delay_type", "delay_time", "delay_feedback",
+                                    "delay_mix", "master_vol"]),
                  "arpset": ("Arp Settings", ["arp_type", "arp_range", "arp_resolution", "arp_gate", "arp_swing", "arp_latch",
                                              "arp_key_sync", "arp_target"]),
                  "steps": ("Arp Steps", [f"arp_step{n}" for n in range(1, 9)])}
-        check([p.get("level") for p in levels["root"]["params"]] == ["perf", "osc", "env", "mix", "fx", "arpset", "steps", "bank"]
+        check([p.get("level") for p in levels["root"]["params"]] == ["perf", "osc", "filter", "amp", "mod", "fx", "arpset", "steps", "bank"]
               and levels["root"]["knobs"] == [],
               f"root is the preset browser with the page levels in order: {[p.get('level') for p in levels['root']['params']]}")
         check(all(levels[k]["name"] == name and levels[k]["knobs"] == knobs for k, (name, knobs) in pages.items()),
-              "Perf / Osc / Envelopes / Mix/Filter / Effects / Arp Settings / Arp Steps pages hold their knobs (sound-design pages badged [L1])")
+              "Perf / Osc / Filter / Amp / Mod / Effects / Arp Settings / Arp Steps pages hold their knobs (per-layer pages badged [L1])")
         help_doc = json.load(open(os.path.join(cal.ROOT, "src", "help.json"), encoding="utf-8"))
         help_pages = [c["title"] for c in next(c for c in help_doc["children"] if c["title"] == "Pages")["children"]]
         check(help_pages == [f"{i}: {levels[p['level']]['label']}" for i, p in enumerate(levels["root"]["params"], 1)],
@@ -386,7 +394,7 @@ def host_api():
               f"Layer 2 edit: is_loading {loading}, page {hier2['levels']['osc']['name']!r}, "
               f"cutoff cell {meta2['cutoff'].get('short_name')!r}")
         put("level", "0.75")
-        macros = ("cutoff", "resonance", "attack2", "release2")  # the Perf page's per-timbre knobs
+        macros = ("cutoff", "resonance", "attack2", "release2")  # per-layer knobs on Filter and Amp
         put("timbre_edit", "0")
         t1_macros = [get(k) for k in macros]
         put("timbre_edit", "1")
@@ -396,7 +404,7 @@ def host_api():
         put("timbre_edit", "0")
         check(get("level") == "0.2500", f"Level edits the selected layer only (Layer 1 kept {get('level')})")
         check([get(k) for k in macros] == t1_macros and t2_macros == ["0.3000"] * 4,
-              f"Perf macros (Cutoff, Resonance, Amp Atk / Rel) edit the selected layer: L2 {t2_macros}, L1 kept {t1_macros}")
+              f"Cutoff, Resonance, Amp Atk / Rel edit the selected layer: L2 {t2_macros}, L1 kept {t1_macros}")
         put("voice_mode", "0")
         get("is_loading")             # the host takes the change back to Layer 1
         # Filter Type and Sync / Ring are option boxes; Sync / Ring in the hardware's order (off, ring, sync,
@@ -416,15 +424,15 @@ def host_api():
             names = {k: v["name"] for k, v in json.loads(get("ui_hierarchy"))["levels"].items()}
             seen[vm + te] = (m["timbre_edit"].get("short_options"), m["cutoff"].get("short_name"),
                              m["attack1"].get("short_name"), m["drive"].get("label"), m["wave1"].get("short_name"),
-                             names["osc"], names["env"], names["mix"], names["perf"], changed)
-        single = (["N/A", "N/A"], None, None, None, None, "Osc [L1]", "Envelopes [L1]", "Mix/Filter [L1]", "Perf")
+                             names["osc"], names["filter"], names["amp"], names["perf"], changed)
+        single = (["N/A", "N/A"], None, None, None, None, "Osc [L1]", "Filter [L1]", "Amp [L1]", "Perf")
         check(seen["00"][:-1] == single and seen["01"][:-1] == single and seen["01"][-1] == ["0", "0"],
               f"Single mode: Layer {seen['00'][0]}, plain labels, either stored edit choice: {seen['00'][:5]}")
-        check(seen["10"][:-1] == (["L1", "L2"], "L1.CUT", "L1.FATK", "L1 Drive", "L1.WV1", "Osc [L1]",
-                                  "Envelopes [L1]", "Mix/Filter [L1]", "Perf") and seen["10"][-1] == ["1", "0"],
+        check(seen["10"][:-1] == (["L1", "L2"], "L1.CUT", "L1.FATK", "L1 Distortion", "L1.WV1", "Osc [L1]",
+                                  "Filter [L1]", "Amp [L1]", "Perf") and seen["10"][-1] == ["1", "0"],
               f"Layer, Layer 1: {seen['10'][:-1]}; is_loading {seen['10'][-1]} (the Mode turn is a label change)")
-        check(seen["11"][:-1] == (["L1", "L2"], "L2.CUT", "L2.FATK", "L2 Drive", "L2.WV1", "Osc [L2]",
-                                  "Envelopes [L2]", "Mix/Filter [L2]", "Perf") and seen["11"][-1] == ["1", "0"],
+        check(seen["11"][:-1] == (["L1", "L2"], "L2.CUT", "L2.FATK", "L2 Distortion", "L2.WV1", "Osc [L2]",
+                                  "Filter [L2]", "Amp [L2]", "Perf") and seen["11"][-1] == ["1", "0"],
               f"Layer, Layer 2: {seen['11'][:-1]}; is_loading {seen['11'][-1]}")
         put("voice_mode", "0")
         put("timbre_edit", "0")

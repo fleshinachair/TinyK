@@ -4,6 +4,8 @@
 #include "dsp.h"
 #include "presets.h"
 #include "syx_bank.h"
+#include "dwgs_waves.h"
+#include "vox_pulse.h"
 
 /* An instance's active bank (synth->bank_file): 0 = built-in (presets.h), 1..g_syx_bank_count = .syx dumps found
  * in <module>/banks/. The decoded banks are shared by all instances (read-only once scanned); the choice is not. */
@@ -174,7 +176,7 @@ static const param_meta_t PARAM_METAS[NUM_PARAMS] = {
     { "env_int",      "Env Intensity",  "EnvIn",  2, 0.5f },
     { "drive",        "Drive",          "Drive",  2, 0.2f },
     { "mod_int",      "Mod Intensity",  "ModIn",  2, 0.0f },
-    { "vel_sens",     "Vel Sensitivity","VelSn",  2, 0.3f },
+    { "vel_sens",     "Vel Sensitivity","VelSn",  2, 0.0f }, /* velocity -> filter EG depth: 0, as on the microKORG */
 
     /* Page 3: ENVs */
     { "attack1",      "Filter Attack",  "Atk1",   3, 0.01f },
@@ -189,7 +191,7 @@ static const param_meta_t PARAM_METAS[NUM_PARAMS] = {
     /* Page 4: FX/MOD */
     { "lfo1_rate",    "LFO1 Rate",      "LFO1",   4, 0.3f },
     { "lfo2_rate",    "LFO2 Rate",      "LFO2",   4, 0.3f },
-    { "chorus_mix",   "Chorus Mix",     "Chor",   4, 0.0f },
+    { "chorus_mix",   "Mod FX Depth",   "Depth",  4, 0.0f },
     { "delay_time",   "Delay Time",     "Time",   4, 0.3f },
     { "delay_feedback","Delay Feedback","Fdbk",   4, 0.3f },
     { "delay_mix",    "Delay Mix",      "D.Mix",  4, 0.0f },
@@ -296,12 +298,13 @@ static const float LFO_SYNC_NOTES[15] = {
 #define LFO_SMOOTH_S 0.0005f
 #endif
 
-/* Note-on de-click: a voice starting from silence fades in over this many samples (raised cosine, 1 ms at 44.1 kHz),
- * on top of its amp EG. The EG's fastest attack (1.5 ms) starts at its steepest slope, and with random start phases
+/* Note-on de-click: a voice starting from silence fades in over this many samples (a raised cosine, squared: 4.5 ms
+ * at 44.1 kHz, the VST's own onset with the attack at 0: 0.5 %, 8 %, 40 %, 90 % of full level in its first four
+ * milliseconds; the 1 ms fade used before left a click 2-5 dB over the plug-in's on a plain sine), on top of its amp EG. The EG's fastest attack (1.5 ms) starts at its steepest slope, and with random start phases
  * the waveform is rarely at zero there: that corner, lifted by the brightness tilt, was a click on every fast-attack
  * note. */
 #ifndef DECLICK_SAMPLES
-#define DECLICK_SAMPLES 44
+#define DECLICK_SAMPLES 200
 #endif
 /* A steal or retrigger glides the voice's velocity gain over this time constant instead of stepping it */
 #define VEL_GLIDE_S 0.0005f
@@ -320,57 +323,21 @@ static const float DELAY_SYNC_NOTES[15] = {
 static inline float patch_lfo_value(const lfo_t *l, int which, int wave) {
     switch (wave) {
         case 0: return 1.0f - 2.0f * l->phase; /* saw falls: +LFO -> amp gates decaying hits (A.21 AutoHouse) */
-        case 1: return (l->phase < 0.5f) ? 1.0f : -1.0f;
+        case 1: return (l->phase < 0.5f) ? 1.0f : (which == 1 ? 0.0f : -1.0f); /* LFO2's square is 0..+1 (measured) */
         case 2: return which == 0 ? 2.0f * fabsf(2.0f * l->phase - 1.0f) - 1.0f
                                   : sinf(2.0f * (float)M_PI * l->phase);
         default: return l->sh_value;
     }
 }
 
-/* --- Sine cross-modulation (Osc 1 Control 1 / 2 on the Sine wave, Osc 2 synced) ------------------------------------
- * On the microKORG the Sine wave's Control 1 is the cross-modulation depth and Control 2 how far LFO1 moves it.
- * With Osc 2 synced, the factory's drum kicks (A.21 AutoHouse T2 and the MS2000's Auto Disco / Zoop Mania, Ctrl 1/2 =
- * 1 / 12-13) use it as a pitch envelope: the LFO1 saw sweeps the sine 130 -> 33 Hz in ~180 ms (VST takes, C3 = note
- * 60, the sine's note pitch 63.6 Hz):
- *   ref_a21_timbre2_drum_c3            Ctrl 1 / 2 = 1 / 13: the sweep
- *   ref_a21_take1_ctrl2_zero           Ctrl 2 = 0: a steady 17.1 Hz (depth 1 alone), after the first note
- *   ref_a21_take2_osc2_semi_zero       Osc 2 semitone -24 -> 0: the same sweep, so Osc 2's wave is not the modulator
- * Measured, the sine's pitch is straight in octaves against the depth d = 127 * (ctrl1 + ctrl2 * lfo1): about +0.22
- * octave per step, the note's own pitch near d = 9.6 (xmod_semitones per unit of depth, xmod_offset_semitones at
- * depth 0; fitted by renders on the take traces, see tools/a21_kick_trace.py). That only holds where it was measured,
- * so it applies to synced Sine timbres whose depth stays within the measured span (ctrl1 + ctrl2 <= XMOD_MAX_DEPTH,
- * Ctrl 1 or 2 set); other cross-mod settings (audio-rate FM with Osc 2 free: A.13 X-ModBass, A.23 X-ModPerc; deep
- * synced settings) are not modelled and play the plain sine. */
-#define XMOD_MAX_DEPTH (14.0f / 127.0f)
-
-static inline int sine_xmod_applies(const timbre_extra_t *x, int osc1_wave, int sync_ring_mode) {
-    float c1 = x->osc1_ctrl[0], c2 = x->osc1_ctrl[1];
-    return osc1_wave == OSC1_WAVE_SINE && (sync_ring_mode == SYNC_RING_SYNC || sync_ring_mode == SYNC_RING_BOTH) &&
-           (c1 > 0.0f || c2 > 0.0f) && c1 + c2 <= XMOD_MAX_DEPTH + 1e-6f && tinyk_tuning.xmod_semitones != 0.0f;
-}
-
-/* The cross-mod depth: Control 1 plus Control 2 x LFO1 (the timbre's patch LFO1, -1..+1) */
-static inline float sine_xmod_depth(const timbre_extra_t *x, float lfo1) {
-    return x->osc1_ctrl[0] + x->osc1_ctrl[1] * lfo1;
-}
-
-/* Osc 1 frequency multiplier for a cross-mod depth: an offset in semitones, linear in the depth (clamped to 4 octaves
- * down / 2 up, beyond anything measured) */
-static inline float sine_xmod_ratio(float depth) {
-    float st = tinyk_tuning.xmod_semitones * depth + tinyk_tuning.xmod_offset_semitones;
-    return exp2f(fmaxf(-48.0f, fminf(24.0f, st)) * (1.0f / 12.0f));
-}
+/* Osc 1 Sine cross modulation used to be a fitted pitch law for one synced case (A.21's kick: the sine's pitch
+ * against depth). It is now what the VST does everywhere, frequency modulation by Osc 2 (see the oscillator
+ * loop, XMOD_MAX_HZ); with Osc 2 synced, the modulator is locked to the sine and its net effect is that pitch
+ * shift. The A.21 takes have not been re-checked against it (they are not in this checkout);
+ * xmod_semitones / xmod_offset_semitones in the tuning table are unused. */
 
 /* White-noise generator state (xorshift32); reset by synth_init so renders are repeatable */
 #define NOISE_SEED 0x1234ABCDu
-
-/* Fast polynomial tanh approximation for saturation in feedback loops */
-static inline float fast_tanh(float x) {
-    if (x > 3.0f) return 1.0f;
-    if (x < -3.0f) return -1.0f;
-    float x2 = x * x;
-    return x * (27.0f + x2) / (27.0f + 9.0f * x2);
-}
 
 /* Fast positive fmod for phase wrapping [0, 1) */
 static inline float fmod_pos(float v) {
@@ -409,215 +376,260 @@ static inline float clamp01f(float v) {
 #define EG_DECAY_MIN_S  0.015f   /* decay and release */
 #define EG_DECAY_MAX_S  20.0f
 
-/* ADSR calculation helpers */
+/* ---- Envelopes: measured on the VST (2026-10, a sine through the open high-pass) -------------------------------------
+ * Every segment is a finite ramp, not an exponential, and all three stages share ONE time table:
+ *   attack   E = 1 - (1 - x)^2            x = time / T(attack knob)
+ *   decay    E = S + (1 - S) (1 - x)^2    x = time / T(decay knob),   S = sustain knob / 127
+ *   release  E = L (1 - x)^2              x = time / T(release knob), L = the level it left from
+ * and the AMP follows E^2 (sustain 64 holds 0.254 of full level, 96 holds 0.571; a decay is 6 / 12 / 20 / 40 /
+ * 60 dB down at 0.166 / 0.296 / 0.438 / 0.684 / 0.822 of T and silent at T; an attack is 90 % up at 0.7735 T
+ * and 99 % at 0.929 T: all ten measured points of the attack curve fit to 0.01). The old exponential stages
+ * with a 1.35 overshoot were 2-15 x too fast on the attack below knob 80 and 2-5 x off on decay and release.
+ * EG_TIME_S is T every 4 knob steps, from the attack's time to 90 % (less the plug-in's 4.5 ms of note latency,
+ * / 0.7735); decay and release give the same T from knob 8 up: instant at 0, 0.79 s at 64, 1.6 s at 100, then
+ * steeply up to 30 s at 127. Below knob 8 a decay or release is slower than an attack, a floor against clicks:
+ * 8 ms at 0, then 15.5 + 2.54 x knob ms (18 ms at 1, 26.6 at 4, 31 at 6), measured through the release.
+ * The filter EG and the patch sources take E itself; that part is assumed, not measured. */
+#define EG_TIME_POINTS 33
+static const float EG_TIME_S[EG_TIME_POINTS] = {
+    0.00020f, 0.01470f, 0.03583f, 0.05561f, 0.07565f, 0.09543f, 0.12710f, 0.16304f, 0.19885f, 0.23867f, 0.27849f,
+    0.35400f, 0.44178f, 0.52917f, 0.61670f, 0.70435f, 0.79174f, 0.87953f, 0.96705f, 1.05509f, 1.14262f, 1.22962f,
+    1.31818f, 1.40467f, 1.49207f, 1.58024f, 1.98942f, 3.18968f, 4.87991f, 6.91935f, 10.37920f, 19.58920f, 30.23570f
+};
+
+/* A stage's knob (0..1) as its step per sample: 1 / (T x fs). min_sec / max_sec are kept for the callers'
+ * tuning scales (attack_scale ...): only their ratio to the stock range is used. */
+static inline float eg_step(float knob01, float scale, float fs, int attack) {
+    float k = clamp01f(knob01) * 127.0f, pos = k / 4.0f, t;
+    int i = (int)pos;
+    if (i >= EG_TIME_POINTS - 2) {   /* 124 .. 127 is a three-step segment */
+        t = EG_TIME_S[EG_TIME_POINTS - 2] + (EG_TIME_S[EG_TIME_POINTS - 1] - EG_TIME_S[EG_TIME_POINTS - 2]) * fminf(1.0f, (k - 124.0f) / 3.0f);
+    } else {
+        t = EG_TIME_S[i] + (EG_TIME_S[i + 1] - EG_TIME_S[i]) * (pos - (float)i);
+    }
+    if (!attack) {
+        float floor_s = k < 1.0f ? 0.008f + 0.010f * k : 0.0155f + 0.00254f * k;
+        if (t < floor_s) t = floor_s;
+    }
+    return 1.0f / fmaxf(1.0f, t * scale * fs);
+}
+
 static inline float time_to_coeff(float time_val_01, float min_sec, float max_sec, float fs) {
-    /* Exponential curve for decay/release time control */
-    float sec = min_sec * powf(max_sec / min_sec, clamp01f(time_val_01));
-    float coeff = expf(-4.60517f / (sec * fs));
-    if (coeff < 0.0f) coeff = 0.0f;
-    if (coeff > 0.999999f) coeff = 0.999999f;
-    return coeff;
+    (void)max_sec;
+    return eg_step(time_val_01, min_sec / EG_DECAY_MIN_S, fs, 0);
 }
 
 static inline float attack_time_to_coeff(float time_val_01, float min_sec, float max_sec, float fs) {
-    /* Analog RC exponential curve for attack time control targeting 1.35 overshoot for punch */
-    float sec = min_sec * powf(max_sec / min_sec, clamp01f(time_val_01));
-    float coeff = expf(-1.35f / (sec * fs));
-    if (coeff < 0.0f) coeff = 0.0f;
-    if (coeff > 0.999999f) coeff = 0.999999f;
-    return coeff;
+    (void)max_sec;
+    return eg_step(time_val_01, min_sec / EG_ATTACK_MIN_S, fs, 1);
 }
 
-static inline void adsr_gate_on(adsr_t *env, float attack_coeff) {
+static inline void adsr_gate_on(adsr_t *env, float attack_step) {
+    /* a voice still sounding goes on up the attack curve from where its level is */
+    float e = fmaxf(0.0f, fminf(1.0f, env->value));
     env->stage = ENV_ATTACK;
-    env->target = 1.35f;
-    env->rate = attack_coeff; /* Stored attack coefficient */
+    env->target = 1.0f;
+    env->rate = attack_step;
+    env->pos = 1.0f - sqrtf(1.0f - e);
 }
 
 static inline void adsr_gate_off(adsr_t *env) {
     env->stage = ENV_RELEASE;
     env->target = 0.0f;
+    env->from = env->value;
+    env->pos = 0.0f;
 }
 
-static inline float adsr_process(adsr_t *env, float decay_coeff, float sustain_level, float release_coeff) {
-    /* Denormal flushing on entry */
-    if (fabsf(env->value) < 1e-15f) {
-        env->value = 0.0f;
-        if (env->stage == ENV_RELEASE) {
-            env->stage = ENV_IDLE;
-        }
-    }
-
+/* One sample of E (0..1); decay_step / release_step as from eg_step */
+static inline float adsr_process(adsr_t *env, float decay_step, float sustain_level, float release_step) {
+    float r;
     switch (env->stage) {
         case ENV_IDLE:
             env->value = 0.0f;
             break;
         case ENV_ATTACK:
-            /* Analog RC curve targeting 1.35 for snappy punch and immediate bite */
-            env->value = env->value * env->rate + (1.0f - env->rate) * 1.35f;
-            if (env->value >= 1.0f) {
+            env->pos += env->rate;
+            if (env->pos >= 1.0f) {
                 env->value = 1.0f;
                 env->stage = ENV_DECAY;
                 env->target = sustain_level;
+                env->pos = 0.0f;
+            } else {
+                r = 1.0f - env->pos;
+                env->value = 1.0f - r * r;
             }
             break;
         case ENV_DECAY:
-            /* True analog exponential decay curve */
-            env->value = env->value * decay_coeff + (1.0f - decay_coeff) * sustain_level;
-            if (fabsf(env->value) < 1e-15f) env->value = 0.0f;
-            if (fabsf(env->value - sustain_level) < 0.0005f) {
+            env->pos += decay_step;
+            if (env->pos >= 1.0f) {
                 env->value = sustain_level;
                 env->stage = ENV_SUSTAIN;
+            } else {
+                r = 1.0f - env->pos;
+                env->value = sustain_level + (1.0f - sustain_level) * r * r;
             }
             break;
         case ENV_SUSTAIN:
             env->value = sustain_level;
-            if (fabsf(env->value) < 1e-15f) env->value = 0.0f;
             break;
         case ENV_RELEASE:
-            /* True analog exponential release curve */
-            env->value = env->value * release_coeff;
-            if (env->value <= 0.0005f || fabsf(env->value) < 1e-15f) {
+            env->pos += release_step;
+            if (env->pos >= 1.0f) {
                 env->value = 0.0f;
                 env->stage = ENV_IDLE;
+            } else {
+                r = 1.0f - env->pos;
+                env->value = env->from * r * r;
             }
             break;
     }
 
-    if (isnan(env->value) || isinf(env->value)) env->value = 0.0f;
+    if (!isfinite(env->value)) env->value = 0.0f;
     return fmaxf(0.0f, fminf(1.0f, env->value));
 }
 
-/* Safety bound on the SVF integrator states. It must stay well above their normal range: the input is
- * tanh-limited to +-1 but a TPT integrator state reaches ~2x the output, and the band-pass output peaks
- * at 1/k (up to ~16 at full resonance). The old +-2 clamp chopped normal signals near the cutoff ceiling. */
-#define SVF_STATE_LIMIT 64.0f
+/* ---- Filter: measured on the VST (2026-10; tools/vst_ab.py filter) ------------------------------------------------
+ * Method: a 55 Hz saw's harmonics through every type over cutoff x resonance, each curve relative to the open
+ * high-pass, and ring-down times for the highest resonances.
+ * The plug-in's filter is a Chamberlin state-variable filter run once per sample, and that exact recurrence
+ *     lp += F * bp;   hp = x - lp - q * bp;   bp += F * hp
+ * reproduces its 12HPF and 12BPF curves to 0.06-0.13 dB at every setting tried (an analogue-matched filter,
+ * which the engine had, is 2 dB off near the top of the range and far more above it: the plug-in passes much
+ * more through a nearly-open high-pass). Its laws:
+ *   F  = Fc(cutoff) x FLT_F_RATIO[resonance]. Fc is the knob's coefficient at resonance 0: 2 pi fc / fs with fc
+ *        doubling every 12.03 knob steps (10.56 octaves over the knob, 32.7 Hz at 0) up to knob 70, then
+ *        levelling off to 0.915 at 110 (knob_fc). Resonance multiplies it: x 1.72 at 60, x 2.0 at
+ *        127, AFTER the bend (F reaches 1.9), which is how resonance raises the corner by an octave.
+ *   q  = FLT_DAMP[resonance]: 1.47 at 0, falling straight to 0.98 at 4, then about 1.05 (1 - res / 127)^2:
+ *        0.30 at 60, 0.05 at 100, 0.004 at 120, 0.00026 at 126 and 127 (a ring of seconds; flt_damp above 100).
+ *   gain = FLT_GAIN_DB[resonance], the same for every type: within 2 dB of flat to 84, then falling as fast as
+ *        the resonance rises, so the peak stops near +17 dB while everything else sinks (-40 dB at 127).
+ *   12HPF = gain x hp;   12BPF = gain x 1.32 x bp;
+ *   12LPF = gain x 2.94 x lp through the low-pass types' extra stage (FLT_LP_A0 below: a pole near 2.3-4.6 kHz
+ *           wherever the cutoff is, so an open 12LPF is 10 dB down at 10 kHz against an open 12HPF);
+ *   24LPF = the first core's lp x 2.19 through that stage with its gain held at 1, then a second identical
+ *           core's lp x FLT_STAGE2_DB[resonance] (the table's level is set by a sine in the passband).
+ * The filter is linear (the same curve at every input level), so the old input soft clip is gone. */
+#define SVF_STATE_LIMIT 1.0e6f /* a safety net only: at q 0.00026 the band state legitimately reaches thousands */
+#define FLT_POINTS 26
+static const float FLT_RES[FLT_POINTS] = { 0, 4, 6, 12, 18, 24, 30, 36, 42, 48, 54, 60, 66, 72, 78, 84, 90, 96, 100, 104, 108, 112, 116, 120, 124, 126 };   /* 127 is 126: the ring-down is the same to 3 figures */
+static const float FLT_F_RATIO[FLT_POINTS] = { 1.0000f, 1.1262f, 1.1526f, 1.2308f, 1.3053f, 1.3762f, 1.4423f, 1.5060f, 1.5649f, 1.6214f, 1.6731f,
+    1.7212f, 1.7656f, 1.8065f, 1.8438f, 1.8774f, 1.9075f, 1.9327f, 1.9483f, 1.9615f, 1.9736f, 1.9832f, 1.9916f, 1.9988f, 2.0024f, 2.0048f };
+static const float FLT_DAMP[FLT_POINTS] = { 1.4741f, 0.9828f, 0.9512f, 0.8599f, 0.7733f, 0.6912f, 0.6138f, 0.5409f, 0.4727f, 0.4090f, 0.3500f,
+    0.2955f, 0.2456f, 0.2004f, 0.1597f, 0.1237f, 0.0922f, 0.0653f, 0.0500f, 0.0368f, 0.0257f, 0.0164f, 0.0088f, 0.00413f, 0.00103f, 0.000255f };
+static const float FLT_GAIN_DB[FLT_POINTS] = { -0.08f, -0.06f, -0.07f, -0.17f, -0.37f, -0.64f, -0.96f, -1.28f, -1.56f, -1.75f, -1.81f,
+    -1.75f, -1.62f, -1.50f, -1.52f, -1.83f, -3.10f, -5.92f, -8.13f, -10.69f, -13.72f, -17.38f, -21.99f, -28.05f, -36.26f, -40.41f };
+static const float FLT_STAGE2_DB[FLT_POINTS] = { -5.50f, -5.56f, -5.54f, -5.58f, -5.62f, -5.68f, -5.85f, -6.22f, -6.58f, -7.22f, -8.26f,
+    -9.60f, -11.25f, -13.40f, -15.75f, -18.96f, -22.55f, -25.24f, -27.10f, -29.60f, -32.70f, -36.30f, -40.80f, -46.80f, -55.10f, -62.00f };
+#define FLT_BP_GAIN 1.3213f       /* +2.42 dB */
+#define FLT_LP_GAIN 2.1878f       /* +6.8 dB: the 24LPF's first stage */
+#define FLT_LP12_GAIN 2.938f      /* +9.4 dB: the 12LPF's core output, which is also what the distortion sees */
+/* The low-pass types' extra stage: an integrator with feedback, y += k (x - a y), with a = FLT_LP_A0 +
+ * FLT_LP_AF x F (F = the core's coefficient, resonance and modulation included). So its low-frequency gain is
+ * 1 / a, falling as the filter opens (-1.4 dB at knob 0, -2.9 at 80, -4.7 from 110 up, another 2.3 dB at high
+ * resonance), while above its corner (a x 2.0 kHz) the level stays put. Measured with a sine in the passband,
+ * clean against distorted (the distortion taps the core before this stage), over 8 cutoffs x 6 resonances and
+ * with the corner moved by the EG and by key track: 1 / a holds to 0.1 dB, 0.25 at knob 110. Its curve was
+ * checked with sines to 8.4 kHz: the 12LPF follows the step-invariant pole (0.5 dB; plain Euler is 2 dB bright,
+ * the trapezoid rule 1.7 dB dark at 8 kHz), the 24LPF the Euler step with the gain held at 1. */
+#define FLT_KICK 0.115f           /* the note-on kick to the core's band state, per unit of Q (a saw's peak = 1) */
+#define FLT_KICK_HZ 477.0f
+#define FLT_LP_A0 1.173f
+#define FLT_LP_AF 0.595f
+#define FLT_LP_STAGE_HZ 1990.0f
+/* With distortion on, the clipper is fed more than the clean output for every type but the high-pass (a sine
+ * small enough to stay linear, the same grid: exact to 0.01 dB): the band-pass x 1.75, the 12LPF's core alone
+ * (before its extra stage), the 24LPF x 3.285 / a. */
+#define DIST_BP_GAIN 1.750f
+#define DIST_LP24_GAIN 3.285f
+#define FLT_BASE_HZ 32.67f        /* the cutoff knob at 0 */
+#define FLT_KNOB_OCTAVES 10.56f   /* ... and its whole travel */
+#define FLT_EG_OCTAVES 7.98f      /* filter EG int +-63 = 96 knob steps (1.52 per unit, linear) */
+#define FLT_PATCH_OCTAVES 7.83f   /* an EG / LFO -> cutoff at +-63 and full source (94 knob steps) */
+#define FLT_F_BEND 0.915f
+#define FLT_F_MAX 1.95f
 
-/* Process single 2-pole TPT State Variable Filter with soft non-linear saturation
- * in the resonance feedback path and pre-filter drive stage, preserving low-end weight */
-static inline float svf_process_2pole(svf_t *svf, float in, float fc, float res, filter_type_t type, float fs) {
-    /* 1. NaN/Infinity sanitization on existing filter states */
-    if (isnan(svf->s1) || isinf(svf->s1)) svf->s1 = 0.0f;
-    if (isnan(svf->s2) || isinf(svf->s2)) svf->s2 = 0.0f;
-
-    /* 2. Denormal flushing on existing filter states */
-    if (fabsf(svf->s1) < 1e-15f) svf->s1 = 0.0f;
-    if (fabsf(svf->s2) < 1e-15f) svf->s2 = 0.0f;
-
-    /* 3. State clamping before feedback calculations */
-    svf->s1 = fmaxf(-SVF_STATE_LIMIT, fminf(SVF_STATE_LIMIT, svf->s1));
-    svf->s2 = fmaxf(-SVF_STATE_LIMIT, fminf(SVF_STATE_LIMIT, svf->s2));
-
-    /* Clamp cutoff frequency to Nyquist safe range */
-    if (isnan(fc) || isinf(fc)) fc = 1000.0f;
-    if (fc < 20.0f) fc = 20.0f;
-    if (fc > fs * 0.45f) fc = fs * 0.45f; /* the TPT SVF is stable up to Nyquist; keep tan() well conditioned */
-
-    /* g = tan(pi * fc / fs) */
-    float g = tanf((float)M_PI * fc / fs);
-    /* Resonance mapping: res in [0, 1] -> damping k from k0 down to k0 * 0.04. Non-finite or out-of-range
-     * values are sanitized so the feedback can never become negatively damped and blow up. */
-    if (!(res >= 0.0f)) res = 0.0f;
-    if (res > 1.0f) res = 1.0f;
-    /* Each LPF24 stage starts Butterworth (k = sqrt 2, Q 0.707, as measured on the microKORG at res 0);
-     * the 2-pole types start critically damped (k = 2). Resonance scales k down proportionally. */
-    float k;
-    if (type == FILTER_BP_12) {
-        /* Measured on the microKORG: Q 0.33 at res 0, 1.47 at res 63; exponential so it stays stable (Q ~6.8 at 127) */
-        k = tinyk_tuning.bpf_k0 * exp2f(-4.38f * res);
-    } else {
-        float k0 = (type == FILTER_LP_24) ? 1.4142f : 2.0f;
-        k = k0 * (1.0f - 0.5f * tinyk_tuning.res_damping_range * res);
+static float flt_table(const float *xs, const float *ys, int n, float x) {
+    if (x <= xs[0]) return ys[0];
+    for (int i = 1; i < n; i++) {
+        if (x <= xs[i]) return ys[i - 1] + (ys[i] - ys[i - 1]) * (x - xs[i - 1]) / (xs[i] - xs[i - 1]);
     }
-    if (k < 0.05f) k = 0.05f;
-
-    /* Sanitize and clamp input signal */
-    if (isnan(in) || isinf(in)) in = 0.0f;
-    in = fmaxf(-3.0f, fminf(3.0f, in));
-
-    /* Input soft clip with resonance gain compensation (compensating passband volume drop). Distortion is
-     * not here: it is in the amp section, after the filter (see the voice loop). */
-    float input_gain = 1.0f + res * 0.5f;
-    float v0 = fast_tanh(in * input_gain);
-
-    /* Zero-delay-feedback (TPT) SVF high-pass node: hp = (x - (k + g) s1 - s2) / (1 + g (g + k)).
-     * The (k + g) term matters: with k alone the solution was wrong by a g*s1 term that grows with the
-     * cutoff, and near the 13 kHz ceiling the filter went unstable and filled the band with hiss (a 131 Hz
-     * saw through LPF12 res 0.35 at 12.9 kHz had an 8 kHz centroid). The loop is linear, which is stable
-     * for any k > 0; the drive saturation stays on the input above. */
-    float denom = 1.0f + g * (g + k);
-    if (denom < 1e-6f) denom = 1e-6f;
-    float u = (v0 - (k + g) * svf->s1 - svf->s2) / denom;
-
-    /* Integrator bandpass and lowpass state updates */
-    float v1 = g * u + svf->s1;
-    float next_s1 = g * u + v1;
-
-    float v2 = g * v1 + svf->s2;
-    float next_s2 = g * v1 + v2;
-
-    /* NaN/Infinity sanitization and state clamping */
-    if (isnan(next_s1) || isinf(next_s1)) next_s1 = 0.0f;
-    if (isnan(next_s2) || isinf(next_s2)) next_s2 = 0.0f;
-    if (fabsf(next_s1) < 1e-15f) next_s1 = 0.0f;
-    if (fabsf(next_s2) < 1e-15f) next_s2 = 0.0f;
-
-    svf->s1 = fmaxf(-SVF_STATE_LIMIT, fminf(SVF_STATE_LIMIT, next_s1));
-    svf->s2 = fmaxf(-SVF_STATE_LIMIT, fminf(SVF_STATE_LIMIT, next_s2));
-
-    float out = 0.0f;
-    switch (type) {
-        case FILTER_LP_12:
-        case FILTER_LP_24:
-            out = v2;
-            break;
-        case FILTER_BP_12:
-            out = v1;
-            break;
-        case FILTER_HP_12:
-            out = u;
-            break;
-        default:
-            out = v2;
-            break;
-    }
-
-    DIAG_CHECK(out);
-    DIAG_CHECK(next_s1);
-    DIAG_CHECK(next_s2);
-    if (isnan(out) || isinf(out)) out = 0.0f;
-    return fmaxf(-2.0f, fminf(2.0f, out));
+    return ys[n - 1];
 }
+
+/* The Noise oscillator's own low-pass, fitted on the plug-in at 15 settings of Control 2 (a Chamberlin core fits
+ * each within 0.45 dB): frequency ratio and damping are the main filter's at resonance 4.5 + 122.5 c2 / 127 (so
+ * it never has the main filter's heavily damped first steps: q 0.96 and ratio 1.12 at 0), with a level of its own. */
+#define NOISE_POINTS 15
+static const float NOISE_RES[NOISE_POINTS] = { 0, 8, 16, 24, 32, 40, 48, 64, 80, 96, 104, 112, 120, 124, 127 };
+static const float NOISE_GAIN_DB[NOISE_POINTS] = { 0.00f, -0.06f, 0.01f, 0.05f, 0.20f, 0.27f, 0.25f, -0.12f, -2.05f, -4.33f, -7.18f,
+    -9.95f, -17.33f, -26.0f, -36.5f };
+
+/* The damping above resonance 100, where the table's straight lines between points are too coarse for a ring that
+ * lasts seconds: the plug-in's ring-down gives q = (0.00803 (128 - res))^2 at every cutoff, res stopping at 126
+ * (measured 100 .. 127: 0.0508, 0.0259, 0.0166, 0.0093, 0.00414, 0.00232, 0.00103, 0.000255, 0.000255). */
+static float flt_damp(float r127) {
+    if (r127 < 100.0f) return flt_table(FLT_RES, FLT_DAMP, FLT_POINTS, r127);
+    float u = 0.00803f * (128.0f - fminf(r127, 126.0f));
+    return u * u;
+}
+
+/* The cutoff knob's coefficient at resonance 0. Measured on the VST from the band-pass peak at resonance 110, 13
+ * knob positions from 50 up (sharp peaks, read to 0.1 %): the exponential law holds to knob 70, from 80 to 105 the
+ * coefficient rises in a straight line (0.019 a step), and from 110 it stays at 0.914. The smooth bend used
+ * before, Fn / sqrt(1 + (Fn / 0.915)^2), was 2 % high at 90 and 5-6 % low at 105-110 (a resonant peak at
+ * 15.8 kHz for the plug-in's 18.0). The table is in 44.1 kHz coefficients (the rate of every measurement here
+ * and of the Move), scaled to this rate. */
+static float knob_fc(float knob127, float fs) {
+    static const float K[8] = { 70, 80, 85, 90, 95, 100, 105, 110 };
+    static const float FC[8] = { 0.2606f, 0.4192f, 0.5141f, 0.6054f, 0.7006f, 0.7959f, 0.8804f, 0.9140f };
+    if (knob127 < 70.0f) return (2.0f * (float)M_PI * FLT_BASE_HZ / fs) * exp2f(knob127 * (FLT_KNOB_OCTAVES / 127.0f));
+    return fminf(0.99f, flt_table(K, FC, 8, knob127) * (44100.0f / fs));
+}
+
+/* One sample of the Chamberlin state-variable filter (s1 = band, s2 = low) */
+static inline void svf_core(svf_t *svf, float in, float F, float q, float *hp, float *bp, float *lp) {
+    if (!isfinite(svf->s1)) svf->s1 = 0.0;
+    if (!isfinite(svf->s2)) svf->s2 = 0.0;
+    if (!isfinite(in)) in = 0.0f;
+    double low = svf->s2 + (double)F * svf->s1;
+    double high = (double)in - low - (double)q * svf->s1;
+    double band = svf->s1 + (double)F * high;
+    if (fabs(low) < 1e-30) low = 0.0;
+    if (fabs(band) < 1e-30) band = 0.0;
+    svf->s2 = fmax(-(double)SVF_STATE_LIMIT, fmin((double)SVF_STATE_LIMIT, low));
+    svf->s1 = fmax(-(double)SVF_STATE_LIMIT, fmin((double)SVF_STATE_LIMIT, band));
+    *hp = (float)high; *bp = (float)svf->s1; *lp = (float)svf->s2;
+    DIAG_CHECK(*hp);
+    DIAG_CHECK(*bp);
+    DIAG_CHECK(*lp);
+}
+
+
 
 /* Exponential cutoff map: 0..1 -> ~15 Hz .. ~19.6 kHz (5.1 octaves per half-turn) */
 
 /* Soft-clipping saturation for the voice mix: unity gain for small signals, bounded at +/-1 */
+#ifdef TINYK_LEVEL_PROBE
+/* tools only (tools/probe_levels.c): the largest level into the voice-mix clip and into the output limiter */
+float tinyk_probe_mix, tinyk_probe_out;
+#endif
 static inline float soft_clip(float x) {
     return tanhf(x);
 }
 
-/* Build a single-cycle table for the Vox (formant) and DWGS (digital waveform) oscillators.
- * These are additive approximations, not the hardware's sampled waves. */
-static void build_wavetable(float *table, int wave, float dwgs01) {
+/* Build the single-cycle table of the Vox (formant) oscillator: an additive approximation, not the
+ * hardware's sampled wave. */
+static void build_wavetable(float *table) {
     enum { MAX_HARMONICS = 16 };
-    int idx = (int)(dwgs01 * 63.0f + 0.5f);
     float amp[MAX_HARMONICS + 1];
 
     for (int h = 1; h <= MAX_HARMONICS; h++) {
+        /* Two formant peaks over a saw-like rolloff */
         float fh = (float)h;
-        if (wave == OSC1_WAVE_VOX) {
-            /* Two formant peaks over a saw-like rolloff */
-            float f1 = (fh - 3.0f) / 1.2f;
-            float f2 = (fh - 9.0f) / 1.5f;
-            amp[h] = (1.0f / fh) * (0.3f + 4.0f * expf(-0.5f * f1 * f1) + 2.5f * expf(-0.5f * f2 * f2));
-        } else {
-            /* 8 spectral-peak positions x 8 rolloff slopes; odd indices thin out even harmonics */
-            float center = 1.0f + (float)(idx >> 3) * 1.6f;
-            float slope = 0.4f + 0.2f * (float)(idx & 7);
-            float peak = (fh - center) / 1.2f;
-            amp[h] = powf(fh, -slope) * (1.0f + 4.0f * expf(-0.5f * peak * peak));
-            if ((idx & 1) && (h % 2 == 0)) amp[h] *= 0.25f;
-        }
+        float f1 = (fh - 3.0f) / 1.2f;
+        float f2 = (fh - 9.0f) / 1.5f;
+        amp[h] = (1.0f / fh) * (0.3f + 4.0f * expf(-0.5f * f1 * f1) + 2.5f * expf(-0.5f * f2 * f2));
     }
 
     float peak_abs = 1e-6f;
@@ -629,6 +641,68 @@ static void build_wavetable(float *table, int wave, float dwgs01) {
         if (fabsf(acc) > peak_abs) peak_abs = fabsf(acc);
     }
     for (int i = 0; i < WAVETABLE_SIZE; i++) table[i] /= peak_abs;
+}
+
+/* DWGS: the 64 digital waveforms (dwgs_waves.h, Fourier series traced from the hardware's output) as
+ * band-limited tables. Each wave has DWGS_LEVELS tables, level l keeping the note's harmonics up to
+ * DWGS_HARMONICS >> l at dwgs_level_size(l) samples per period of the note; the oscillator reads the
+ * richest level whose top harmonic stays under Nyquist, with a 4-point Hermite interpolation (linear left
+ * images about 40 dB under the top harmonics, heard as aliasing on bright waves in the top octaves). A
+ * table spans the wave's `periods` (1 for most; a few waves repeat only every 2, 3 or 5 periods of the note)
+ * and wraps into DWGS_GUARD samples, one before and two after. Built once, at the first synth_init, and
+ * read-only afterwards: shared by every instance like the decoded banks. */
+#define DWGS_LEVELS 7
+#define DWGS_SAMPLES_PER_PERIOD 2048 /* the sum of dwgs_level_size over the levels */
+#define DWGS_GUARD 3
+
+static inline int dwgs_level_size(int level) {
+    int n = 1024 >> level;
+    return n < 32 ? 32 : n;
+}
+
+static float g_dwgs_pool[DWGS_TOTAL_PERIODS * DWGS_SAMPLES_PER_PERIOD + DWGS_WAVE_COUNT * DWGS_LEVELS * DWGS_GUARD];
+static const float *g_dwgs_table[DWGS_WAVE_COUNT][DWGS_LEVELS];
+static int g_dwgs_ready = 0;
+
+static void dwgs_build_tables(void) {
+    if (g_dwgs_ready) return;
+    float *out = g_dwgs_pool + 1;
+    for (int w = 0; w < DWGS_WAVE_COUNT; w++) {
+        const short *coef = DWGS_WAVES[w].coef;
+        int periods = DWGS_WAVES[w].periods;
+        for (int level = 0; level < DWGS_LEVELS; level++) {
+            int n = dwgs_level_size(level) * periods;
+            int top = (DWGS_HARMONICS >> level) * periods;
+            if (top > DWGS_WAVES[w].count) top = DWGS_WAVES[w].count;
+            for (int i = 0; i < n; i++) out[i] = 0.0f;
+            for (int h = 1; h <= top; h++) {
+                double a = (double)coef[2 * h - 2] * (double)DWGS_COEF_SCALE;
+                double b = (double)coef[2 * h - 1] * (double)DWGS_COEF_SCALE;
+                if (a == 0.0 && b == 0.0) continue;
+                /* a cos(h x) + b sin(h x), stepped by rotating (cos, sin) through one sample */
+                double step = 2.0 * M_PI * (double)h / (double)n;
+                double rc = cos(step), rs = sin(step), c = 1.0, sn = 0.0;
+                for (int i = 0; i < n; i++) {
+                    out[i] += (float)(a * c + b * sn);
+                    double nc = c * rc - sn * rs;
+                    sn = sn * rc + c * rs;
+                    c = nc;
+                }
+            }
+            out[-1] = out[n - 1];
+            out[n] = out[0];
+            out[n + 1] = out[1];
+            g_dwgs_table[w][level] = out;
+            out += n + DWGS_GUARD;
+        }
+    }
+    g_dwgs_ready = 1;
+}
+
+/* DWGS waveform number 0..63 of a timbre */
+static inline int dwgs_index(const timbre_extra_t *extra) {
+    int i = (int)(extra->dwgs * (float)(DWGS_WAVE_COUNT - 1) + 0.5f);
+    return i < 0 ? 0 : (i >= DWGS_WAVE_COUNT ? DWGS_WAVE_COUNT - 1 : i);
 }
 
 /* Copy one timbre's patch data into a parameter array and its extras */
@@ -659,6 +733,18 @@ static void apply_timbre(float *dst, timbre_extra_t *extra, const struct TimbreP
     extra->transpose_semi = (clamp01f(t->transpose) - 0.5f) * 48.0f;
     extra->noise_level = clamp01f(t->noise_level);
     extra->level = clamp01f(t->level);
+    if (t->amp_level > 0.0f) { /* the program records its three level knobs */
+        extra->lvl_osc1 = clamp01f((t->osc1_level * 128.0f - 1.0f) / 127.0f);
+        extra->lvl_osc2 = clamp01f((t->osc2_level * 128.0f - 1.0f) / 127.0f);
+        extra->lvl_amp = clamp01f((t->amp_level * 128.0f - 1.0f) / 127.0f);
+    } else {                   /* the built-in bank: only the mix and their product, so the louder one is taken as full */
+        float mix = clamp01f(t->osc_mix);
+        extra->lvl_osc1 = fminf(1.0f, 2.0f * (1.0f - mix));
+        extra->lvl_osc2 = fminf(1.0f, 2.0f * mix);
+        extra->lvl_amp = extra->level;
+    }
+    extra->mix_seen = clamp01f(t->osc_mix);
+    extra->level_seen = extra->level;
     extra->dwgs = clamp01f(t->dwgs);
     extra->osc1_ctrl[0] = clamp01f(t->osc1_ctrl1);
     extra->osc1_ctrl[1] = clamp01f(t->osc1_ctrl2);
@@ -702,7 +788,122 @@ static void arp_param_set(synth_engine_t *synth, int i, int v);
  * the output ducks over FLUSH_FADE_S, they are cleared at silence and the output comes back (no click). */
 #define FLUSH_FADE_S 0.006f
 #define FLUSH_AUDIBLE 0.0001f
+static int clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+#define NOISE_MIX_GAIN 5.48f   /* the mixer's noise at 127: its level below 3 kHz against a full-level saw, band by band */
+#define NOISE_LP_HZ 5500.0f
+#define SAW1_FUND_HZ 18.4f     /* Osc 1's saw (not Osc 2's): extra fundamental = this / f of a full-level sine */
+#define NOISE_OSC_GAIN 3.005f /* the Noise oscillator, open: 5.2 dB under the mixer's noise at 127 */
+#define DIST_GAIN 2.69f
+#define DIST_CLIP 1.55f /* clipped right down the fundamental is 1.97 x a full-level sine: 4 / pi x 1.55 */
+/* The voice mix runs at the plug-in's own level, where it is LINEAR: at 0.35 one held key reached the mix clip
+ * (a tanh) at a median 1.95 and eight keys at 4.8 over the 128 built-in programs (tools/probe_levels.c): every
+ * program was audibly saturated on the Move, the brightness tilt's edges most of all. At 0.03 one key peaks at a
+ * median 0.17 and eight keys reach 1.0 only in the loudest tenth of the programs. TINYK_OUTPUT_MAKEUP brings the
+ * level back up after the effects, in front of the output limiter, which is linear to 0.65. */
+#ifndef TINYK_MIX_GAIN
+#define TINYK_MIX_GAIN 0.03f
+#endif
+#ifndef TINYK_OUTPUT_MAKEUP
+#define TINYK_OUTPUT_MAKEUP 2.8f
+#endif
+
+/* The Osc 1, Osc 2 and Noise level knobs (0..1 = 0..127) as amplitude, measured on the VST: 0.082 at 16, 0.177
+ * at 32, 0.404 at 64, 0.682 at 96 (straight lines between). The Amp level knob is a plain square (0.254 at 64). */
+static float level_curve(float knob01) {
+    static const float K[6] = { 0.0f, 16.0f, 32.0f, 64.0f, 96.0f, 127.0f }, A[6] = { 0.0f, 0.082f, 0.177f, 0.404f, 0.682f, 1.0f };
+    float k = clamp01f(knob01) * 127.0f;
+    for (int i = 1; i < 6; i++) {
+        if (k <= K[i]) return A[i - 1] + (A[i] - A[i - 1]) * (k - K[i - 1]) / (K[i] - K[i - 1]);
+    }
+    return 1.0f;
+}
+
+/* The waves' own levels against a full-level sine (= 1.0), from their fundamentals on the VST: a square runs
+ * +-0.667 and a triangle +-1.333 (the plug-in's waves are matched in loudness, not in peak); a saw +-1. */
+static inline float osc_wave_gain(int square, int triangle) {
+    return square ? 0.667f : (triangle ? 1.333f : 1.0f);
+}
+#define XMOD_MAX_HZ 24000.0f   /* Osc 1 Sine cross modulation: the frequency deviation at full depth */
+#define PAN_SLEW_PER_S 1000.0f /* pan position, -1 .. +1, per second: left to right in 2 ms */
+
+/* Delay, measured on the VST with noise bursts (tools/vst_ab.py delay).
+ * Time (knob 0..127, not tempo-synced) is a fraction of a 65536-sample line at 48 kHz, 1.3653 s, in five straight
+ * segments: 0.01 at 0, 0.16 at 64, 0.40 at 110, 0.60 at 120, 0.80 at 125, then 1.0 at 126 and 1.2 at 127
+ * (13.7 ms ... 218 ms at the centre ... 1.64 s). Every one of the 128 values was measured.
+ * Depth (0..127) is one gain for both the first repeat and each further one (repeat n = dry * gain^n): straight
+ * from 0 to 0.300 at 64, then straight to 0.990 at 127, and scaled down as the delay gets longer, by
+ * 1 - (time as a fraction of the 1.3653 s line) / 4: the same factor at every depth, measured from 46 ms
+ * to 1.64 s (0.982 of the dry level at depth 127 and 46 ms, 0.693 at 1.64 s). */
+static float delay_time_s(float knob01) {
+    float k = clamp01f(knob01) * 127.0f, frac;
+    if (k <= 64.0f) frac = 0.01f + 0.15f * k / 64.0f;
+    else if (k <= 110.0f) frac = 0.16f + 0.24f * (k - 64.0f) / 46.0f;
+    else if (k <= 120.0f) frac = 0.40f + 0.02f * (k - 110.0f);
+    else if (k <= 125.0f) frac = 0.60f + 0.04f * (k - 120.0f);
+    else frac = 1.0f + 0.2f * (k - 126.0f);
+    return frac * (65536.0f / 48000.0f);
+}
+
+static float delay_gain(float depth01, float time_s) {
+    float d = clamp01f(depth01) * 127.0f;
+    float g = d <= 64.0f ? d * (0.3000f / 64.0f) : 0.3000f + (d - 64.0f) * ((0.9900f - 0.3000f) / 63.0f);
+    float frac = time_s * (48000.0f / 65536.0f);
+    return g * (1.0f - 0.25f * (frac > 1.2f ? 1.2f : frac));
+}
+
+/* EQ (program bytes 26-29): a Low and a Hi shelf on the stereo output, after the delay, as on the hardware.
+ * The frequencies are Korg's tables (MIDI implementation, T-11 / T-10). The shape is measured on the VST
+ * (noise through its EQ, tools/vst_ab.py eq): first-order shelves whose table frequency is the corner, 3 dB
+ * short of the full gain (+12 dB at 200 Hz reads +9.3 at 200, +6.0 at 400, +2.7 at 800), and a cut is the
+ * mirror image of the boost. A band at 0 dB is skipped, so a flat EQ leaves the output bit-identical. */
+static const float EQ_LOW_HZ[30] = {
+    40, 50, 60, 80, 100, 120, 140, 160, 180, 200, 220, 240, 260, 280, 300,
+    320, 340, 360, 380, 400, 420, 440, 460, 480, 500, 600, 700, 800, 900, 1000
+};
+static const float EQ_HI_HZ[30] = {
+    1000, 1250, 1500, 1750, 2000, 2250, 2500, 2750, 3000, 3250, 3500, 3750, 4000, 4250, 4500,
+    4750, 5000, 5250, 5500, 5750, 6000, 7000, 8000, 9000, 10000, 11000, 12000, 14000, 16000, 18000
+};
+
+static void eq_update(synth_engine_t *synth, float fs) {
+    int key = 1 + synth->eq_freq[0] + 30 * (synth->eq_freq[1] + 30 * ((synth->eq_gain[0] + 12) + 25 * (synth->eq_gain[1] + 12)));
+    if (key == synth->eq_key) return;
+    synth->eq_key = key;
+    for (int band = 0; band < 2; band++) {
+        float f0 = band ? EQ_HI_HZ[synth->eq_freq[1]] : EQ_LOW_HZ[synth->eq_freq[0]];
+        int db = synth->eq_gain[band];
+        /* Boost: H(s) = (s + G) / (s + 1) for the Low shelf, (G s + 1) / (s + 1) for the Hi shelf, s in units of
+         * the corner; bilinear transform, pre-warped at the corner. A cut is 1 / (the boost of the same size). */
+        float G = powf(10.0f, (float)(db < 0 ? -db : db) / 20.0f);
+        float K = 1.0f / tanf((float)M_PI * f0 / fs);
+        float n1 = band ? G : 1.0f, n0 = band ? 1.0f : G;
+        float num[2] = { n1 * K + n0, n0 - n1 * K }, den[2] = { K + 1.0f, 1.0f - K };
+        const float *b = db < 0 ? den : num, *a = db < 0 ? num : den;
+        float *c = synth->eq_coef[band];
+        c[0] = b[0] / a[0]; c[1] = b[1] / a[0]; c[2] = 0.0f; c[3] = a[1] / a[0]; c[4] = 0.0f;
+    }
+}
+
+static inline float eq_band(const float *c, float *z, float x) {
+    float y = c[0] * x + z[0];
+    z[0] = c[1] * x - c[3] * y + z[1];
+    z[1] = c[2] * x - c[4] * y;
+    if (fabsf(z[0]) < 1e-20f) z[0] = 0.0f;
+    if (fabsf(z[1]) < 1e-20f) z[1] = 0.0f;
+    return y;
+}
+
+/* A program's EQ into the instance (struct EqParams: index / 29, 0.5 + dB / 24) */
+static void eq_from_preset(synth_engine_t *synth, const struct EqParams *e) {
+    synth->eq_freq[0] = clampi((int)lroundf(e->low_freq * 29.0f), 0, 29);
+    synth->eq_freq[1] = clampi((int)lroundf(e->hi_freq * 29.0f), 0, 29);
+    synth->eq_gain[0] = clampi((int)lroundf((e->low_gain - 0.5f) * 24.0f), -12, 12);
+    synth->eq_gain[1] = clampi((int)lroundf((e->hi_gain - 0.5f) * 24.0f), -12, 12);
+}
+
 static void flush_effects(synth_engine_t *synth) {
+    memset(synth->eq_z, 0, sizeof(synth->eq_z));
     memset(synth->chorus_buf_l, 0, sizeof(synth->chorus_buf_l));
     memset(synth->chorus_buf_r, 0, sizeof(synth->chorus_buf_r));
     memset(synth->delay_buf_l, 0, sizeof(synth->delay_buf_l));
@@ -757,6 +958,8 @@ static void load_preset_from(synth_engine_t *synth, const struct Preset *p, int 
     synth->params[PARAM_CHORUS_MIX] = clamp01f(p->chorus_mix);
     synth->modfx_speed = clamp01f(p->modfx_speed);
     synth->modfx_type = (int)lroundf(clamp01f(p->modfx_type) * 2.0f);
+    eq_from_preset(synth, &p->eq);
+    synth->delay_type = clampi((int)lroundf(p->delay_type * 2.0f), 0, 2);
     synth->params[PARAM_DELAY_TIME] = clamp01f(p->delay_time);
     synth->params[PARAM_DELAY_FEEDBACK] = clamp01f(p->delay_feedback);
     synth->params[PARAM_DELAY_MIX] = clamp01f(p->delay_mix);
@@ -777,9 +980,6 @@ static void load_preset_from(synth_engine_t *synth, const struct Preset *p, int 
     }
     if (synth->params[PARAM_LFO2_RATE] <= 0.001f) {
         synth->params[PARAM_LFO2_RATE] = 0.3f;
-    }
-    if (synth->params[PARAM_VEL_SENS] <= 0.001f) {
-        synth->params[PARAM_VEL_SENS] = 0.3f;
     }
 
     /* Preset 0 specific audible defaults guarantee */
@@ -878,6 +1078,13 @@ int tinyk_dsp_bank_preset(int b, int idx, float *t1, float *t2, float *fx, char 
     snprintf(label, (size_t)label_len, "%s", p->label);
     return p->voice_mode;
 }
+/* Copies preset idx's struct EqParams floats (EQ_FIELDS order) and its delay_type into eq[5]; returns how many */
+int tinyk_dsp_bank_eq(int b, int idx, float *eq) {
+    const struct Preset *p = (b >= 1 && b <= g_syx_bank_count) ? &g_syx_banks[b - 1].presets[idx] : &FACTORY_PRESETS[idx];
+    memcpy(eq, &p->eq, sizeof p->eq);
+    eq[4] = p->delay_type;
+    return (int)(sizeof p->eq / sizeof(float)) + 1;
+}
 /* Copies preset idx's struct ArpParams floats (ARP_FIELDS order) into arp; returns how many */
 int tinyk_dsp_bank_arp(int b, int idx, float *arp) {
     const struct Preset *p = (b >= 1 && b <= g_syx_bank_count) ? &g_syx_banks[b - 1].presets[idx] : &FACTORY_PRESETS[idx];
@@ -889,6 +1096,7 @@ int tinyk_dsp_bank_arp(int b, int idx, float *arp) {
 /* Synthesizer Initialization */
 void synth_init(synth_engine_t *synth) {
     if (!synth) synth = default_synth();
+    dwgs_build_tables();
     memset(synth, 0, sizeof(*synth));
     synth->tempo_bpm = 0.0f;  /* unknown: the first block takes the host's tempo as is */
     synth->delay_sync_note = -1;
@@ -1043,9 +1251,37 @@ static int timbre_badge(const synth_engine_t *synth) {
     return is_layer ? edit_timbre(synth) + 1 : 0;
 }
 
-/* Everything the served labels depend on: the Program names (bank, category) and the timbre badge */
+/* In-place edits of the served ui_hierarchy: replace the first `from` by `to`, and cut the {...} object that
+ * starts with `head` together with one adjoining comma (its entries hold no nested objects or braces). */
+static void json_swap(char *buf, const char *from, const char *to) {
+    char *p = strstr(buf, from);
+    size_t lf = strlen(from), lt = strlen(to);
+    if (!p || lt > lf) return;
+    memcpy(p, to, lt);
+    memmove(p + lt, p + lf, strlen(p + lf) + 1);
+}
+static void json_cut_object(char *buf, const char *head) {
+    char *p = strstr(buf, head);
+    if (!p) return;
+    char *e = strchr(p, '}');
+    if (!e) return;
+    e++;
+    if (*e == ',') e++;
+    else if (p > buf && p[-1] == ',') p--;
+    memmove(p, e, strlen(e) + 1);
+}
+
+/* Osc page, second knob: Control 1, or the DWGS waveform selector while the edited layer's Wave 1 is DWGS
+ * (the hardware's Control knobs change role with the wave the same way) */
+static int dwgs_knob_shown(const synth_engine_t *synth) {
+    const float *p = synth->timbre_params[edit_timbre(synth)];
+    return (int)(p[PARAM_WAVE1] * (float)(OSC1_WAVE_COUNT - 1) + 0.5f) == OSC1_WAVE_DWGS;
+}
+
+/* Everything the served labels depend on: the Program names (bank, category), the timbre badge and the
+ * Osc page's third knob */
 static int label_context(const synth_engine_t *synth) {
-    return (synth->bank_file * 8 + synth->genre_category) * 3 + timbre_badge(synth);
+    return ((synth->bank_file * 8 + synth->genre_category) * 3 + timbre_badge(synth)) * 2 + dwgs_knob_shown(synth);
 }
 
 /* Selector params served to the host as enum knobs over a 0..1 engine value: options are the names the
@@ -1073,12 +1309,16 @@ typedef struct {
     const int *to_engine; /* an involution here, so it also maps engine mode -> option index */
 } selector_t;
 
+static const char *const ONOFF_NAMES[2] = { "Off", "On" };
+static const char *const ONOFF_SHORT[2] = { "OFF", "ON" };
 static const selector_t SELECTORS[] = {
     { "wave1", "Wave 1", WAVE1_NAMES, WAVE1_SHORT, 7, NULL },
     { "wave2", "Wave 2", WAVE2_NAMES, WAVE2_SHORT, 3, NULL },
     { "sync_ring", "Sync / Ring", SYNC_RING_NAMES, SYNC_RING_SHORT, 4, SYNC_RING_TO_ENGINE },
     { "filter_type", "Filter Type", FILTER_NAMES, FILTER_NAMES, 4, NULL },
     { "voice_assign", "Voice", ASSIGN_NAMES, ASSIGN_SHORT, 3, NULL },
+    /* the microKORG's distortion is a switch (timbre byte 27 bit 0); programs store it as 0 / 0.5, any value above 0 is on */
+    { "drive", "Distortion", ONOFF_NAMES, ONOFF_SHORT, 2, NULL },
 };
 
 static const selector_t *find_selector(const char *key) {
@@ -1174,11 +1414,41 @@ void synth_set_param(synth_engine_t *synth, const char *key, float val) {
         synth->timbre_extra[edit_timbre(synth)].noise_level = clamp01f(val);
         return;
     }
+    /* DWGS waveform 0..63 of the edited layer; dwgs_pick (the DWGS Waves list) also turns Wave 1 to DWGS */
+    if (strcmp(key, "dwgs_wave") == 0 || strcmp(key, "dwgs_pick") == 0) {
+        int i = (int)lroundf(val), t = edit_timbre(synth);
+        if (i < 0) i = 0;
+        if (i > DWGS_WAVE_COUNT - 1) i = DWGS_WAVE_COUNT - 1;
+        synth->timbre_extra[t].dwgs = (float)i / (float)(DWGS_WAVE_COUNT - 1);
+        if (key[5] == 'p') synth_set_param(synth, "wave1", (float)OSC1_WAVE_DWGS / (float)(OSC1_WAVE_COUNT - 1));
+        return;
+    }
     /* Mod Wheel knob (0..127) for a Move without a wheel: it sets the same patch source (7) as CC1, so
      * whichever moved last wins and an external wheel takes over as soon as it sends */
     if (strcmp(key, "mod_wheel") == 0) {
         synth->modwheel_src = clamp01f(val / 127.0f);
         return;
+    }
+    if (strcmp(key, "delay_type") == 0) { /* 0 Stereo, 1 Cross, 2 L/R (program byte 22) */
+        synth->delay_type = clampi((int)lroundf(val), 0, 2);
+        return;
+    }
+    /* Osc 1's Control 1 / 2 of the edited layer, 0..127 as on the hardware: what they do depends on the wave
+     * (pulse width and its LFO1 depth, the Vox formant, the Noise oscillator's cutoff and resonance, the sine's
+     * cross-modulation ...). Control 1 is also the pulse's width parameter. */
+    if (strcmp(key, "osc1_ctrl1") == 0 || strcmp(key, "osc1_ctrl2") == 0) {
+        int t = edit_timbre(synth), which = key[9] == '2';
+        float v01 = clamp01f(val / 127.0f);
+        synth->timbre_extra[t].osc1_ctrl[which] = v01;
+        if (!which) synth_set_param(synth, "pulse_width", v01);
+        return;
+    }
+    /* EQ: frequency index 0..29 (Low 40..1000 Hz, Hi 1..18 kHz), gain -12..+12 dB */
+    if (strncmp(key, "eq_", 3) == 0) {
+        int band = strncmp(key + 3, "hi_", 3) == 0 ? 1 : (strncmp(key + 3, "low_", 4) == 0 ? 0 : -1);
+        const char *field = band < 0 ? "" : key + (band ? 6 : 7);
+        if (strcmp(field, "freq") == 0) { synth->eq_freq[band] = clampi((int)lroundf(val), 0, 29); return; }
+        if (strcmp(field, "gain") == 0) { synth->eq_gain[band] = clampi((int)lroundf(val), -12, 12); return; }
     }
     if (strcmp(key, "modfx_speed") == 0) { /* Mod FX LFO speed, 0..1 (program byte 23 / 127) */
         synth->modfx_speed = clamp01f(val);
@@ -1354,12 +1624,23 @@ float synth_get_param(const synth_engine_t *synth, const char *key) {
     if (strcmp(key, "noise_level") == 0) {
         return synth->timbre_extra[edit_timbre(synth)].noise_level;
     }
+    if (strcmp(key, "dwgs_wave") == 0 || strcmp(key, "dwgs_pick") == 0) {
+        return (float)dwgs_index(&synth->timbre_extra[edit_timbre(synth)]);
+    }
     if (strcmp(key, "mod_wheel") == 0) { /* follows CC1 too */
         return synth->modwheel_src * 127.0f;
     }
     if (strcmp(key, "arp_on") == 0) {
         return (float)synth->arp.set.on;
     }
+    if (strcmp(key, "delay_type") == 0) return (float)synth->delay_type;
+    if (strcmp(key, "osc1_ctrl1") == 0 || strcmp(key, "osc1_ctrl2") == 0) {
+        return roundf(synth->timbre_extra[edit_timbre(synth)].osc1_ctrl[key[9] == '2'] * 127.0f);
+    }
+    if (strcmp(key, "eq_low_freq") == 0) return (float)synth->eq_freq[0];
+    if (strcmp(key, "eq_hi_freq") == 0) return (float)synth->eq_freq[1];
+    if (strcmp(key, "eq_low_gain") == 0) return (float)synth->eq_gain[0];
+    if (strcmp(key, "eq_hi_gain") == 0) return (float)synth->eq_gain[1];
     if (strcmp(key, "modfx_speed") == 0) return synth->modfx_speed;
     if (strcmp(key, "modfx_type") == 0) return (float)synth->modfx_type;
     if (strncmp(key, "arp_step", 8) == 0 && key[8] >= '1' && key[8] <= '8' && key[9] == '\0') {
@@ -1405,22 +1686,28 @@ static float voice_rand_phase(synth_engine_t *synth) {
 
 static void voice_fresh_state(synth_engine_t *synth, voice_t *v) {
     v->filter_svf[0].s1 = v->filter_svf[0].s2 = v->filter_svf[1].s1 = v->filter_svf[1].s2 = 0.0f;
+    v->flt_shelf_x1 = v->flt_shelf_y1 = 0.0f;
+    v->noise_svf.s1 = v->noise_svf.s2 = 0.0f;
     v->osc1_phase = voice_rand_phase(synth);
+    v->osc1_cycle = 0;
+    v->pan_fresh = 1;
     v->osc2_phase = voice_rand_phase(synth);
     v->sub_phase = voice_rand_phase(synth);
     v->amp_env.value = 0.0f;
     v->filter_env.value = 0.0f;
     v->declick_pos = 0;
-    v->vel_gain = v->velocity;
+    v->vel_gain = 1.0f;
+    /* the note-on kick to the filter (FLT_KICK): 0.5 .. 2 times its typical size, either sign */
+    v->flt_kick = exp2f(2.0f * voice_rand_phase(synth) - 1.0f) * (voice_rand_phase(synth) < 0.5f ? -1.0f : 1.0f);
 }
 
-/* A timbre's voices: in Layer mode t and t + 2 (two per timbre), in Single mode all four */
+/* A timbre's voices: in Layer mode every second one (t, t + 2, ...: half each), in Single mode all of them */
 static int timbre_voices(const synth_engine_t *synth, int t, int *idx) {
     int is_layer = (synth->params[PARAM_VOICE_MODE] > 0.5f) || (synth->voice_mode == 1);
     if (is_layer) {
-        idx[0] = t;
-        idx[1] = t + 2;
-        return 2;
+        int n = 0;
+        for (int i = t; i < NUM_VOICES; i += 2) idx[n++] = i;
+        return n;
     }
     for (int i = 0; i < NUM_VOICES; i++) idx[i] = i;
     return NUM_VOICES;
@@ -1434,7 +1721,14 @@ static void group_voice_start(synth_engine_t *synth, voice_t *v, int t, uint8_t 
     int is_layer = (synth->params[PARAM_VOICE_MODE] > 0.5f) || (synth->voice_mode == 1);
     bool was_active = v->active && (v->amp_env.stage != ENV_IDLE);
     bool was_gated = was_active && v->gate;
-    float place = n > 1 ? 2.0f * (float)k / (float)(n - 1) - 1.0f : 0.0f; /* -1 .. +1 */
+    /* Unison, measured on the VST (4 voices): the voices sit at -d, -d/2, +d/2, +d cents for a detune of d,
+     * each at a full voice's level (the stack is 6 dB over one voice), all in the centre; the same four in
+     * Layer mode (measured: a layered unison timbre is 5.8 dB over its poly level). */
+    float place = 0.0f;
+    if (n > 1) {
+        int half = n / 2, step = k < half ? k - half : k - half + 1 - (n & 1); /* 4: -2 -1 +1 +2; 2: -1 +1 */
+        place = (float)step / (float)half;
+    }
     v->active = true;
     v->gate = true;
     v->note = note;
@@ -1443,9 +1737,9 @@ static void group_voice_start(synth_engine_t *synth, voice_t *v, int t, uint8_t 
     v->timbre_index = t;
     v->is_timbre_2 = is_layer ? t : 0;
     v->layer_partner = -1;
-    v->unison_cents = 0.5f * place * x->unison_cents * tinyk_tuning.unison_cents_scale;
-    v->unison_pan = place * tinyk_tuning.unison_spread;
-    v->unison_gain = 1.0f / sqrtf((float)n);
+    v->unison_cents = place * x->unison_cents;
+    v->unison_pan = 0.0f;
+    v->unison_gain = 1.0f;
     v->kill = false;
     if (!was_active || synth->timbre_params[t][PARAM_PORTAMENTO] < 0.005f) v->current_pitch = target_pitch;
     v->target_pitch = target_pitch;
@@ -1478,7 +1772,7 @@ static void group_note_on(synth_engine_t *synth, int t, uint8_t note, float vel0
     synth->mono_count[t] = c;
 
     int idx[NUM_VOICES], n = timbre_voices(synth, t, idx);
-    int stack = (x->assign == ASSIGN_UNISON) ? n : 1;
+    int stack = (x->assign == ASSIGN_UNISON) ? (n < UNISON_STACK ? n : UNISON_STACK) : 1;
     int retrigger = !held_before || x->multi_trigger;
     for (int k = 0; k < stack; k++) {
         group_voice_start(synth, &synth->voices[idx[k]], t, note, vel01, target_pitch, atk1_coef, atk2_coef, k, stack, retrigger);
@@ -1513,18 +1807,22 @@ static void group_note_off(synth_engine_t *synth, int t, uint8_t note) {
     }
 }
 
-/* Layer mode, one timbre: its voice for a note among its two (timbre t uses voices t and t + 2): the one already
- * playing the note, else an idle one, else the released one with the lower level, else the older */
+/* Layer mode, one timbre: its voice for a note among its own (timbre_voices): the one already playing the note,
+ * else an idle one, else the released one with the lowest level, else the oldest */
 static int layer_voice_for(const synth_engine_t *synth, int t, uint8_t note) {
-    const voice_t *a = &synth->voices[t], *b = &synth->voices[t + 2];
-    if (a->active && a->note == note) return t;
-    if (b->active && b->note == note) return t + 2;
-    if (!a->active || a->amp_env.stage == ENV_IDLE) return t;
-    if (!b->active || b->amp_env.stage == ENV_IDLE) return t + 2;
-    if (!a->gate && !b->gate) return (a->amp_env.value <= b->amp_env.value) ? t : t + 2;
-    if (!a->gate) return t;
-    if (!b->gate) return t + 2;
-    return (a->age <= b->age) ? t : t + 2;
+    int idx[NUM_VOICES], n = timbre_voices(synth, t, idx);
+    int released = -1, oldest = idx[0];
+    for (int k = 0; k < n; k++) {
+        const voice_t *v = &synth->voices[idx[k]];
+        if (v->active && v->note == note) return idx[k];
+    }
+    for (int k = 0; k < n; k++) {
+        const voice_t *v = &synth->voices[idx[k]];
+        if (!v->active || v->amp_env.stage == ENV_IDLE) return idx[k];
+        if (!v->gate && (released < 0 || v->amp_env.value < synth->voices[released].amp_env.value)) released = idx[k];
+        if (v->age < synth->voices[oldest].age) oldest = idx[k];
+    }
+    return released >= 0 ? released : oldest;
 }
 
 /* Starts one timbre's voice in Layer mode (the single-timbre counterpart of the paired start below) */
@@ -1595,7 +1893,7 @@ static void voice_note_on(synth_engine_t *synth, uint8_t note, uint8_t velocity,
     int is_layer_mode = (params[PARAM_VOICE_MODE] > 0.5f);
 
     if (is_layer_mode) {
-        /* Layer mode: each timbre in its own two voices (t and t + 2), as its voice assign says */
+        /* Layer mode: each timbre in its own half of the voices, as its voice assign says */
         for (int t = 0; t < 2; t++) {
             if (!((mask >> t) & 1)) continue;
             float atk1 = t ? t2_atk1_coef : t1_atk1_coef, atk2 = t ? t2_atk2_coef : t1_atk2_coef;
@@ -1603,11 +1901,11 @@ static void voice_note_on(synth_engine_t *synth, uint8_t note, uint8_t velocity,
             else group_note_on(synth, t, note, vel01, target_pitch, atk1, atk2);
         }
     } else if (synth->timbre_extra[0].assign != ASSIGN_POLY) {
-        /* Single mode, Mono or Unison: one voice, or all four stacked */
+        /* Single mode, Mono or Unison: one voice, or UNISON_STACK of them */
         group_note_on(synth, 0, note, vel01, target_pitch, t1_atk1_coef, t1_atk2_coef);
     } else {
         /* =========================================================
-         * SINGLE MODE (4-Voice Polyphonic Engine)
+         * SINGLE MODE (polyphonic over all the voices)
          * ========================================================= */
         float portamento = synth->timbre_params[0][PARAM_PORTAMENTO];
         int voice_idx = -1;
@@ -1951,7 +2249,7 @@ void synth_all_notes_off(synth_engine_t *synth) {
  * staged around -12..-8 dBFS: -6.9 dB brings a TinyK track level with them. The calibration tools build the engine
  * with -DTINYK_OUTPUT_HEADROOM=1.0f to keep comparing against the VST takes at unity. */
 #ifndef TINYK_OUTPUT_HEADROOM
-#define TINYK_OUTPUT_HEADROOM 0.45f
+#define TINYK_OUTPUT_HEADROOM 0.9f
 #endif
 
 /* Soft-knee saturation / tanh master limiter to guarantee no digital wrap-around clipping */
@@ -1976,14 +2274,28 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
  *     chorus_center_ms +- depth * chorus_depth_ms; the wet copy is added to the dry signal (chorus_wet). Fitted on the
  *     VST's A.11 at speed 44 / 80 (ref_a11_modfx_speed44 / 80): a triangle sweep of about 2..8 ms, the wet takes 2-4 dB
  *     above the dry one, L/R correlation 0.19 / 0.07 (dry 0.47).
- *   Ensemble: three sine-modulated taps 120 degrees apart, the middle one shared, ENS_* (chosen, not measured).
+ *   Ensemble: four taps sweeping 8 .. 12 ms on one sine LFO (measured: see modfx_process).
  *   Phaser: six first-order all-pass stages per channel swept exponentially by a triangle LFO (right channel a
  *     quarter cycle on), with feedback, summed with the dry signal at 0.707 each, PHASER_* (chosen, not measured). */
-#define ENS_CENTER_MS   7.0f
-#define ENS_DEPTH_MS    1.6f
-#define PHASER_LO_HZ    250.0f
-#define PHASER_OCTAVES  4.0f
-#define PHASER_FEEDBACK 0.55f
+#define ENS_WET         0.763f   /* 1 / sqrt(1 + 0.75^2 + 0.4^2): the three taps a side sum to the wet level */
+#define PHASER_LO_HZ    490.0f
+#define PHASER_HI_HZ    3100.0f
+
+/* Rates measured on the VST, every 8 knob steps (straight lines between).
+ * LFO 1 / 2 frequency (a triangle LFO -> pan, the level's period): 0.016 Hz at 0, 0.25 at 24, 1.75 at 40, 5.0 at
+ * 64, then doubling every 12 steps (33 Hz at 96, 82 at 112; the top two points continue that line, the pan
+ * could not follow them). The old 0.05 x 600^knob was 4-5 x too slow from the middle up.
+ * Mod FX speed (the phase wobble of a sine through the chorus at full depth): its own, slower curve. */
+static const float LFO_RATE_HZ[17] = { 0.0157f, 0.0900f, 0.1696f, 0.2502f, 0.8302f, 1.7502f, 2.7506f, 3.7500f, 4.9978f, 8.1793f,
+    12.9755f, 20.5917f, 32.7045f, 51.9048f, 82.4155f, 130.8f, 196.0f };
+static const float MODFX_RATE_HZ[17] = { 0.0454f, 0.0454f, 0.0504f, 0.0926f, 0.1927f, 0.4078f, 0.7937f, 1.4297f, 2.3958f, 3.8194f,
+    5.7986f, 8.4722f, 11.9792f, 16.4931f, 22.1528f, 27.1528f, 31.5f };
+static float rate_table(const float *hz, float knob01) {
+    float k = clamp01f(knob01) * 127.0f;
+    if (k >= 120.0f) return hz[15] + (hz[16] - hz[15]) * (k - 120.0f) / 7.0f;
+    int i = (int)(k / 8.0f);
+    return hz[i] + (hz[i + 1] - hz[i]) * (k / 8.0f - (float)i);
+}
 
 static inline float modfx_tri(float ph) { /* phase 0..1 -> triangle -1 (0) .. +1 (0.5) */
     ph -= floorf(ph);
@@ -1991,52 +2303,119 @@ static inline float modfx_tri(float ph) { /* phase 0..1 -> triangle -1 (0) .. +1
 }
 
 static inline float chorus_tap(const float *buf, uint32_t wpos, float delay) {
+    /* 4-point Hermite: a straight line between samples dulled the tap (and, fed back, every pass of it) */
     float rpos = (float)wpos - delay;
     while (rpos < 0.0f) rpos += (float)CHORUS_BUFFER_SIZE;
-    int i0 = (int)rpos % CHORUS_BUFFER_SIZE, i1 = (i0 + 1) % CHORUS_BUFFER_SIZE;
-    float fr = rpos - floorf(rpos);
-    return buf[i0] * (1.0f - fr) + buf[i1] * fr;
+    int i1 = (int)rpos % CHORUS_BUFFER_SIZE;
+    float x = rpos - floorf(rpos);
+    float y0 = buf[(i1 + CHORUS_BUFFER_SIZE - 1) % CHORUS_BUFFER_SIZE], y1 = buf[i1];
+    float y2 = buf[(i1 + 1) % CHORUS_BUFFER_SIZE], y3 = buf[(i1 + 2) % CHORUS_BUFFER_SIZE];
+    float c1 = 0.5f * (y2 - y0);
+    float c2 = y0 - 2.5f * y1 + 2.0f * y2 - 0.5f * y3;
+    float c3 = 0.5f * (y3 - y0) + 1.5f * (y1 - y2);
+    return ((c3 * x + c2) * x + c1) * x + y1;
 }
 
 /* One sample of the program's Mod FX on (l, r); wpos is where this sample was written into the chorus line */
 static inline void modfx_process(synth_engine_t *s, float *l, float *r, uint32_t wpos, float depth, float fs) {
-    float hz = tinyk_tuning.modfx_rate_lo_hz * powf(tinyk_tuning.modfx_rate_span, s->modfx_speed);
+    float hz = rate_table(MODFX_RATE_HZ, s->modfx_speed);
     s->chorus_lfo_phase += hz / fs;
     if (s->chorus_lfo_phase >= 1.0f) s->chorus_lfo_phase -= 1.0f;
     float ph = s->chorus_lfo_phase, ms = fs * 0.001f, maxd = (float)(CHORUS_BUFFER_SIZE - 4);
-    if (s->modfx_type == 2) { /* Phaser */
+    if (s->modfx_type == 2) {
+        /* Phaser, measured on the VST (noise through it against the dry spectrum, held at three depths and
+         * tracked over the sweep). Its response is two notches with a resonant peak between them over a
+         * lowered floor, the same on both sides (the plug-in's is mono), and it is reproduced here as exactly
+         * that, three biquads, because no all-pass-chain-with-feedback tried fits it (2-8 stages, either sign:
+         * 5-8 dB off; this form: 0.8-1.1 dB at depth 40, 80 and 127):
+         *   notches at fc / 2.36 and fc x 2.36, Q 0.37;
+         *   a peak at fc: gain 12.5 + 0.035 d + 0.00085 d^2 dB, Q 0.38 + 4e-7 d^3 (+15 dB / 0.41 at 40, +31 / 1.2 at 127);
+         *   floor -1.0 - 0.0324 d dB.
+         * fc sweeps 490 Hz .. 3.1 kHz whatever the depth, at its own rate, 0.00149 x speed^2 Hz (0.86 Hz at 24,
+         * 3.43 at 48, 13.7 at 96). The sweep's shape (a triangle in octaves) is assumed. */
+        float sp = s->modfx_speed * 127.0f, d127 = depth * 127.0f;
+        s->chorus_lfo_phase += (0.00149f * sp * sp - hz) / fs; /* its own rate, not the chorus's added above */
+        if (s->chorus_lfo_phase >= 1.0f) s->chorus_lfo_phase -= 1.0f;
+        if (s->chorus_lfo_phase < 0.0f) s->chorus_lfo_phase += 1.0f;
+        if (s->phaser_tick-- <= 0) { /* new coefficients every 16 samples */
+            s->phaser_tick = 15;
+            float sweep = 0.5f + 0.5f * modfx_tri(s->chorus_lfo_phase);
+            float fc = PHASER_LO_HZ * powf(PHASER_HI_HZ / PHASER_LO_HZ, sweep);
+            float f0[3] = { fc / 2.36f, fc * 2.36f, fc };
+            float pq = 0.38f + 4.0e-7f * d127 * d127 * d127;
+            float A = powf(10.0f, (12.5f + 0.035f * d127 + 0.00085f * d127 * d127) / 40.0f);
+            for (int k = 0; k < 3; k++) {
+                float w0 = 2.0f * (float)M_PI * fminf(f0[k], 0.45f * fs) / fs, cw = cosf(w0);
+                float al = sinf(w0) / (2.0f * (k < 2 ? 0.37f : pq));
+                float b0 = k < 2 ? 1.0f : 1.0f + al * A, b2 = k < 2 ? 1.0f : 1.0f - al * A;
+                float a0 = k < 2 ? 1.0f + al : 1.0f + al / A, a2 = k < 2 ? 1.0f - al : 1.0f - al / A;
+                float *c = s->phaser_coef[k];
+                c[0] = b0 / a0; c[1] = -2.0f * cw / a0; c[2] = b2 / a0; c[3] = -2.0f * cw / a0; c[4] = a2 / a0;
+            }
+            s->phaser_floor = powf(10.0f, (-1.0f - 0.0324f * d127) / 20.0f);
+        }
         float in[2] = { *l, *r };
         for (int c = 0; c < 2; c++) {
-            float sweep = 0.5f + 0.5f * modfx_tri(ph + 0.25f * (float)c);
-            float fc = fminf(PHASER_LO_HZ * exp2f(PHASER_OCTAVES * depth * sweep), 0.45f * fs);
-            float t = tanf((float)M_PI * fc / fs), a = (t - 1.0f) / (t + 1.0f);
-            float x = in[c] + PHASER_FEEDBACK * depth * s->phaser_fb[c];
-            for (int k = 0; k < 6; k++) { /* y = a x + x[n-1] - a y[n-1], as one state */
-                float y = a * x + s->phaser_ap[c][k];
-                s->phaser_ap[c][k] = x - a * y;
+            float x = in[c] * s->phaser_floor;
+            for (int k = 0; k < 3; k++) { /* transposed direct form II; phaser_ap holds the two states of each */
+                const float *q = s->phaser_coef[k];
+                float *st = &s->phaser_ap[c][2 * k];
+                float y = q[0] * x + st[0];
+                st[0] = q[1] * x - q[3] * y + st[1];
+                st[1] = q[2] * x - q[4] * y;
                 x = y;
             }
-            s->phaser_fb[c] = fast_tanh(x);
-            in[c] = 0.7071f * (in[c] + x); /* full-depth notches, about the dry level on average */
+            in[c] = isfinite(x) ? x : 0.0f;
         }
         *l = in[0];
         *r = in[1];
         return;
     }
-    if (s->modfx_type == 1) { /* Ensemble */
-        float t0 = chorus_tap(s->chorus_buf_l, wpos, fminf(maxd, (ENS_CENTER_MS + depth * ENS_DEPTH_MS * sinf(2.0f * (float)M_PI * ph)) * ms));
-        float t1 = 0.5f * (chorus_tap(s->chorus_buf_l, wpos, fminf(maxd, (ENS_CENTER_MS + depth * ENS_DEPTH_MS * sinf(2.0f * (float)M_PI * (ph + 1.0f / 3.0f))) * ms))
-                         + chorus_tap(s->chorus_buf_r, wpos, fminf(maxd, (ENS_CENTER_MS + depth * ENS_DEPTH_MS * sinf(2.0f * (float)M_PI * (ph + 1.0f / 3.0f))) * ms)));
-        float t2 = chorus_tap(s->chorus_buf_r, wpos, fminf(maxd, (ENS_CENTER_MS + depth * ENS_DEPTH_MS * sinf(2.0f * (float)M_PI * (ph + 2.0f / 3.0f))) * ms));
-        *l += tinyk_tuning.chorus_wet * 0.8f * (t0 + 0.5f * t1);
-        *r += tinyk_tuning.chorus_wet * 0.8f * (t2 + 0.5f * t1);
+    if (s->modfx_type == 1) {
+        /* Ensemble, measured on the VST (a 27.5 Hz saw through it: every copy of its edge is a tap, followed
+         * over a whole LFO cycle at speed 24). Four taps on ONE sine LFO, all sweeping 8 .. 12 ms at every
+         * depth: 10 + 2 sin(p) and 10 + 2 sin(p + 60 deg), and the mirror image of each, 10 - 2 sin(..). The
+         * first pair's taps go one to each side; the second pair's go to both, about 2 : 1, the mirror image
+         * favouring the other side. Depth is only the mix: noise through it sits 1.6 / 3.0 / 3.5 / 2.9 dB
+         * under dry at depth 32 / 64 / 96 / 127 with L/R correlation 0.98 / 0.90 / 0.75 / 0.62. The tap
+         * weights (1, 0.75, 0.4) are read off the edge copies to about 25 %. */
+        float d127 = depth * 127.0f;
+        /* the mix that gives those levels and correlations with these taps: the wet side rises in a straight
+         * line (0.55 at 127), the dry falls to 0.65 at 64 and 0.46 at 127 */
+        static const float ENS_D[5] = { 0, 32, 64, 96, 127 }, ENS_DRY[5] = { 1.0f, 0.82f, 0.65f, 0.524f, 0.46f };
+        float dry = flt_table(ENS_D, ENS_DRY, 5, d127), wet = 0.00433f * d127 * ENS_WET;
+        float sa = 2.0f * ms * sinf(2.0f * (float)M_PI * ph), sb = 2.0f * ms * sinf(2.0f * (float)M_PI * (ph + 1.0f / 6.0f));
+        float c = 10.0f * ms;
+        float ap = 0.5f * (chorus_tap(s->chorus_buf_l, wpos, c + sa) + chorus_tap(s->chorus_buf_r, wpos, c + sa));
+        float am = 0.5f * (chorus_tap(s->chorus_buf_l, wpos, c - sa) + chorus_tap(s->chorus_buf_r, wpos, c - sa));
+        float bp = 0.5f * (chorus_tap(s->chorus_buf_l, wpos, c + sb) + chorus_tap(s->chorus_buf_r, wpos, c + sb));
+        float bm = 0.5f * (chorus_tap(s->chorus_buf_l, wpos, c - sb) + chorus_tap(s->chorus_buf_r, wpos, c - sb));
+        *l = dry * *l + wet * (ap + 0.75f * bp + 0.4f * bm);
+        *r = dry * *r + wet * (am + 0.75f * bm + 0.4f * bp);
         return;
     }
-    /* Chorus/Flanger */
-    float dl = (tinyk_tuning.chorus_center_ms + depth * tinyk_tuning.chorus_depth_ms * modfx_tri(ph)) * ms;
-    float dr = (tinyk_tuning.chorus_center_ms + depth * tinyk_tuning.chorus_depth_ms * modfx_tri(ph + 0.5f)) * ms;
-    *l += tinyk_tuning.chorus_wet * chorus_tap(s->chorus_buf_l, wpos, fmaxf(1.0f, fminf(maxd, dl)));
-    *r += tinyk_tuning.chorus_wet * chorus_tap(s->chorus_buf_r, wpos, fmaxf(1.0f, fminf(maxd, dr)));
+    /* Chorus/Flanger, measured on the VST (noise and a sine through it, depth 8..127 at a slow speed). One
+     * moving tap per side on a triangle LFO, the sides in anti-phase. Depth (d, 0..127) does three things:
+     *   the sweep moves down and narrows: 9.2 - 0.068 d  ..  24.85 - 0.159 d ms (6.5-18.5 ms at 40, 2.4-9.0
+     *     at 100, 0.6-4.6 at 127: a chorus that turns into a flanger);
+     *   the mix goes from dry to an even blend by 40, holds to 80, then on to nearly all wet
+     *     (dry 1 - d / 80, then 0.5, then 0.5 - 0.0073 (d - 80); wet = 1 - dry);
+     *   above 40 the tap is fed back, 0.0104 (d - 40): 0.62 at 100, 0.90 at 127.
+     * These reproduce the measured level (-3.2 dB at 40, -1.2 at 100, +3.8 at 127) and L/R correlation
+     * (0.5, 0.17, 0.01) of noise; the split between wet level and feedback is inferred from those two, and
+     * the feedback's sign and everything below depth 30 (too faint to track) are assumed. */
+    float d127 = depth * 127.0f;
+    float lo_ms = 9.2f - 0.068f * d127, hi_ms = 24.85f - 0.159f * d127;
+    float dry = d127 <= 40.0f ? 1.0f - d127 / 80.0f : (d127 <= 80.0f ? 0.5f : 0.5f - 0.0073f * (d127 - 80.0f));
+    float fb = d127 > 40.0f ? fminf(0.92f, 0.0104f * (d127 - 40.0f)) : 0.0f;
+    float dl = (lo_ms + (hi_ms - lo_ms) * (0.5f + 0.5f * modfx_tri(ph))) * ms;
+    float dr = (lo_ms + (hi_ms - lo_ms) * (0.5f + 0.5f * modfx_tri(ph + 0.5f))) * ms;
+    float wl = chorus_tap(s->chorus_buf_l, wpos, fmaxf(3.0f, fminf(maxd, dl)));
+    float wr = chorus_tap(s->chorus_buf_r, wpos, fmaxf(3.0f, fminf(maxd, dr)));
+    s->chorus_buf_l[wpos] += fb * wl;
+    s->chorus_buf_r[wpos] += fb * wr;
+    *l = dry * *l + (1.0f - dry) * wl;
+    *r = dry * *r + (1.0f - dry) * wr;
 }
 
 /* One block: the session tempo once, then the audio in segments that end where an arpeggiator step or gate end
@@ -2091,7 +2470,7 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
     const float lfo_slew_step = 2.0f / (LFO_SLEW_S * fs);
     const float lfo_smooth_k = 1.0f - expf(-1.0f / (LFO_SMOOTH_S * fs));
     const float vel_glide_k = 1.0f - expf(-1.0f / (VEL_GLIDE_S * fs));
-    const float kill_coef = expf(-4.60517f / (KILL_RELEASE_S * fs));
+    const float kill_coef = 1.0f / (KILL_RELEASE_S * fs); /* a release step: the whole fade in KILL_RELEASE_S */
 
 #ifdef TINYK_TEMPO_LOG
     /* Diagnostic builds only (-DTINYK_TEMPO_LOG): what the host reports, logged at start and on every change.
@@ -2159,17 +2538,26 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
         int osc2_wave;
         float detune_semi;
         int sync_ring_mode;
+        int lfo2_rate_modulated; /* a patch aims at LFO2 FREQ */
         int xmod_on;            /* Sine cross-mod pitch envelope (sine_xmod_applies) */
         float osc_mix;
+        float pw_knob;                        /* the Pulse Width knob, 0..1 */
+        float noise_ratio, noise_k, noise_gain; /* the Noise oscillator's own filter: resonance = Control 2 */
+        float gain_osc1, gain_osc2, gain_amp; /* the three level knobs as gains (level_curve, the wave's own level, amp^2) */
+        float amp_knob;       /* the amp level knob itself, 0..1: applied once more after the distortion */
         float sub_level;
         float glide_coeff;
         float transpose_semi;
         float noise_level;
         float level;
         float pan;              /* timbre pan, -1..+1 */
-        const float *wavetable;
+        const float *wavetable;                 /* Vox */
+        const float *const *dwgs;               /* the DWGS wave's tables, one per level */
+        int dwgs_periods;                       /* periods of the note in one DWGS table; 1 for other waves */
 
-        float cutoff_pitch;   /* knob position in octaves above cutoff_base_hz */
+        float cutoff_pitch;   /* the knob's corner in octaves above FLT_BASE_HZ, its top-end bend included */
+        float cutoff_pitch_max; /* the knob's own top: modulation cannot push the cutoff past it */
+        float flt_ratio, flt_k, flt_gain, flt_gain2; /* resonance: corner ratio, damping 1 / Q, output gain, 24LPF stage 2 gain */
         float resonance;
         filter_type_t filter_type;
         float keytrack;
@@ -2223,26 +2611,55 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
         const timbre_extra_t *extra = &synth->timbre_extra[is_layer_mode ? t : 0];
 
         t_cfg[t].osc1_wave = (int)(wave1_p * (float)(OSC1_WAVE_COUNT - 1) + 0.5f);
-        t_cfg[t].pw = 0.5f + 0.45f * pw_p; /* 0..1 -> 50%..95% duty */
+        t_cfg[t].pw = 0.5f + 0.5f * pw_p;
+        t_cfg[t].pw_knob = pw_p;
+        {
+            float c2 = clamp01f(extra->osc1_ctrl[1]) * 127.0f;
+            float r127 = 4.5f + c2 * (122.5f / 127.0f);
+            t_cfg[t].noise_ratio = flt_table(FLT_RES, FLT_F_RATIO, FLT_POINTS, r127);
+            t_cfg[t].noise_k = flt_damp(r127);
+            t_cfg[t].noise_gain = powf(10.0f, flt_table(NOISE_RES, NOISE_GAIN_DB, NOISE_POINTS, c2) / 20.0f);
+        }
         t_cfg[t].osc2_wave = (int)(wave2_p * (float)(OSC2_WAVE_COUNT - 1) + 0.5f);
         t_cfg[t].detune_semi = (detune_p - 0.5f) * 48.0f;
         t_cfg[t].sync_ring_mode = (int)(sync_ring_p * (float)(SYNC_RING_COUNT - 1) + 0.5f);
-        t_cfg[t].xmod_on = sine_xmod_applies(extra, t_cfg[t].osc1_wave, t_cfg[t].sync_ring_mode);
         t_cfg[t].transpose_semi = extra->transpose_semi;
         t_cfg[t].noise_level = extra->noise_level;
         t_cfg[t].level = extra->level;
         t_cfg[t].pan = extra->pan;
 
-        /* Vox / DWGS wavetable: rebuild only when the selection changes */
+        /* Vox wavetable: built on first use */
         t_cfg[t].wavetable = synth->wavetable[t];
-        if (t_cfg[t].osc1_wave == OSC1_WAVE_VOX || t_cfg[t].osc1_wave == OSC1_WAVE_DWGS) {
-            int key = t_cfg[t].osc1_wave * 64 + (int)(extra->dwgs * 63.0f + 0.5f);
-            if (synth->wavetable_key[t] != key) {
-                build_wavetable(synth->wavetable[t], t_cfg[t].osc1_wave, extra->dwgs);
-                synth->wavetable_key[t] = key;
-            }
+        if (t_cfg[t].osc1_wave == OSC1_WAVE_VOX && synth->wavetable_key[t] != OSC1_WAVE_VOX) {
+            build_wavetable(synth->wavetable[t]);
+            synth->wavetable_key[t] = OSC1_WAVE_VOX;
         }
+        t_cfg[t].dwgs = g_dwgs_table[dwgs_index(extra)];
+        t_cfg[t].dwgs_periods = (t_cfg[t].osc1_wave == OSC1_WAVE_DWGS) ? DWGS_WAVES[dwgs_index(extra)].periods : 1;
         t_cfg[t].osc_mix = osc_mix_p;
+        {
+            /* The Osc Mix and Level knobs are the page's view of the three level knobs a program stores (Osc 1,
+             * Osc 2, Amp). A turn of either is folded back into them: Mix re-splits the two oscillators under
+             * the louder one's level, Level sets the amp knob. */
+            timbre_extra_t *lv = &synth->timbre_extra[t];
+            float loud = fmaxf(lv->lvl_osc1, lv->lvl_osc2);
+            if (isnan(lv->mix_seen)) lv->mix_seen = osc_mix_p;
+            if (isnan(lv->level_seen)) lv->level_seen = lv->level;
+            if (fabsf(osc_mix_p - lv->mix_seen) > 1e-6f) {
+                if (loud < 0.01f) loud = 1.0f;
+                lv->lvl_osc1 = loud * fminf(1.0f, 2.0f * (1.0f - osc_mix_p));
+                lv->lvl_osc2 = loud * fminf(1.0f, 2.0f * osc_mix_p);
+                lv->mix_seen = osc_mix_p;
+            }
+            if (fabsf(lv->level - lv->level_seen) > 1e-6f) {
+                lv->lvl_amp = clamp01f(lv->level / fmaxf(loud, 0.01f));
+                lv->level_seen = lv->level;
+            }
+            t_cfg[t].gain_osc1 = level_curve(lv->lvl_osc1) * osc_wave_gain(t_cfg[t].osc1_wave == OSC1_WAVE_SQUARE, t_cfg[t].osc1_wave == OSC1_WAVE_TRIANGLE);
+            t_cfg[t].gain_osc2 = level_curve(lv->lvl_osc2) * osc_wave_gain(t_cfg[t].osc2_wave == OSC2_WAVE_SQUARE, t_cfg[t].osc2_wave == OSC2_WAVE_TRIANGLE);
+            t_cfg[t].gain_amp = lv->lvl_amp * lv->lvl_amp;
+            t_cfg[t].amp_knob = lv->lvl_amp;
+        }
         t_cfg[t].sub_level = sub_level_p;
 
         t_cfg[t].glide_coeff = 1.0f;
@@ -2254,10 +2671,22 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
         t_cfg[t].resonance = resonance_p;
         t_cfg[t].filter_type = (filter_type_t)(int)(filter_type_p * (float)(FILTER_TYPE_COUNT - 1) + 0.5f);
         /* BPF12's centre follows the knob on its own curve (fitted on VST takes at cutoff 32/64/96, res 63) */
-        if (t_cfg[t].filter_type == FILTER_BP_12)
-            t_cfg[t].cutoff_pitch = clamp01f(cutoff_p) * tinyk_tuning.bpf_cutoff_octaves + tinyk_tuning.bpf_cutoff_offset;
-        else
-            t_cfg[t].cutoff_pitch = clamp01f(cutoff_p) * tinyk_tuning.cutoff_octaves;
+        /* The knob's coefficient (knob_fc: exponential, then a straight line, then flat from 110); modulation
+         * then moves that corner in plain octaves, up to the knob's own top (measured: an EG or key track
+         * from a high knob setting moves the corner by its full depth, 1.45 octaves for EG -10 from knob 100,
+         * where bending the sum gave 0.79). */
+        {
+            float f0 = 2.0f * (float)M_PI * FLT_BASE_HZ / fs;
+            t_cfg[t].cutoff_pitch_max = log2f(knob_fc(127.0f, fs) / f0);
+            t_cfg[t].cutoff_pitch = log2f(knob_fc(clamp01f(cutoff_p) * 127.0f, fs) / f0);
+        }
+        {
+            float r127 = clamp01f(resonance_p) * 127.0f;
+            t_cfg[t].flt_ratio = flt_table(FLT_RES, FLT_F_RATIO, FLT_POINTS, r127);
+            t_cfg[t].flt_k = flt_damp(r127);
+            t_cfg[t].flt_gain = powf(10.0f, flt_table(FLT_RES, FLT_GAIN_DB, FLT_POINTS, r127) / 20.0f);
+            t_cfg[t].flt_gain2 = powf(10.0f, flt_table(FLT_RES, FLT_STAGE2_DB, FLT_POINTS, r127) / 20.0f);
+        }
         t_cfg[t].keytrack = keytrack_p;
         t_cfg[t].env_int = env_int_p;
         t_cfg[t].drive = drive_p;
@@ -2273,15 +2702,57 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
 
         t_cfg[t].extra = extra;
         for (int p = 0; p < 4; p++) {
-            /* Pan has its own depth curve: the measured 2.4 (pitch / cutoff) left +20 at a +-0.7 dB swing */
-            float a = extra->patch_int[p];
-            float curve = (extra->patch_dst[p] == PATCH_DST_PAN) ? tinyk_tuning.patch_pan_curve : tinyk_tuning.patch_int_curve;
-            t_cfg[t].patch_amt[p] = copysignf(powf(fabsf(a), curve), a);
+            /* Patch depth against intensity, measured on the VST (2026-10). The curve depends on the SOURCE's
+             * family as well as on the destination; each amount below scales the destination's range where it
+             * is used (pitch x 24 semitones, cutoff x FLT_PATCH_OCTAVES, pan on -1..+1, Ctrl 1 on the knob,
+             * amp as gain = (1 + amount x source)^2 with the bracket held to 0..2). u = |int| / 63.
+             *   EG1, EG2, LFO1, LFO2 (a square LFO at seven intensities; the EGs checked on pitch):
+             *     pitch, osc 2 tune: 0.04 / 0.20 / 1 / 3 / 5 / 12 / 24 semitones at 4 / 8 / 16 / 24 / 32 / 48 / 63
+             *     cutoff: 7.83 octaves x u^2 (24 knob steps at 32);  amp: u^2;  pan: 2 u^2 (hard over from 45)
+             *     Ctrl 1, noise: u^2, by analogy, not measured
+             *   Velocity, keyboard (and, unmeasured, pitch bend and mod wheel):
+             *     pitch, osc 2 tune: straight to 12 semitones at 48, then straight to 24 at 63
+             *     cutoff: 2.94 octaves x (0.596 u + 0.404 u^2);  amp: 1.955 x the pitch curve / 24
+             *     pan: 1.183 u + 0.801 u^2;  Ctrl 1: 0.596 u + 0.404 u^2;  noise: the pitch curve, roughly
+             * LFO2 FREQ: the intensity moves LFO2's rate KNOB, one step per unit at a source of 1 (see the LFO
+             * loop in the sample loop). (The old single u^2.4 was close to the EG / LFO family
+             * for cutoff, and wrong for pitch: +16 gave 0.9 semitones for either family's 1 or 4.) */
+            static const float PITCH_EG_LFO_I[8] = { 0, 4, 8, 16, 24, 32, 48, 63 };
+            static const float PITCH_EG_LFO_ST[8] = { 0.0f, 0.043f, 0.199f, 1.0f, 3.0f, 5.0f, 12.0f, 24.0f };
+            float a = extra->patch_int[p], u = fabsf(a), i63 = u * 63.0f, amt;
+            int slow = extra->patch_src[p] <= PATCH_SRC_LFO2; /* the EG / LFO family */
+            float lin = i63 <= 48.0f ? i63 / 96.0f : 0.5f + (i63 - 48.0f) / 30.0f;
+            float mix = 0.596f * u + 0.404f * u * u;
+            switch (extra->patch_dst[p]) {
+                case PATCH_DST_PITCH: case PATCH_DST_OSC2_PITCH:
+                    amt = slow ? flt_table(PITCH_EG_LFO_I, PITCH_EG_LFO_ST, 8, i63) / 24.0f : lin;
+                    break;
+                case PATCH_DST_CUTOFF:
+                    amt = slow ? u * u : (2.94f / FLT_PATCH_OCTAVES) * mix;
+                    break;
+                case PATCH_DST_AMP:
+                    amt = slow ? u * u : 1.955f * lin;
+                    break;
+                case PATCH_DST_PAN:
+                    amt = slow ? 2.0f * u * u : 1.183f * u + 0.801f * u * u;
+                    break;
+                case PATCH_DST_OSC1_CTRL1:
+                    amt = slow ? u * u : mix;
+                    break;
+                case PATCH_DST_NOISE:
+                    amt = slow ? u * u : lin;
+                    break;
+                default:
+                    amt = powf(u, tinyk_tuning.patch_int_curve);
+                    break;
+            }
+            t_cfg[t].patch_amt[p] = copysignf(amt, a);
         }
         int lfo2_rate_modulated = 0;
         for (int p = 0; p < 4; p++) {
             if (extra->patch_dst[p] == PATCH_DST_LFO2_FREQ && extra->patch_int[p] != 0.0f) lfo2_rate_modulated = 1;
         }
+        t_cfg[t].lfo2_rate_modulated = lfo2_rate_modulated;
         for (int l = 0; l < 2; l++) {
             float hz;
             if (extra->lfo_sync_note[l] >= 0) {
@@ -2296,34 +2767,37 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
                     synth->patch_lfo[t][l].phase = (float)(cycles - floor(cycles));
                 }
             } else {
-                hz = 0.05f * powf(600.0f, extra->lfo_rate[l]); /* same 0.05..30 Hz curve as the UI LFOs */
+                hz = rate_table(LFO_RATE_HZ, extra->lfo_rate[l]);
             }
             t_cfg[t].lfo_dt[l] = hz / fs;
         }
     }
 
-    /* LFO Frequencies: 0.05 Hz to 30 Hz */
-    float lfo1_freq = 0.05f * powf(600.0f, lfo1_rate_p);
-    float lfo2_freq = 0.05f * powf(600.0f, lfo2_rate_p);
+    /* LFO frequencies: the measured knob curve (LFO_RATE_HZ) */
+    float lfo1_freq = rate_table(LFO_RATE_HZ, lfo1_rate_p);
+    float lfo2_freq = rate_table(LFO_RATE_HZ, lfo2_rate_p);
     float lfo1_dt = lfo1_freq / fs;
     float lfo2_dt = lfo2_freq / fs;
 
-    /* Delay config. The hardware has one delay depth that sets both the repeats and the level;
-     * depth 0 means the delay is off. Feedback is capped at 0.6 so repeats die away instead of
-     * building into a pseudo-reverb wash. */
+    /* Delay config (delay_time_s, delay_gain: measured on the VST). The hardware has one delay depth that sets
+     * both the repeats and their level; depth 0 means the delay is off. */
     float target_delay_samples;
     if (synth->delay_sync_note >= 0) {
         /* tempo-synced: the Delay Time knob steps the time base (1/32 .. 1/1) at the session tempo */
         int base = (int)lroundf(clamp01f(delay_time_p) * 14.0f);
         target_delay_samples = 240.0f / synth->tempo_bpm * DELAY_SYNC_NOTES[base] * fs;
-        target_delay_samples = fmaxf(100.0f, fminf((float)(DELAY_BUFFER_SIZE - 2), target_delay_samples));
     } else {
-        target_delay_samples = 100.0f + delay_time_p * (float)(DELAY_FREE_MAX_SAMPLES - 200);
+        target_delay_samples = delay_time_s(delay_time_p) * fs;
     }
-    float delay_feedback = fminf(delay_fdbk_p * 0.75f, 0.6f);
-    float delay_send = delay_mix_p * tinyk_tuning.delay_send_scale;
+    /* a whole number of samples: reading between samples would low-pass every repeat a little more */
+    target_delay_samples = floorf(fmaxf(100.0f, fminf((float)(DELAY_BUFFER_SIZE - 2), target_delay_samples)) + 0.5f);
+    float delay_feedback = delay_gain(delay_fdbk_p, target_delay_samples / fs);
+    float delay_send = delay_gain(delay_mix_p, target_delay_samples / fs);
+    eq_update(synth, fs);
     int delay_on = (delay_mix_p > 0.005f);
 
+    /* The low-pass types' fixed one-pole low-pass: y += a (x - y) */
+    float lp_stage_w = 2.0f * (float)M_PI * FLT_LP_STAGE_HZ / fs;
     /* Brightness tilt coefficients: bilinear first-order high shelf H(s) = (G s + 1) / (s + 1), prewarped at
      * tilt_hz. Unity at DC, G toward Nyquist. */
     float tilt_b0, tilt_b1, tilt_a1;
@@ -2334,10 +2808,11 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
         tilt_b1 = (K - G) / (1.0f + K);
         tilt_a1 = (K - 1.0f) / (1.0f + K);
     }
-    /* The audible noise's pre-shaping: the inverse of the same shelf at noise_tilt_db (see heard_noise below) */
+    /* The audible noise's pre-shaping: the inverse of the tilt, then the plug-in's own roll-off (see heard_noise) */
     float noise_b0, noise_b1, noise_a1;
+    float noise_lp_a = 1.0f - expf(-2.0f * (float)M_PI * NOISE_LP_HZ / fs);
     {
-        float G = powf(10.0f, tinyk_tuning.noise_tilt_db / 20.0f);
+        float G = powf(10.0f, tinyk_tuning.tilt_db / 20.0f);
         float K = tanf((float)M_PI * fminf(tinyk_tuning.tilt_hz, 0.49f * fs) / fs);
         noise_b0 = (G + K) / (1.0f + K);
         noise_b1 = (K - G) / (1.0f + K);
@@ -2370,33 +2845,55 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
         noise_state ^= noise_state << 5;
         synth->noise_state = noise_state;
         float white_noise = (float)(int32_t)noise_state * (1.0f / 2147483648.0f);
-        /* The noise you hear keeps part of the brightness tilt: the tilt models the VST oscillators' extra top end
-         * and on raw noise added ~18 dB around 17 kHz (A.21's off-beat hat came out level with the kick, thin
-         * hiss), while fully whitened noise left the hat 21 dB under the kick, against 8.7 dB on the VST
-         * (ref_a21_timbre2_drum_c3). So the audible noise is pre-shaped by the inverse of a lower shelf,
-         * noise_tilt_db (1 + a1 z^-1) / (b0 + b1 z^-1), stable since the shelf's zero is inside the unit circle.
-         * S&H keeps the raw source. */
-        float heard_noise = (white_noise + noise_a1 * synth->noise_x1) / noise_b0 - (noise_b1 / noise_b0) * synth->noise_y1;
+        /* The noise you hear. The brightness tilt further down models the plug-in's oscillators and its noise has
+         * none of it, so the noise first goes through the tilt's inverse, (1 + a1 z^-1) / (b0 + b1 z^-1) (stable:
+         * the shelf's zero is inside the unit circle). The plug-in's noise is not white either: flat to 3 kHz,
+         * then -1, -2, -6, -9 dB at 4.8, 6.8, 9.6, 13.6 kHz, which a one-pole low-pass at NOISE_LP_HZ follows
+         * within 2 dB. S&H keeps the raw source. */
+        float flat_noise = (white_noise + noise_a1 * synth->noise_x1) / noise_b0 - (noise_b1 / noise_b0) * synth->noise_y1;
         synth->noise_x1 = white_noise;
-        synth->noise_y1 = heard_noise;
+        synth->noise_y1 = flat_noise;
+        synth->noise_lp += noise_lp_a * (flat_noise - synth->noise_lp);
+        float heard_noise = synth->noise_lp;
 
-        /* Patch-matrix LFOs, per timbre. LFO2's rate can itself be a patch destination; only the
-         * timbre-wide sources (LFO1, pitch bend, mod wheel) can drive it, since it is shared by the timbre's voices. */
+        /* Patch-matrix LFOs, per timbre. LFO2's rate can itself be a patch destination. Measured on the VST
+         * (a constant source of 1 into LFO2 FREQ, the vibrato rate read off a sine, 17 settings from three knob
+         * positions): the patch moves the rate KNOB by intensity x source, one knob step per unit, to 1 %. The
+         * LFOs here are one per timbre, so a per-voice source (an EG, velocity, the keyboard) is taken from the
+         * timbre's newest voice. A tempo-synced LFO2 is left alone (not measured). */
         float plfo[2][2] = { { 0.0f, 0.0f }, { 0.0f, 0.0f } };
         for (int t = 0; t < (is_layer_mode ? 2 : 1); t++) {
             const timbre_extra_t *ex = t_cfg[t].extra;
-            float lfo2_fmod = 0.0f;
-            for (int p = 0; p < 4; p++) {
-                if (ex->patch_dst[p] != PATCH_DST_LFO2_FREQ || ex->patch_int[p] == 0.0f) continue;
-                float sv = 0.0f;
-                if (ex->patch_src[p] == PATCH_SRC_LFO1) sv = synth->patch_lfo[t][0].out;
-                else if (ex->patch_src[p] == PATCH_SRC_PITCH_BEND) sv = synth->bend_src;
-                else if (ex->patch_src[p] == PATCH_SRC_MOD_WHEEL) sv = synth->modwheel_src;
-                lfo2_fmod += t_cfg[t].patch_amt[p] * sv;
+            float lfo2_dt = t_cfg[t].lfo_dt[1];
+            if (t_cfg[t].lfo2_rate_modulated && ex->lfo_sync_note[1] < 0) {
+                const voice_t *lead = NULL;
+                for (int vi = 0; vi < NUM_VOICES; vi++) {
+                    const voice_t *c = &synth->voices[vi];
+                    if (c->active && c->timbre_index == t && (!lead || c->age >= lead->age)) lead = c;
+                }
+                float knob_shift = 0.0f;
+                for (int p = 0; p < 4; p++) {
+                    if (ex->patch_dst[p] != PATCH_DST_LFO2_FREQ || ex->patch_int[p] == 0.0f) continue;
+                    float sv = 0.0f;
+                    switch (ex->patch_src[p]) {
+                        case PATCH_SRC_EG1:        sv = lead ? lead->filter_env.value : 0.0f; break;
+                        case PATCH_SRC_EG2:        sv = lead ? lead->amp_env.value : 0.0f; break;
+                        case PATCH_SRC_LFO1:       sv = synth->patch_lfo[t][0].out; break;
+                        case PATCH_SRC_VELOCITY:   sv = lead ? lead->velocity : 0.0f; break;
+                        case PATCH_SRC_KBD:
+                            sv = lead ? ((float)lead->note + (float)(synth->octave_transpose * 12) + t_cfg[t].transpose_semi - 60.0f) / 43.0f : 0.0f;
+                            break;
+                        case PATCH_SRC_PITCH_BEND: sv = synth->bend_src; break;
+                        case PATCH_SRC_MOD_WHEEL:  sv = synth->modwheel_src; break;
+                        default: break;
+                    }
+                    knob_shift += ex->patch_int[p] * (63.0f / 127.0f) * sv;
+                }
+                lfo2_dt = rate_table(LFO_RATE_HZ, ex->lfo_rate[1] + knob_shift) / fs;
             }
             for (int l = 0; l < 2; l++) {
                 lfo_t *lf = &synth->patch_lfo[t][l];
-                lf->phase += t_cfg[t].lfo_dt[l] * (l == 1 ? exp2f(4.0f * lfo2_fmod) : 1.0f);
+                lf->phase += l == 1 ? lfo2_dt : t_cfg[t].lfo_dt[0];
                 if (lf->phase >= 1.0f) {
                     lf->phase -= floorf(lf->phase);
                     lf->sh_value = white_noise; /* sample & hold from the deterministic noise source */
@@ -2432,6 +2929,11 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
              * previous sample (the envelopes are advanced further down). */
             float pmod[PATCH_DST_COUNT] = { 0.0f };
             float amp_gain = 1.0f;
+            /* The note every keyboard follower sees (the KBD patch source, filter key track, the Noise
+             * oscillator's cutoff): the played key moved by the timbre's transpose. Measured on the VST: with
+             * transpose +12 the tracked filter and the Noise oscillator sit an octave up, and KBD -> pitch -48
+             * holds C4 at every transpose. */
+            float kbd_note = (float)v->note + (float)(synth->octave_transpose * 12) + cfg->transpose_semi;
             for (int p = 0; p < 4; p++) {
                 float amt = cfg->patch_amt[p];
                 if (amt == 0.0f) continue;
@@ -2441,8 +2943,20 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
                     case PATCH_SRC_EG2:      sv = v->amp_env.value; break;
                     case PATCH_SRC_LFO1:     sv = plfo[t_idx][0]; break;
                     case PATCH_SRC_LFO2:     sv = plfo[t_idx][1]; break;
-                    case PATCH_SRC_VELOCITY: sv = v->velocity; break;
-                    case PATCH_SRC_KBD:      sv = ((float)v->note - 60.0f) / 64.0f; break;
+                    /* Velocity, measured: 0..1 for pitch, pan and Ctrl 1, but for cutoff and amp it is zero at
+                     * velocity 80 and runs to +1 at 127 (-0.34 at 64, -1.68 at 1). Keyboard: one unit per octave
+                     * from C4 on a pitch route (+32 gives exactly 8 semitones per octave), a quarter of that on
+                     * a cutoff route; other destinations are assumed like cutoff. */
+                    case PATCH_SRC_VELOCITY: {
+                        int d = cfg->extra->patch_dst[p];
+                        sv = (d == PATCH_DST_CUTOFF || d == PATCH_DST_AMP) ? (v->velocity * 127.0f - 80.0f) / 47.0f : v->velocity;
+                        break;
+                    }
+                    case PATCH_SRC_KBD: {
+                        int d = cfg->extra->patch_dst[p];
+                        sv = (kbd_note - 60.0f) / ((d == PATCH_DST_PITCH || d == PATCH_DST_OSC2_PITCH) ? 12.0f : 43.0f);
+                        break;
+                    }
                     case PATCH_SRC_PITCH_BEND: sv = synth->bend_src; break;
                     case PATCH_SRC_MOD_WHEEL:  sv = synth->modwheel_src; break;
                     default:                 sv = 0.0f; break;
@@ -2450,7 +2964,8 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
                 if (cfg->extra->patch_dst[p] == PATCH_DST_AMP) amp_gain *= fmaxf(0.0f, 1.0f + amt * sv);
                 else pmod[cfg->extra->patch_dst[p]] += amt * sv;
             }
-            amp_gain = fminf(amp_gain * amp_gain, 1.0f / fmaxf(cfg->level, 0.05f));
+            amp_gain = fminf(amp_gain, 2.0f); /* the plug-in's ceiling: x 4 after squaring */
+            amp_gain *= amp_gain;
 
             /* Portamento Pitch Glide */
             v->current_pitch += (v->target_pitch - v->current_pitch) * cfg->glide_coeff;
@@ -2461,8 +2976,6 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
 
             float final_note1 = v->current_pitch + cfg->transpose_semi + pitch_mod;
             float freq1 = note_to_freq(final_note1);
-            /* Sine cross-mod as a pitch envelope (synced, within the measured depths: sine_xmod_applies) */
-            if (cfg->xmod_on) freq1 *= sine_xmod_ratio(sine_xmod_depth(cfg->extra, plfo[t_idx][0]));
             float dt1 = freq1 / fs;
             if (dt1 > 0.45f) dt1 = 0.45f;
 
@@ -2476,10 +2989,30 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
 
             /* Advance Phase & Handle Hard Sync */
             bool sync_triggered = false;
-            v->osc1_phase += dt1;
+            /* Osc 1 Sine, Control 1 / 2 = cross modulation: Osc 2's waveform modulates the sine's FREQUENCY,
+             * linearly and through zero, by up to XMOD_MAX_HZ * depth^2 (in Hz, whatever the note), depth =
+             * Control 1 + Control 2 * LFO1 + patches -> Ctrl 1 on 0..1. Measured on the VST: sidebands of a
+             * 110 Hz sine against a modulator a fifth up fit to 0.1-0.5 dB for all three Osc 2 waves and the
+             * deviation is 95 Hz at Control 1 = 8 at 110, 220, 440 and 880 Hz alike (24 kHz at 127). Osc 2's
+             * level does not matter, only its wave and pitch. */
+            float fm_dt = 0.0f;
+            if (cfg->osc1_wave == OSC1_WAVE_SINE) {
+                float d = cfg->extra->osc1_ctrl[0] + cfg->extra->osc1_ctrl[1] * plfo[t_idx][0] + pmod[PATCH_DST_OSC1_CTRL1];
+                if (d > 0.0f) {
+                    if (d > 1.0f) d = 1.0f;
+                    float m = cfg->osc2_wave == OSC2_WAVE_SAW ? 1.0f - 2.0f * v->osc2_phase
+                            : cfg->osc2_wave == OSC2_WAVE_SQUARE ? (v->osc2_phase < 0.5f ? 1.0f : -1.0f)
+                            : 2.0f * fabsf(2.0f * v->osc2_phase - 1.0f) - 1.0f;
+                    fm_dt = (XMOD_MAX_HZ / fs) * d * d * m;
+                }
+            }
+            v->osc1_phase += dt1 + fm_dt;
             if (v->osc1_phase >= 1.0f) {
-                v->osc1_phase -= 1.0f;
+                v->osc1_phase -= floorf(v->osc1_phase);
                 sync_triggered = true;
+                if (++v->osc1_cycle >= cfg->dwgs_periods) v->osc1_cycle = 0;
+            } else if (v->osc1_phase < 0.0f) {
+                v->osc1_phase -= floorf(v->osc1_phase); /* through zero: the sine runs backwards */
             }
 
             v->osc2_phase += dt2;
@@ -2497,74 +3030,154 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
 
             /* --- Oscillator 1 Signal Generation --- */
             float osc1_out = 0.0f;
+            /* Control 1 as the wave sees it: the knob (Pulse Width on the page for the pulse), Control 2 x LFO1, patches */
+            float ctrl = (cfg->osc1_wave == OSC1_WAVE_SQUARE ? cfg->pw_knob : cfg->extra->osc1_ctrl[0])
+                       + cfg->extra->osc1_ctrl[1] * plfo[t_idx][0] + pmod[PATCH_DST_OSC1_CTRL1];
+            ctrl = ctrl < 0.0f ? 0.0f : (ctrl > 1.0f ? 1.0f : ctrl);
             switch (cfg->osc1_wave) {
-                case OSC1_WAVE_SAW:
-                    osc1_out = (2.0f * v->osc1_phase - 1.0f) - poly_blep(v->osc1_phase, dt1);
+                /* Control 1 (+ Control 2 x LFO1 + patches -> Ctrl 1) on Saw, Pulse and Triangle, measured on the VST
+                 * through the harmonics of a 55 Hz note at five settings each (ctrl below is that sum, 0..1). */
+                case OSC1_WAVE_SAW: {
+                    /* Two saws, the second moved by ctrl / 2 of a cycle and each at half level: every harmonic
+                     * from the second up follows 0.637 |cos(pi k ctrl / 2)| / k to 0.01-0.04 (a saw an octave
+                     * up at full). Osc 1's saw alone also carries an extra fundamental of 18.4 / f Hz of a
+                     * full-level sine (0.335 at 55 Hz, 0.173 at 110), the same at every Control 1. */
+                    float ph2 = fmod_pos(v->osc1_phase + 0.5f * ctrl);
+                    osc1_out = 0.5f * ((2.0f * v->osc1_phase - 1.0f) - poly_blep(v->osc1_phase, dt1)
+                                     + (2.0f * ph2 - 1.0f) - poly_blep(ph2, dt1))
+                             - fminf(0.5f, SAW1_FUND_HZ / fmaxf(freq1, 20.0f)) * sinf(2.0f * (float)M_PI * v->osc1_phase);
                     break;
+                }
                 case OSC1_WAVE_SQUARE: {
-                    float pw = cfg->pw + 0.45f * pmod[PATCH_DST_OSC1_CTRL1];
-                    if (pw < 0.05f) pw = 0.05f;
-                    if (pw > 0.95f) pw = 0.95f;
-                    float raw = (v->osc1_phase < pw) ? 1.0f : -1.0f;
-                    osc1_out = raw + poly_blep(v->osc1_phase, dt1) - poly_blep(fmod_pos(v->osc1_phase - pw), dt1);
+                    /* duty 0.5 + 0.5 ctrl: 0.563 at 16, 0.753 at 64, 0.942 at 112, silent at 127 */
+                    float pw = 0.5f + 0.5f * ctrl;
+                    if (pw > 0.999f) pw = 0.999f;
+                    /* half a period on from the phase wrap: at the wrap, where sync restarts Osc 2 (upward
+                     * from zero), the plug-in's pulse is in its low half (a synced Osc 2 square cancels it) */
+                    float sq = fmod_pos(v->osc1_phase + 0.5f);
+                    float raw = (sq < pw) ? 1.0f : -1.0f;
+                    osc1_out = raw + poly_blep(sq, dt1) - poly_blep(fmod_pos(sq - pw), dt1);
                     osc1_out -= 2.0f * pw - 1.0f; /* remove the duty-cycle DC offset */
                     break;
                 }
-                case OSC1_WAVE_TRIANGLE:
-                    osc1_out = 2.0f * fabsf(2.0f * v->osc1_phase - 1.0f) - 1.0f;
-                    break;
-                case OSC1_WAVE_SINE:
-                    osc1_out = sinf(2.0f * (float)M_PI * v->osc1_phase);
-                    break;
-                case OSC1_WAVE_VOX:
-                case OSC1_WAVE_DWGS: {
-                    float pos = v->osc1_phase * (float)WAVETABLE_SIZE;
-                    int i0 = (int)pos;
-                    float frac = pos - (float)i0;
-                    i0 &= (WAVETABLE_SIZE - 1);
-                    int i1 = (i0 + 1) & (WAVETABLE_SIZE - 1);
-                    osc1_out = cfg->wavetable[i0] * (1.0f - frac) + cfg->wavetable[i1] * frac;
+                case OSC1_WAVE_TRIANGLE: {
+                    /* the triangle driven 1 + 2 ctrl times too hard and folded back on itself: at full it is a
+                     * triangle three harmonics up (the plug-in: harmonics 1, 3, 9 = 0, 1.105, 0.132) */
+                    float tri = 2.0f * fabsf(2.0f * v->osc1_phase - 1.0f) - 1.0f;
+                    float w = fmod_pos(((1.0f + 2.0f * ctrl) * tri + 1.0f) * 0.25f);
+                    osc1_out = 1.0f - 4.0f * fabsf(w - 0.5f);
                     break;
                 }
-                case OSC1_WAVE_NOISE:
-                    osc1_out = heard_noise;
+                case OSC1_WAVE_SINE:
+                    /* at its positive peak at the phase wrap (measured against a synced Osc 2 square: their
+                     * ring product is a half-cosine twice per period) */
+                    osc1_out = cosf(2.0f * (float)M_PI * v->osc1_phase);
                     break;
+                case OSC1_WAVE_DWGS: {
+                    /* the richest level whose top harmonic is under Nyquist at this pitch */
+                    int level = 0;
+                    float top = dt1 * (float)(2 * DWGS_HARMONICS);
+                    while (top > 1.0f && level < DWGS_LEVELS - 1) { top *= 0.5f; level++; }
+                    int cycle = v->osc1_cycle < cfg->dwgs_periods ? v->osc1_cycle : 0;
+                    float pos = ((float)cycle + v->osc1_phase) * (float)dwgs_level_size(level);
+                    int i0 = (int)pos, last = dwgs_level_size(level) * cfg->dwgs_periods - 1;
+                    if (i0 > last) i0 = last;
+                    const float *tab = cfg->dwgs[level] + i0;
+                    float x = pos - (float)i0;
+                    float c1 = 0.5f * (tab[1] - tab[-1]);
+                    float c2 = tab[-1] - 2.5f * tab[0] + 2.0f * tab[1] - 0.5f * tab[2];
+                    float c3 = 0.5f * (tab[2] - tab[-1]) + 1.5f * (tab[0] - tab[1]);
+                    osc1_out = ((c3 * x + c2) * x + c1) * x + tab[0];
+                    break;
+                }
+                case OSC1_WAVE_VOX: {
+                    /* The Vox wave, measured on the VST (tools/capture_vox.py): one fixed pulse per period of
+                     * the note, the same at every pitch, so a higher note only brings the pulses closer (they
+                     * overlap and add) and the formant stays where it is. Control 1 shortens the pulse (about
+                     * an octave of formant per 32 steps, 300 Hz to 4.5 kHz) and reshapes it a little: nine
+                     * captured pulses, each on its own time scale d, read at the scale the knob gives and
+                     * cross-faded. The pulse train's mean is taken off (the plug-in's output has none). */
+                    float c127 = (ctrl < 0.0f ? 0.0f : (ctrl > 1.0f ? 1.0f : ctrl)) * 127.0f;
+                    int seg = 0;
+                    while (seg < VOX_POINTS - 2 && c127 > VOX_C1[seg + 1]) seg++;
+                    float w = (c127 - VOX_C1[seg]) / (VOX_C1[seg + 1] - VOX_C1[seg]);
+                    float d = VOX_D_S[seg] + (VOX_D_S[seg + 1] - VOX_D_S[seg]) * w;
+                    float period = (float)VOX_PER_D / (fmaxf(freq1, 8.0f) * d);     /* in table samples */
+                    const short *pa = VOX_PULSE[seg], *pb = VOX_PULSE[seg + 1];
+                    float x = v->osc1_phase * period, sum = 0.0f;
+                    for (int k = 0; k < 24 && x < (float)(VOX_LEN - 1); k++, x += period) {
+                        int i = (int)x;
+                        float f = x - (float)i;
+                        float a = (float)pa[i] + ((float)pa[i + 1] - (float)pa[i]) * f;
+                        float b2 = (float)pb[i] + ((float)pb[i + 1] - (float)pb[i]) * f;
+                        sum += a + (b2 - a) * w;
+                    }
+                    osc1_out = sum * VOX_SCALE
+                             - (VOX_AREA[seg] + (VOX_AREA[seg + 1] - VOX_AREA[seg]) * w) * (float)VOX_PER_D / period;
+                    break;
+                }
+                case OSC1_WAVE_NOISE: {
+                    /* The Noise oscillator, measured on the VST: noise through its own resonant 12 dB low-pass,
+                     * a core like the main filter's. Control 1 is its cutoff on the main filter's knob scale,
+                     * following the keyboard one octave per octave from C4 (peak 657 / 1303 / 2589 / 4953 Hz
+                     * at notes 36 / 48 / 60 / 72); Control 2 is its resonance (see NOISE_GAIN_DB). Control 2
+                     * is not an LFO depth on this wave. */
+                    float nk = cfg->extra->osc1_ctrl[0] + pmod[PATCH_DST_OSC1_CTRL1];
+                    nk = nk < 0.0f ? 0.0f : (nk > 1.0f ? 1.0f : nk);
+                    float nfn = (2.0f * (float)M_PI * FLT_BASE_HZ / fs)
+                              * exp2f(fminf(FLT_KNOB_OCTAVES + 2.0f, nk * FLT_KNOB_OCTAVES + (kbd_note - 60.0f) / 12.0f));
+                    float nfc = nfn / sqrtf(1.0f + (nfn / FLT_F_BEND) * (nfn / FLT_F_BEND));
+                    float nf = fminf(FLT_F_MAX, nfc * (1.0f + (cfg->noise_ratio - 1.0f) * (1.0f + 0.12f * nfc * nfc)));
+                    float nhp, nbp, nlp;
+                    svf_core(&v->noise_svf, NOISE_OSC_GAIN * heard_noise, nf, cfg->noise_k, &nhp, &nbp, &nlp);
+                    osc1_out = cfg->noise_gain * nlp;
+                    break;
+                }
             }
 
             /* --- Oscillator 2 Signal Generation --- */
+            /* Every Osc 2 wave is at its rising zero crossing at phase 0, which is where sync restarts it.
+             * Measured on the VST (one period of Osc 1 saw + synced Osc 2, both waves in view): the synced saw
+             * wraps half a period after Osc 1's, the square goes high at Osc 1's wrap, the triangle starts
+             * upward from zero. Restarting the saw at its wrap and the triangle at its peak, as before, put
+             * the mix and the ring product of a synced pair 6-13 dB off. */
             float osc2_out = 0.0f;
             switch (cfg->osc2_wave) {
-                case OSC2_WAVE_SAW:
-                    osc2_out = (2.0f * v->osc2_phase - 1.0f) - poly_blep(v->osc2_phase, dt2);
+                case OSC2_WAVE_SAW: {
+                    float ph = fmod_pos(v->osc2_phase + 0.5f);
+                    osc2_out = (2.0f * ph - 1.0f) - poly_blep(ph, dt2);
                     break;
+                }
                 case OSC2_WAVE_SQUARE: {
                     float raw = (v->osc2_phase < 0.5f) ? 1.0f : -1.0f;
                     osc2_out = raw + poly_blep(v->osc2_phase, dt2) - poly_blep(fmod_pos(v->osc2_phase - 0.5f), dt2);
                     break;
                 }
                 case OSC2_WAVE_TRIANGLE:
-                    osc2_out = 2.0f * fabsf(2.0f * v->osc2_phase - 1.0f) - 1.0f;
+                    osc2_out = 2.0f * fabsf(2.0f * fmod_pos(v->osc2_phase + 0.75f) - 1.0f) - 1.0f;
                     break;
             }
 
-            /* Ring Modulation */
+            /* Ring Modulation: Osc 1 x Osc 2 in Osc 2's place. Its level against the plain Osc 2 depends on
+             * Osc 1's wave (pairs at inharmonic intervals on the VST: saw and square 1.11, sine 2.27, triangle 1.5,
+             * each within 0.3 dB over two or three Osc 2 waves; the other
+             * waves are not measured) */
             float osc2_final = osc2_out;
             if (cfg->sync_ring_mode == SYNC_RING_RING || cfg->sync_ring_mode == SYNC_RING_BOTH) {
-                osc2_final = osc1_out * osc2_out * 1.5f;
+                float k = cfg->osc1_wave == OSC1_WAVE_SAW || cfg->osc1_wave == OSC1_WAVE_SQUARE ? 1.11f
+                        : cfg->osc1_wave == OSC1_WAVE_SINE ? 2.27f : cfg->osc1_wave == OSC1_WAVE_TRIANGLE ? 1.5f : 1.2f;
+                osc2_final = osc1_out * osc2_out * k;
             }
 
             /* Sub-oscillator: square wave 1 octave down */
             float sub_out = (v->sub_phase < 0.5f) ? 1.0f : -1.0f;
 
-            /* Mixer: crossfade Osc1/Osc2 (peak <= 1.0), plus sub and noise; the voice-mix soft clip handles overs */
-            /* osc_mix: 0 = osc1 only, 0.5 = both at full level, 1 = osc2 only (like the hardware
-             * mixer, the two oscillators add). cfg->level is the patch's overall level. */
-            float g1 = fminf(1.0f, 2.0f * (1.0f - cfg->osc_mix));
-            float g2 = fminf(1.0f, 2.0f * cfg->osc_mix);
-            float osc_sum = (g1 * osc1_out + g2 * osc2_final
+            /* Mixer, as the plug-in's: each source at its own level knob (level_curve), simply added. A level
+             * of 1.0 is a full-level sine's amplitude: the filter, and above all the distortion's clip point,
+             * are fixed against that. The amp level comes after the distortion. */
+            float osc_sum = cfg->gain_osc1 * osc1_out + cfg->gain_osc2 * osc2_final
                           + cfg->sub_level * sub_out
-                          + fmaxf(0.0f, fminf(1.0f, cfg->noise_level + pmod[PATCH_DST_NOISE])) * heard_noise)
-                          * cfg->level * tinyk_tuning.mixer_trim;
+                          + level_curve(fmaxf(0.0f, fminf(1.0f, cfg->noise_level + pmod[PATCH_DST_NOISE]))) * NOISE_MIX_GAIN * heard_noise;
 
             /* --- Envelopes (Exponential Curves) --- */
             float f_env = adsr_process(&v->filter_env, cfg->dcy1_coef, cfg->sustain1, cfg->rel1_coef);
@@ -2589,53 +3202,111 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
             /* --- Filter Processing --- */
             /* All modulation is summed as control pitch (octaves above cutoff_base_hz), then converted
              * to Hz once. Key tracking is bipolar around 0.5 (0.5 = none, 1.0 = KEYTRACK_SLOPE octaves per octave about KEYTRACK_PIVOT). */
-            float keytrack_mod = (v->note - KEYTRACK_PIVOT) * ((cfg->keytrack * 2.0f - 1.0f) * (KEYTRACK_SLOPE / 12.0f));
+            /* Key tracking, measured on the VST: octaves of cutoff per octave played = track / 48 up to +-48
+             * (0.33 at 16, 0.67 at 32), then on to 2 at +-63 (4.00 octaves over two at 63). The pivot is C4 (the corner does not move there). */
+            float kt63 = (cfg->keytrack * 2.0f - 1.0f) * 63.0f, kta = fabsf(kt63);
+            float keytrack_mod = (kbd_note - KEYTRACK_PIVOT) / 12.0f
+                               * copysignf(kta <= 48.0f ? kta / 48.0f : 1.0f + (kta - 48.0f) / 15.0f, kt63);
             float lfo2_mod = cfg->mod_int * lfo2_val * 2.0f;
 
             /* Bipolar filter envelope: env_int 0.5 = off, > 0.5 opens, < 0.5 closes on note strike */
             float bipolar_env = (cfg->env_int - 0.5f) * 2.0f;
             bipolar_env *= (1.0f - cfg->vel_sens + cfg->vel_sens * v->velocity);
-            float eg_mod = bipolar_env * f_env * tinyk_tuning.env_octaves;
+            float eg_mod = bipolar_env * f_env * FLT_EG_OCTAVES;
 
             float cutoff_pitch = cfg->cutoff_pitch + keytrack_mod + lfo2_mod + eg_mod
-                               + pmod[PATCH_DST_CUTOFF] * tinyk_tuning.patch_cutoff_octaves;
-            float fc = tinyk_tuning.cutoff_base_hz * exp2f(fmaxf(-4.0f, fminf(16.0f, cutoff_pitch)));
-            fc = fmaxf(tinyk_tuning.cutoff_floor_hz,
-                       fminf(cfg->filter_type == FILTER_HP_12 ? tinyk_tuning.hpf_ceil_hz : tinyk_tuning.cutoff_ceil_hz, fc));
+                               + pmod[PATCH_DST_CUTOFF] * FLT_PATCH_OCTAVES;
+            /* The knob's corner (already bent, see cutoff_pitch) moved by its modulations, stopping at the
+             * knob's own top; then resonance scales it (flt_ratio). See the filter notes above svf_core. */
+            float flt_oct = fmaxf(-2.0f, fminf(cfg->cutoff_pitch_max, cutoff_pitch));
+            float flt_fc = (2.0f * (float)M_PI * FLT_BASE_HZ / fs) * exp2f(flt_oct);
+            /* resonance's share grows a little with the coefficient itself (x 1.06 at 0.72, x 1.10 at 0.89) */
+            float flt_f = flt_fc * (1.0f + (cfg->flt_ratio - 1.0f) * (1.0f + 0.12f * flt_fc * flt_fc));
+            if (flt_f > FLT_F_MAX) flt_f = FLT_F_MAX;
 
-            /* SVF Multimode Filter with feedback tanh saturation & bass preservation */
-            float filtered = 0.0f;
-            if (cfg->filter_type == FILTER_LP_24) {
-                float stage1 = svf_process_2pole(&v->filter_svf[0], osc_sum, fc, cfg->resonance * tinyk_tuning.lp24_res_scale, FILTER_LP_24, fs);
-                filtered = svf_process_2pole(&v->filter_svf[1], stage1, fc, cfg->resonance * tinyk_tuning.lp24_res_scale, FILTER_LP_24, fs);
+            float filtered, hp, bp, lp;
+            /* The plug-in kicks the filter at every note-on, whatever feeds it (measured with every source at 0:
+             * a thump that scales with the amp level, rings at the filter's own frequency and is the same size
+             * through every type once their output gains are taken off, so it enters the core's state). Its ring
+             * is about 0.3 x Q of a saw's peak at the low-pass output up to Q 20, a random size and sign from
+             * note to note (+-6 dB), and falls with the corner as exp(-f / 477 Hz) (9 cutoffs at resonance 127:
+             * within 3 dB). Inaudible on most sounds; at resonance 100+ and a low cutoff it is a pinged resonator
+             * (A.78 reznotes is that ping and little else). The resonance gain sits before the core, as in
+             * the plug-in, so the kick is the same size at every resonance. */
+            if (v->flt_kick != 0.0f) {
+                float hz = flt_f * fs * (1.0f / (2.0f * (float)M_PI));
+                float kick = v->flt_kick * FLT_KICK * fminf(1.0f / fmaxf(cfg->flt_k, 0.05f), 20.0f) * expf(-hz / FLT_KICK_HZ);
+                v->filter_svf[0].s1 += (double)kick;
+                /* the 24LPF rings as loud as the 12LPF (measured), so its second core takes the same kick, sized
+                 * at the output: this engine's second stage carries its resonance gain after the core */
+                if (cfg->filter_type == FILTER_LP_24) v->filter_svf[1].s1 += (double)(kick * 2.5f / fmaxf(cfg->flt_gain2, 1e-4f));
+                v->flt_kick = 0.0f;
+            }
+            svf_core(&v->filter_svf[0], cfg->flt_gain * osc_sum, flt_f, cfg->flt_k, &hp, &bp, &lp);
+            /* `driven` is what the distortion clips: not the clean output for three of the four types */
+            float driven;
+            if (cfg->filter_type == FILTER_HP_12) {
+                filtered = driven = hp;
+            } else if (cfg->filter_type == FILTER_BP_12) {
+                filtered = FLT_BP_GAIN * bp;
+                driven = DIST_BP_GAIN * filtered;
             } else {
-                filtered = svf_process_2pole(&v->filter_svf[0], osc_sum, fc, cfg->resonance, cfg->filter_type, fs);
+                /* the low-pass types' extra stage (FLT_LP_A0): the 12LPF takes it as it is, the 24LPF with
+                 * its low-frequency gain held at 1, before the second core */
+                float lp_a = FLT_LP_A0 + FLT_LP_AF * flt_f;
+                if (cfg->filter_type == FILTER_LP_24) {
+                    float lp2;
+                    /* here the stage's corner follows the knob's coefficient alone, not resonance's share of it,
+                     * times 0.9 (sines to 10.5 kHz at cutoff 100 and 127, six resonances: 0.2-0.5 dB rms) */
+                    v->flt_shelf_y1 += fminf(0.9f, 0.9f * lp_stage_w * (FLT_LP_A0 + FLT_LP_AF * flt_fc)) * (lp - v->flt_shelf_y1);
+                    if (fabsf(v->flt_shelf_y1) < 1e-15f) v->flt_shelf_y1 = 0.0f;
+                    svf_core(&v->filter_svf[1], FLT_LP_GAIN * v->flt_shelf_y1, flt_f, cfg->flt_k, &hp, &bp, &lp2);
+                    filtered = cfg->flt_gain2 * lp2;
+                    driven = (DIST_LP24_GAIN / lp_a) * filtered;
+                } else {
+                    /* 1 - exp(-u) by its series (u stays under 0.7): the step-invariant pole */
+                    float u = fminf(0.9f, lp_stage_w * lp_a);
+                    v->flt_shelf_y1 += u * (1.0f - u * (0.5f - u * (1.0f / 6.0f - u * (1.0f / 24.0f)))) * (lp / lp_a - v->flt_shelf_y1);
+                    if (fabsf(v->flt_shelf_y1) < 1e-15f) v->flt_shelf_y1 = 0.0f;
+                    filtered = FLT_LP12_GAIN * v->flt_shelf_y1;
+                    driven = FLT_LP12_GAIN * lp;
+                }
             }
-
-            /* Distortion: the microKORG's is an amp-section switch (timbre byte 27, beside amp level and pan),
-             * so it shapes the filter output, not its input. Gain 1 + drive * drive_gain (drive 0.5 = on) into a
-             * soft clip at +-dist_ceiling: on the VST it is mostly level (+19 dB on B.11, whose spectrum it
-             * leaves almost unchanged), saturating only loud signals. */
-            if (cfg->drive > 0.0f) {
-                float ceil_ = tinyk_tuning.dist_ceiling;
-                filtered = ceil_ * fast_tanh(filtered * (1.0f + cfg->drive * tinyk_tuning.drive_gain) / ceil_);
-            }
+            if (!isfinite(filtered)) filtered = 0.0f;
 
             if (isnan(filtered) || isinf(filtered)) filtered = 0.0f;
 
-            float voice_vel = v->velocity;
-            if (voice_vel <= 0.01f) voice_vel = 0.8f;
-            v->vel_gain += (voice_vel - v->vel_gain) * vel_glide_k;
+            /* Key velocity does not set the level: on the microKORG (measured on the VST: the same level at every
+             * velocity) it acts only where a virtual patch routes it (PATCH_SRC_VELOCITY) */
+            v->vel_gain += (1.0f - v->vel_gain) * vel_glide_k;
 
             /* De-click: a fresh voice fades in (raised cosine, zero slope at the start) */
             float declick = 1.0f;
             if (v->declick_pos < DECLICK_SAMPLES) {
                 declick = 0.5f - 0.5f * cosf((float)M_PI * (float)v->declick_pos / (float)DECLICK_SAMPLES);
+                declick *= declick;
                 v->declick_pos++;
             }
 
             /* Amp Envelope & Velocity Scaling */
-            float voice_audio = filtered * a_env * v->vel_gain * declick * amp_gain * v->unison_gain;
+            /* the amp follows the square of its envelope (see the envelope notes) */
+            /* The amp section: the level knob squared, the EG squared and the amp patches. */
+            float amp_section = a_env * a_env * cfg->gain_amp * amp_gain;
+            float voice_audio;
+            if (cfg->drive > 0.0f) {
+                /* Distortion (timbre byte 27) clips the amp section's OUTPUT, so the amp level and the amp EG
+                 * are its drive: measured on the VST, a sine comes out clean below amp level 90 and a decaying
+                 * note stops clipping as it fades (level contour and harmonics, clean against distorted). It is
+                 * a gain of 2.69 (+8.6 dB) into a HARD clip at 1.55 times a full-level sine, exactly linear
+                 * below it (harmonics under -80 dB); clipped right down, every filter type comes out at the
+                 * same level. The level knob then acts once more, after the clip: with distortion on it is a
+                 * cube (amp 71 = -15.2 dB, six settings), and a half-clipped sine at amp 110 has the
+                 * fundamental that split gives (3.7 dB; the knob all before the clip would give 4.5). */
+                float d = isfinite(driven) ? driven * amp_section * DIST_GAIN : 0.0f;
+                voice_audio = fmaxf(-DIST_CLIP, fminf(DIST_CLIP, d)) * cfg->amp_knob * v->vel_gain * declick * v->unison_gain;
+            } else {
+                voice_audio = filtered * amp_section * v->vel_gain * declick * v->unison_gain;
+            }
             DIAG_CHECK(voice_audio);
             if (isnan(voice_audio) || isinf(voice_audio)) voice_audio = 0.0f;
 
@@ -2645,18 +3316,22 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
             float v_gain_r = 1.0f;
 
             /* Level and place: the timbre balance (Layer mode), then the timbre's pan (byte +26) plus the voice's
-             * place in a unison stack, constant power with unity at the centre (the soft clip below handles overs) */
+             * place in a unison stack (the soft clip below handles overs) */
             {
                 float vol = is_layer_mode ? (v->is_timbre_2 ? tB_vol : tA_vol) : 1.0f;
-                float place = fmaxf(-1.0f, fminf(1.0f, cfg->pan + v->unison_pan));
-                v_gain_l = vol * cosf((1.0f + place) * 0.25f * (float)M_PI) * 1.4142f;
-                v_gain_r = vol * sinf((1.0f + place) * 0.25f * (float)M_PI) * 1.4142f;
-            }
-
-            if (pmod[PATCH_DST_PAN] != 0.0f) { /* patch -> pan: constant-power, -1 = left, +1 = right */
-                float pp = fmaxf(-1.0f, fminf(1.0f, pmod[PATCH_DST_PAN]));
-                v_gain_l *= cosf((1.0f + pp) * 0.25f * (float)M_PI) * 1.4142f;
-                v_gain_r *= sinf((1.0f + pp) * 0.25f * (float)M_PI) * 1.4142f;
+                /* a linear balance, as measured on the VST: unity on both sides at the centre, the far side
+                 * falling to nothing and the near side rising to 2 (+6 dB) at a hard pan; patch -> pan moves
+                 * the same position */
+                float place = fmaxf(-1.0f, fminf(1.0f, cfg->pan + v->unison_pan + pmod[PATCH_DST_PAN]));
+                /* the position moves at most PAN_SLEW_PER_S: a square LFO -> pan +63 crosses from one side to
+                 * the other in 2 ms on the VST (10-90 % in 1.61 ms), not in a step */
+                float pan_step = PAN_SLEW_PER_S / fs;
+                if (v->pan_fresh) { v->pan_pos = place; v->pan_fresh = 0; }
+                else if (place > v->pan_pos + pan_step) v->pan_pos += pan_step;
+                else if (place < v->pan_pos - pan_step) v->pan_pos -= pan_step;
+                else v->pan_pos = place;
+                v_gain_l = vol * (1.0f - v->pan_pos);
+                v_gain_r = vol * (1.0f + v->pan_pos);
             }
 
             voice_sum_l += voice_audio * v_gain_l;
@@ -2697,8 +3372,17 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
         }
 
         /* Soft-clip the voice mix so stacked voices and layered timbres saturate smoothly */
-        voice_sum_l = soft_clip(voice_sum_l);
-        voice_sum_r = soft_clip(voice_sum_r);
+        /* Level structure. The plug-in's mix is linear: a hard-panned voice is twice a centred one, four unison
+         * voices are four times one, a resonant peak stands 17 dB proud. With a full voice at 1.0 running
+         * straight into this clip and the output limiter, all of that was squashed (a +20 pan route measured
+         * 4.2 dB side to side where the plug-in gives 8.6). So the mix is taken down by TINYK_MIX_GAIN (9 dB)
+         * first: the clip and the limiter now sit 9 dB above a single voice and act on extremes only.
+         * TINYK_OUTPUT_HEADROOM gives most of it back after the limiter. */
+#ifdef TINYK_LEVEL_PROBE
+        tinyk_probe_mix = fmaxf(tinyk_probe_mix, fmaxf(fabsf(voice_sum_l), fabsf(voice_sum_r)) * TINYK_MIX_GAIN);
+#endif
+        voice_sum_l = soft_clip(voice_sum_l * TINYK_MIX_GAIN);
+        voice_sum_r = soft_clip(voice_sum_r * TINYK_MIX_GAIN);
 
         /* 4. Mod FX (Chorus/Flanger, Ensemble or Phaser: modfx_process) */
         float chorus_l = voice_sum_l;
@@ -2721,45 +3405,59 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
             if (synth->delay_active) {
                 memset(synth->delay_buf_l, 0, sizeof(synth->delay_buf_l));
                 memset(synth->delay_buf_r, 0, sizeof(synth->delay_buf_r));
-                synth->delay_filter_l = 0.0f;
-                synth->delay_filter_r = 0.0f;
                 synth->delay_active = 0;
             }
         } else {
             synth->delay_active = 1;
             uint32_t dwpos = synth->delay_write_pos;
 
-            float drpos_l = (float)dwpos - target_delay_samples;
-            while (drpos_l < 0.0f) drpos_l += (float)DELAY_BUFFER_SIZE;
-            int didx_l0 = (int)drpos_l % DELAY_BUFFER_SIZE;
-            int didx_l1 = (didx_l0 + 1) % DELAY_BUFFER_SIZE;
-            float dfrac_l = drpos_l - (int)drpos_l;
-            float dtap_l = synth->delay_buf_l[didx_l0] * (1.0f - dfrac_l) + synth->delay_buf_l[didx_l1] * dfrac_l;
+            /* both lines are the same length; the type only changes what feeds them and where they are heard */
+            uint32_t didx = (dwpos + DELAY_BUFFER_SIZE - (uint32_t)target_delay_samples) % DELAY_BUFFER_SIZE;
+            float dtap_l = synth->delay_buf_l[didx];
+            float dtap_r = synth->delay_buf_r[didx];
+            if (!isfinite(dtap_l)) dtap_l = 0.0f;
+            if (!isfinite(dtap_r)) dtap_r = 0.0f;
 
-            float drpos_r = (float)dwpos - (target_delay_samples * 0.75f);
-            while (drpos_r < 0.0f) drpos_r += (float)DELAY_BUFFER_SIZE;
-            int didx_r0 = (int)drpos_r % DELAY_BUFFER_SIZE;
-            int didx_r1 = (didx_r0 + 1) % DELAY_BUFFER_SIZE;
-            float dfrac_r = drpos_r - (int)drpos_r;
-            float dtap_r = synth->delay_buf_r[didx_r0] * (1.0f - dfrac_r) + synth->delay_buf_r[didx_r1] * dfrac_r;
-
-            /* 6dB/oct high-damp filter (~2.5 kHz) to roll off highs on each repeat and avoid muddy reverberant wash */
-            synth->delay_filter_l += 0.28f * (dtap_l - synth->delay_filter_l);
-            synth->delay_filter_r += 0.28f * (dtap_r - synth->delay_filter_r);
-
-            if (isnan(synth->delay_filter_l) || isinf(synth->delay_filter_l)) synth->delay_filter_l = 0.0f;
-            if (isnan(synth->delay_filter_r) || isinf(synth->delay_filter_r)) synth->delay_filter_r = 0.0f;
-            if (fabsf(synth->delay_filter_l) < 1e-15f) synth->delay_filter_l = 0.0f;
-            if (fabsf(synth->delay_filter_r) < 1e-15f) synth->delay_filter_r = 0.0f;
-
-            /* Soft-clipped feedback path clamped strictly < 0.92f */
-            synth->delay_buf_l[dwpos] = chorus_l + fast_tanh(synth->delay_filter_l * delay_feedback);
-            synth->delay_buf_r[dwpos] = chorus_r + fast_tanh(synth->delay_filter_r * delay_feedback);
+            /* Dry stays at unity. Every repeat is the one before times the depth's gain, with no damping (the
+             * VST's repeats keep their spectrum). Stereo: each side repeats on its own side. Cross: each repeat
+             * swaps sides, the first one already. L/R: the two sides are summed to mono and the repeats
+             * alternate left, right, left. */
+            float wl, wr;
+            switch (synth->delay_type) {
+                case DELAY_TYPE_CROSS:
+                    wl = chorus_l + delay_feedback * dtap_r;
+                    wr = chorus_r + delay_feedback * dtap_l;
+                    out_l = chorus_l + dtap_r * delay_send;
+                    out_r = chorus_r + dtap_l * delay_send;
+                    break;
+                case DELAY_TYPE_LR:
+                    wl = 0.5f * (chorus_l + chorus_r) + delay_feedback * dtap_r;
+                    wr = delay_feedback * dtap_l;
+                    out_l = chorus_l + dtap_l * delay_send;
+                    out_r = chorus_r + dtap_r * delay_send;
+                    break;
+                default:
+                    wl = chorus_l + delay_feedback * dtap_l;
+                    wr = chorus_r + delay_feedback * dtap_r;
+                    out_l = chorus_l + dtap_l * delay_send;
+                    out_r = chorus_r + dtap_r * delay_send;
+                    break;
+            }
+            if (fabsf(wl) < 1e-15f) wl = 0.0f;
+            if (fabsf(wr) < 1e-15f) wr = 0.0f;
+            synth->delay_buf_l[dwpos] = wl;
+            synth->delay_buf_r[dwpos] = wr;
             synth->delay_write_pos = (dwpos + 1) % DELAY_BUFFER_SIZE;
+        }
 
-            /* Dry stays at unity; the repeats are added as an aux send */
-            out_l = chorus_l + dtap_l * delay_send;
-            out_r = chorus_r + dtap_r * delay_send;
+        /* EQ: the program's Low / Hi shelves (eq_update); a band at 0 dB is skipped */
+        if (synth->eq_gain[0] != 0) {
+            out_l = eq_band(synth->eq_coef[0], synth->eq_z[0][0], out_l);
+            out_r = eq_band(synth->eq_coef[0], synth->eq_z[0][1], out_r);
+        }
+        if (synth->eq_gain[1] != 0) {
+            out_l = eq_band(synth->eq_coef[1], synth->eq_z[1][0], out_l);
+            out_r = eq_band(synth->eq_coef[1], synth->eq_z[1][1], out_r);
         }
 
         /* 6. Master Volume, Pan, Soft-Knee Limiter & Convert to int16 */
@@ -2808,9 +3506,12 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
 
         DIAG_CHECK(out_l);
         DIAG_CHECK(out_r);
-        float pre_lim_l = out_l * master_vol_p * pan_l;
-        float pre_lim_r = out_r * master_vol_p * pan_r;
+        float pre_lim_l = out_l * master_vol_p * pan_l * TINYK_OUTPUT_MAKEUP;
+        float pre_lim_r = out_r * master_vol_p * pan_r * TINYK_OUTPUT_MAKEUP;
 
+#ifdef TINYK_LEVEL_PROBE
+        tinyk_probe_out = fmaxf(tinyk_probe_out, fmaxf(fabsf(pre_lim_l), fabsf(pre_lim_r)));
+#endif
         float lim_l = soft_knee_limiter(pre_lim_l) * TINYK_OUTPUT_HEADROOM;
         float lim_r = soft_knee_limiter(pre_lim_r) * TINYK_OUTPUT_HEADROOM;
 
@@ -3005,7 +3706,7 @@ static void v2_on_midi(void *instance, const uint8_t *msg, int len, int source) 
  * and everything a knob can have changed since it loaded: params, both timbres' parameter sets and extras, voice
  * mode, timbre edit / balance, octave and the delay time base. */
 #define STATE_VERSION 1
-#define STATE_EXTRA_COUNT 30     /* older states have the first 24 (before Osc 1 Ctrl 1 / 2) or 26 (before assign / pan) */
+#define STATE_EXTRA_COUNT 33     /* older states have the first 24 (before Osc 1 Ctrl 1 / 2), 26 (before assign / pan) or 30 (before the three level knobs) */
 #define STATE_EXTRA_MIN 24
 
 static void extra_to_floats(const timbre_extra_t *x, float *f) {
@@ -3020,9 +3721,9 @@ static void extra_to_floats(const timbre_extra_t *x, float *f) {
     }
     f[n++] = x->osc1_ctrl[0]; f[n++] = x->osc1_ctrl[1];
     f[n++] = (float)x->assign; f[n++] = x->unison_cents; f[n++] = x->pan; f[n++] = (float)x->multi_trigger;
+    f[n++] = x->lvl_osc1; f[n++] = x->lvl_osc2; f[n++] = x->lvl_amp;
 }
 
-static int clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
 /* f holds count values (STATE_EXTRA_MIN..STATE_EXTRA_COUNT); fields past the end keep the program's value */
 static void extra_from_floats(timbre_extra_t *x, const float *f, int count) {
@@ -3045,6 +3746,10 @@ static void extra_from_floats(timbre_extra_t *x, const float *f, int count) {
     if (n < count) x->unison_cents = fmaxf(0.0f, fminf(127.0f, f[n++]));
     if (n < count) x->pan = fmaxf(-1.0f, fminf(1.0f, f[n++]));
     if (n < count) x->multi_trigger = f[n++] >= 0.5f;
+    if (n + 2 < count) {
+        x->lvl_osc1 = clamp01f(f[n++]); x->lvl_osc2 = clamp01f(f[n++]); x->lvl_amp = clamp01f(f[n++]);
+    }
+    x->mix_seen = x->level_seen = NAN; /* the restored knobs are what these levels already stand for */
 }
 
 /* The value after "key": in a JSON object, or NULL */
@@ -3150,6 +3855,13 @@ static void apply_state(synth_engine_t *synth, const char *json) {
     if (state_number(json, "timbre_balance", &f)) synth->timbre_balance = clamp01f(f);
     if (state_number(json, "octave", &f)) synth->octave_transpose = clampi((int)lroundf(f), -4, 4);
     if (state_number(json, "delay_sync", &f)) synth->delay_sync_note = clampi((int)lroundf(f), -1, 14);
+    if (state_number(json, "delay_type", &f)) synth->delay_type = clampi((int)lroundf(f), 0, 2);
+    if (state_number(json, "modfx_type", &f)) synth->modfx_type = clampi((int)lroundf(f), 0, 2);
+    if (state_number(json, "modfx_speed", &f)) synth->modfx_speed = clamp01f(f);
+    if (state_number(json, "eq_low_freq", &f)) synth->eq_freq[0] = clampi((int)lroundf(f), 0, 29);
+    if (state_number(json, "eq_low_gain", &f)) synth->eq_gain[0] = clampi((int)lroundf(f), -12, 12);
+    if (state_number(json, "eq_hi_freq", &f)) synth->eq_freq[1] = clampi((int)lroundf(f), 0, 29);
+    if (state_number(json, "eq_hi_gain", &f)) synth->eq_gain[1] = clampi((int)lroundf(f), -12, 12);
     if (state_number(json, "arp_on", &f)) set_arp_on(synth, f >= 0.5f);
     for (int i = 0; i < ARP_PARAM_COUNT; i++) {
         if (state_number(json, ARP_PARAMS[i].key, &f)) arp_param_set(synth, i, (int)lroundf(f));
@@ -3278,6 +3990,15 @@ static void v2_set_param(void *instance, const char *key, const char *val) {
         return;
     }
 
+    if (strcmp(key, "dwgs_wave") == 0 || strcmp(key, "dwgs_pick") == 0) {
+        /* wave name ("Organ3"), list label ("42 Organ3") or index 0..63 */
+        const char *name = val;
+        while (*name >= '0' && *name <= '9') name++;
+        int i = (*name == ' ') ? name_index(name + 1, DWGS_NAMES, DWGS_WAVE_COUNT) : name_index(val, DWGS_NAMES, DWGS_WAVE_COUNT);
+        synth_set_param(synth, key, i >= 0 ? (float)i : (float)atof(val));
+        return;
+    }
+
     const selector_t *sel = find_selector(key);
     if (sel) {
         /* option name ("Square", "SQR", "BPF12") or index; a value with a decimal point is the normalized 0..1 */
@@ -3400,8 +4121,10 @@ static void json_put_string(json_out_t *o, const char *text) {
 static const char *const T2_LABELS[][3] = {
     { "cutoff", "L2.CUT", "L2 Cutoff" }, { "resonance", "L2.RES", "L2 Resonance" },
     { "attack2", "L2.ATK", "L2 Amp Atk" }, { "release2", "L2.REL", "L2 Amp Rel" },
-    { "drive", "L2.DRV", "L2 Drive" }, { "level", "L2.LVL", "L2 Level" },
+    { "drive", "L2.DIST", "L2 Distortion" }, { "level", "L2.LVL", "L2 Level" },
     { "wave1", "L2.WV1", "L2 Wave 1" }, { "pulse_width", "L2.PW", "L2 Pulse Width" },
+    { "osc1_ctrl1", "L2.CT1", "L2 Control 1" }, { "osc1_ctrl2", "L2.CT2", "L2 Control 2" },
+    { "dwgs_wave", "L2.DWGS", "L2 DWGS Wave" },
     { "wave2", "L2.WV2", "L2 Wave 2" }, { "osc2_semi", "L2.SEMI", "L2 Semi" }, { "osc2_tune", "L2.TUNE", "L2 Tune" },
     { "attack1", "L2.FATK", "L2 Filter Atk" }, { "decay1", "L2.FDCY", "L2 Filter Dcy" },
     { "sustain1", "L2.FSU", "L2 Filter Sus" }, { "release1", "L2.FRL", "L2 Filter Rel" },
@@ -3431,6 +4154,19 @@ static void json_put_head(json_out_t *o, const char *key, const char *name, int 
         json_put_string(o, cell);
         break;
     }
+}
+
+/* The DWGS Waves list, numbered as on the hardware (1..64). The host shows `label` and writes `index` */
+static const char *build_dwgs_list_json(char *buf, size_t cap) {
+    json_out_t o = { buf, cap, 0 };
+    char item[64];
+    buf[0] = '\0';
+    for (int i = 0; i < DWGS_WAVE_COUNT; i++) {
+        snprintf(item, sizeof item, "%s{\"index\":%d,\"label\":\"%d %s\"}", i ? "," : "[", i, i + 1, DWGS_NAMES[i]);
+        json_put(&o, item);
+    }
+    json_put(&o, "]");
+    return buf;
 }
 
 /* An enum entry; shorts (the 3-character square's texts) may be NULL */
@@ -3507,6 +4243,10 @@ static const char *build_chain_params_json(const synth_engine_t *synth, char *bu
     /* Single mode has one layer: both options say so (two of them, so the stored choice stays a valid index
      * and comes back with Layer) */
     static const char *const TIMBRES_SINGLE[2] = { "N/A (Single)", "N/A (Single)" };
+    static const char *const MODFX_TYPES[3] = { "Chorus/Flanger", "Ensemble", "Phaser" };
+    static const char *const MODFX_TYPES_SHORT[3] = { "CHO", "ENS", "PHS" };
+    static const char *const DELAY_TYPES[3] = { "Stereo", "Cross", "L/R" };
+    static const char *const DELAY_TYPES_SHORT[3] = { "ST", "CRS", "L/R" };
     static const char *const TIMBRES_SINGLE_SHORT[2] = { "N/A", "N/A" };
     char num[160];
     int badge = timbre_badge(synth);
@@ -3527,6 +4267,26 @@ static const char *build_chain_params_json(const synth_engine_t *synth, char *bu
         const selector_t *s = &SELECTORS[i];
         json_put_enum(&o, s->key, s->name, s->options, s->shorts, s->count, badge);
     }
+    /* DWGS: the names for the overlay, the hardware's wave numbers for the cell's option square */
+    json_put_head(&o, "dwgs_wave", "DWGS Wave", badge);
+    json_put(&o, ",\"type\":\"enum\",\"options\":[");
+    for (int i = 0; i < DWGS_WAVE_COUNT; i++) {
+        snprintf(num, sizeof num, "%s\"%d %s\"", i ? "," : "", i + 1, DWGS_NAMES[i]);
+        json_put(&o, num);
+    }
+    json_put(&o, "],\"short_options\":[");
+    for (int i = 0; i < DWGS_WAVE_COUNT; i++) {
+        snprintf(num, sizeof num, "%s\"%d\"", i ? "," : "", i + 1);
+        json_put(&o, num);
+    }
+    json_put(&o, "],\"default\":0},");
+    json_put_head(&o, "osc1_ctrl1", "Control 1", badge);
+    json_put(&o, ",\"type\":\"int\",\"min\":0,\"max\":127,\"default\":0},");
+    json_put_head(&o, "osc1_ctrl2", "Control 2", badge);
+    json_put(&o, ",\"type\":\"int\",\"min\":0,\"max\":127,\"default\":0},");
+    json_put_enum(&o, "modfx_type", "Mod FX Type", MODFX_TYPES, MODFX_TYPES_SHORT, 3, 0);
+    json_put_enum(&o, "delay_type", "Delay Type", DELAY_TYPES, DELAY_TYPES_SHORT, 3, 0);
+    json_put(&o, "{\"key\":\"modfx_speed\",\"name\":\"Mod FX Speed\",\"short_name\":\"SPEED\",\"type\":\"float\",\"min\":0,\"max\":1,\"default\":0.3},");
     json_put_head(&o, "osc2_semi", "Semi", badge);
     json_put(&o, ",\"type\":\"int\",\"min\":-24,\"max\":24,\"default\":0,\"unit\":\"st\"},");
     json_put_head(&o, "osc2_tune", "Tune", badge);
@@ -3596,6 +4356,11 @@ static int build_state_json(const synth_engine_t *synth, char *tmp, size_t cap, 
              synth->voice_mode, synth->timbre_edit, synth->timbre_balance, synth->octave_transpose, synth->delay_sync_note,
              synth->arp.set.on, synth->arp.set.pattern, synth->arp.set.length);
     json_put(&o, num);
+    snprintf(num, sizeof num, ",\"eq_low_freq\":%d,\"eq_low_gain\":%d,\"eq_hi_freq\":%d,\"eq_hi_gain\":%d,\"delay_type\":%d"
+             ",\"modfx_type\":%d,\"modfx_speed\":%.6g",
+             synth->eq_freq[0], synth->eq_gain[0], synth->eq_freq[1], synth->eq_gain[1], synth->delay_type,
+             synth->modfx_type, synth->modfx_speed);
+    json_put(&o, num);
     for (int i = 0; i < ARP_PARAM_COUNT; i++) {
         snprintf(num, sizeof num, ",\"%s\":%d", ARP_PARAMS[i].key, arp_param_get(synth, i));
         json_put(&o, num);
@@ -3614,93 +4379,111 @@ static int build_state_json(const synth_engine_t *synth, char *tmp, size_t cap, 
 /* UI hierarchy served to the host: GENERATED from src/module.json's ui_hierarchy (keep them identical) */
 static const char MK_UI_HIERARCHY[] =
     "{\"levels\":{\"root\":{\"name\":\"TinyK\",\"label\":\"TinyK\",\"list_param\":\"preset\",\"count_param\":\"preset_count\",\"name_pa"
-    "ram\":\"preset_name\",\"params\":[{\"level\":\"perf\",\"label\":\"Perf\"},{\"level\":\"osc\",\"label\":\"Osc\"},{\"level\":\"env\""
-    ",\"label\":\"Envelopes\"},{\"level\":\"mix\",\"label\":\"Mix/Filter\"},{\"level\":\"fx\",\"label\":\"Effects\"},{\"level\":\"arpse"
-    "t\",\"label\":\"Arp Settings\"},{\"level\":\"steps\",\"label\":\"Arp Steps\"},{\"level\":\"bank\",\"label\":\"Bank\"}],\"knobs\":["
-    "]},\"perf\":{\"name\":\"Perf\",\"label\":\"Perf\",\"params\":[{\"key\":\"category\",\"label\":\"Category\",\"type\":\"enum\",\"opt"
-    "ions\":[\"Trance\",\"Techno/House\",\"Electronica\",\"DnB/Breaks\",\"Hiphop/Vintage\",\"Retro\",\"SE/Hit\"],\"default\":0,\"short_"
-    "name\":\"CAT\"},{\"key\":\"patch\",\"label\":\"Program\",\"short_name\":\"PROG\",\"type\":\"enum\",\"options\":[\"A1\",\"A2\",\"A3"
-    "\",\"A4\",\"A5\",\"A6\",\"A7\",\"A8\",\"B1\",\"B2\",\"B3\",\"B4\",\"B5\",\"B6\",\"B7\",\"B8\"],\"default\":0},{\"key\":\"arp_on\","
-    "\"label\":\"Arp\",\"short_name\":\"ARP\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"short_options\":[\"OFF\",\"ON\"],\"defau"
-    "lt\":0},{\"key\":\"voice_mode\",\"label\":\"Mode\",\"type\":\"enum\",\"options\":[\"Single\",\"Layer\"],\"short_options\":[\"SNGL"
-    "\",\"LAYR\"],\"default\":0,\"short_name\":\"MODE\"},{\"key\":\"cutoff\",\"label\":\"Cutoff\",\"type\":\"float\",\"min\":0.0,\"max"
-    "\":1.0,\"default\":0.7,\"step\":0.01,\"short_name\":\"CUT\"},{\"key\":\"resonance\",\"label\":\"Resonance\",\"type\":\"float\",\"m"
-    "in\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01,\"short_name\":\"RES\"},{\"key\":\"release2\",\"label\":\"Amp Rel\",\"type\":\""
-    "float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01,\"short_name\":\"REL\"},{\"key\":\"timbre_edit\",\"label\":\"Layer\""
-    ",\"type\":\"enum\",\"options\":[\"Layer 1\",\"Layer 2\"],\"short_options\":[\"L1\",\"L2\"],\"default\":0,\"short_name\":\"LAYER\"}"
-    "],\"knobs\":[\"category\",\"patch\",\"arp_on\",\"voice_mode\",\"cutoff\",\"resonance\",\"release2\",\"timbre_edit\"]},\"osc\":{\"n"
-    "ame\":\"Osc [L1]\",\"label\":\"Osc\",\"params\":[{\"key\":\"wave1\",\"label\":\"Wave 1\",\"type\":\"enum\",\"options\":[\"Saw\",\""
-    "Square\",\"Triangle\",\"Sine\",\"Vox\",\"DWGS\",\"Noise\"],\"short_options\":[\"SAW\",\"SQR\",\"TRI\",\"SIN\",\"VOX\",\"DWG\",\"NZ"
-    "\"],\"default\":0},{\"key\":\"wave2\",\"label\":\"Wave 2\",\"type\":\"enum\",\"options\":[\"Saw\",\"Square\",\"Triangle\"],\"short"
-    "_options\":[\"SAW\",\"SQR\",\"TRI\"],\"default\":0},{\"key\":\"pulse_width\",\"label\":\"Pulse Width\",\"type\":\"float\",\"min\":"
-    "0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"osc2_semi\",\"label\":\"Semi\",\"type\":\"int\",\"min\":-24,\"max\":24,"
-    "\"default\":0,\"unit\":\"st\"},{\"key\":\"osc2_tune\",\"label\":\"Tune\",\"type\":\"int\",\"min\":-50,\"max\":50,\"default\":0,\"u"
-    "nit\":\"ct\"},{\"key\":\"voice_assign\",\"label\":\"Voice\",\"short_name\":\"VOICE\",\"type\":\"enum\",\"options\":[\"Mono\",\"Pol"
-    "y\",\"Unison\"],\"short_options\":[\"MONO\",\"POLY\",\"UNIS\"],\"default\":1},{\"key\":\"timbre_balance\",\"label\":\"Layer Bal\","
-    "\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01,\"short_name\":\"BAL\"},{\"key\":\"mod_wheel\",\"label\":"
-    "\"Mod Wheel\",\"short_name\":\"MOD\",\"type\":\"int\",\"min\":0,\"max\":127,\"default\":0}],\"knobs\":[\"wave1\",\"wave2\",\"pulse"
-    "_width\",\"osc2_semi\",\"osc2_tune\",\"voice_assign\",\"timbre_balance\",\"mod_wheel\"]},\"env\":{\"name\":\"Envelopes [L1]\",\"la"
-    "bel\":\"Envelopes\",\"params\":[{\"key\":\"attack1\",\"label\":\"Filter Atk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default"
-    "\":0.01,\"step\":0.01},{\"key\":\"decay1\",\"label\":\"Filter Dcy\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.4,\"s"
-    "tep\":0.01},{\"key\":\"sustain1\",\"label\":\"Filter Sus\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.0"
-    "1},{\"key\":\"release1\",\"label\":\"Filter Rel\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01},{\"key"
-    "\":\"decay2\",\"label\":\"Amp Dcy\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"sustain2"
-    "\",\"label\":\"Amp Sus\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.8,\"step\":0.01},{\"key\":\"keytrack\",\"label\""
-    ":\"Key Track\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"env_int\",\"label\":\"EG Int\""
-    ",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01}],\"knobs\":[\"attack1\",\"decay1\",\"sustain1\",\"relea"
-    "se1\",\"decay2\",\"sustain2\",\"keytrack\",\"env_int\"]},\"mix\":{\"name\":\"Mix/Filter [L1]\",\"label\":\"Mix/Filter\",\"params\""
-    ":[{\"key\":\"osc_mix\",\"label\":\"Osc Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\""
-    "noise_level\",\"label\":\"Noise\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"sync_ring\""
-    ",\"label\":\"Sync / Ring\",\"type\":\"enum\",\"options\":[\"Off\",\"Ring\",\"Sync\",\"Ring Sync\"],\"short_options\":[\"OFF\",\"RI"
-    "NG\",\"SYNC\",\"R.SNC\"],\"default\":0},{\"key\":\"filter_type\",\"label\":\"Filter Type\",\"type\":\"enum\",\"options\":[\"LPF24"
-    "\",\"LPF12\",\"BPF12\",\"HPF12\"],\"short_options\":[\"LPF24\",\"LPF12\",\"BPF12\",\"HPF12\"],\"default\":0},{\"key\":\"drive\",\""
-    "label\":\"Drive\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01},{\"key\":\"level\",\"label\":\"Level\""
-    ",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.9,\"step\":0.01},{\"key\":\"portamento\",\"label\":\"Portamento\",\"type"
-    "\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"attack2\",\"label\":\"Amp Atk\",\"type\":\"float\","
-    "\"min\":0.0,\"max\":1.0,\"default\":0.01,\"step\":0.01}],\"knobs\":[\"osc_mix\",\"noise_level\",\"sync_ring\",\"filter_type\",\"dr"
-    "ive\",\"level\",\"portamento\",\"attack2\"]},\"fx\":{\"name\":\"Effects\",\"label\":\"Effects\",\"params\":[{\"key\":\"chorus_mix"
-    "\",\"label\":\"Chorus Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"delay_time\",\"la"
-    "bel\":\"Delay Time\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01},{\"key\":\"delay_feedback\",\"label"
-    "\":\"Delay Fdbk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01},{\"key\":\"delay_mix\",\"label\":\"Del"
-    "ay Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"master_vol\",\"label\":\"Master Vol"
-    "\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.8,\"step\":0.01,\"short_name\":\"VOL\"},{\"key\":\"pan\",\"label\":\"P"
-    "an\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"lfo1_rate\",\"label\":\"LFO1 Rate\",\"ty"
-    "pe\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01,\"short_name\":\"LFO1\"},{\"key\":\"lfo2_rate\",\"label\":\"L"
-    "FO2 Rate\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01,\"short_name\":\"LFO2\"}],\"knobs\":[\"chorus_"
-    "mix\",\"delay_time\",\"delay_feedback\",\"delay_mix\",\"master_vol\",\"pan\",\"lfo1_rate\",\"lfo2_rate\"]},\"arpset\":{\"name\":\""
-    "Arp Settings\",\"label\":\"Arp Settings\",\"params\":[{\"key\":\"arp_type\",\"label\":\"Type\",\"short_name\":\"TYPE\",\"type\":\""
-    "enum\",\"options\":[\"UP\",\"DOWN\",\"ALT1\",\"ALT2\",\"RANDOM\",\"TRIGGER\"],\"short_options\":[\"UP\",\"DOWN\",\"ALT1\",\"ALT2\""
-    ",\"RND\",\"TRIG\"],\"default\":0},{\"key\":\"arp_range\",\"label\":\"Range\",\"short_name\":\"RANGE\",\"type\":\"enum\",\"options"
-    "\":[\"1 Oct\",\"2 Oct\",\"3 Oct\",\"4 Oct\"],\"short_options\":[\"1OCT\",\"2OCT\",\"3OCT\",\"4OCT\"],\"default\":0},{\"key\":\"arp"
-    "_resolution\",\"label\":\"Resolution\",\"short_name\":\"RESO\",\"type\":\"enum\",\"options\":[\"1/24\",\"1/16\",\"1/12\",\"1/8\","
-    "\"1/6\",\"1/4\"],\"short_options\":[\"1/24\",\"1/16\",\"1/12\",\"1/8\",\"1/6\",\"1/4\"],\"default\":1},{\"key\":\"arp_gate\",\"lab"
-    "el\":\"Gate\",\"short_name\":\"GATE\",\"type\":\"int\",\"min\":0,\"max\":100,\"default\":80,\"unit\":\"%\"},{\"key\":\"arp_swing\""
-    ",\"label\":\"Swing\",\"short_name\":\"SWING\",\"type\":\"int\",\"min\":-100,\"max\":100,\"default\":0,\"unit\":\"%\"},{\"key\":\"a"
-    "rp_latch\",\"label\":\"Latch\",\"short_name\":\"LATCH\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"short_options\":[\"OFF\","
-    "\"ON\"],\"default\":0},{\"key\":\"arp_key_sync\",\"label\":\"Key Sync\",\"short_name\":\"KSYNC\",\"type\":\"enum\",\"options\":[\""
-    "Off\",\"On\"],\"short_options\":[\"OFF\",\"ON\"],\"default\":0},{\"key\":\"arp_target\",\"label\":\"Target\",\"short_name\":\"TARG"
-    "T\",\"type\":\"enum\",\"options\":[\"Both\",\"Layer 1\",\"Layer 2\"],\"short_options\":[\"BOTH\",\"L1\",\"L2\"],\"default\":0}],\""
-    "knobs\":[\"arp_type\",\"arp_range\",\"arp_resolution\",\"arp_gate\",\"arp_swing\",\"arp_latch\",\"arp_key_sync\",\"arp_target\"]},"
-    "\"steps\":{\"name\":\"Arp Steps\",\"label\":\"Arp Steps\",\"params\":[{\"key\":\"arp_step1\",\"label\":\"Step 1\",\"short_name\":"
-    "\"ST1\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\""
-    "custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step2\",\"label\":\"Step 2\",\"short_name\":\"ST2\",\"type"
-    "\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_s"
-    "tep\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step3\",\"label\":\"Step 3\",\"short_name\":\"ST3\",\"type\":\"enum\",\"o"
-    "ptions\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_k"
-    "eys\":[\"arp_playhead\"]}},{\"key\":\"arp_step4\",\"label\":\"Step 4\",\"short_name\":\"ST4\",\"type\":\"enum\",\"options\":[\"Res"
-    "t\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_pl"
-    "ayhead\"]}},{\"key\":\"arp_step5\",\"label\":\"Step 5\",\"short_name\":\"ST5\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],"
-    "\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{"
-    "\"key\":\"arp_step6\",\"label\":\"Step 6\",\"short_name\":\"ST6\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_option"
-    "s\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_s"
-    "tep7\",\"label\":\"Step 7\",\"short_name\":\"ST7\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\","
-    "\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step8\",\"label"
-    "\":\"Step 8\",\"short_name\":\"ST8\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"def"
-    "ault\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}}],\"knobs\":[\"arp_step1\",\"arp_step2\",\"arp"
-    "_step3\",\"arp_step4\",\"arp_step5\",\"arp_step6\",\"arp_step7\",\"arp_step8\"]},\"bank\":{\"name\":\"Bank\",\"label\":\"Bank\",\""
-    "params\":[{\"key\":\"bank_file\",\"label\":\"Bank\",\"type\":\"enum\",\"options\":[\"Built-in\"],\"default\":0},{\"level\":\"bank_"
-    "list\",\"label\":\"Browse banks\"}],\"knobs\":[\"bank_file\"]},\"bank_list\":{\"name\":\"Banks\",\"label\":\"Select Bank\",\"items"
-    "_param\":\"bank_list\",\"select_param\":\"bank_file\",\"navigate_to\":\"root\"}}}";
+    "ram\":\"preset_name\",\"params\":[{\"level\":\"perf\",\"label\":\"Perf\"},{\"level\":\"osc\",\"label\":\"Osc\"},{\"level\":\"filte"
+    "r\",\"label\":\"Filter\"},{\"level\":\"amp\",\"label\":\"Amp\"},{\"level\":\"mod\",\"label\":\"Mod\"},{\"level\":\"fx\",\"label\":"
+    "\"Effects\"},{\"level\":\"arpset\",\"label\":\"Arp Settings\"},{\"level\":\"steps\",\"label\":\"Arp Steps\"},{\"level\":\"bank\","
+    "\"label\":\"Bank\"}],\"knobs\":[]},\"perf\":{\"name\":\"Perf\",\"label\":\"Perf\",\"params\":[{\"key\":\"category\",\"label\":\"Ca"
+    "tegory\",\"type\":\"enum\",\"options\":[\"Trance\",\"Techno/House\",\"Electronica\",\"DnB/Breaks\",\"Hiphop/Vintage\",\"Retro\",\""
+    "SE/Hit\"],\"default\":0,\"short_name\":\"CAT\"},{\"key\":\"patch\",\"label\":\"Program\",\"short_name\":\"PROG\",\"type\":\"enum\""
+    ",\"options\":[\"A1\",\"A2\",\"A3\",\"A4\",\"A5\",\"A6\",\"A7\",\"A8\",\"B1\",\"B2\",\"B3\",\"B4\",\"B5\",\"B6\",\"B7\",\"B8\"],\"d"
+    "efault\":0},{\"key\":\"arp_on\",\"label\":\"Arp\",\"short_name\":\"ARP\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"short_op"
+    "tions\":[\"OFF\",\"ON\"],\"default\":0},{\"key\":\"voice_mode\",\"label\":\"Mode\",\"type\":\"enum\",\"options\":[\"Single\",\"Lay"
+    "er\"],\"short_options\":[\"SNGL\",\"LAYR\"],\"default\":0,\"short_name\":\"MODE\"},{\"key\":\"timbre_edit\",\"label\":\"Layer\",\""
+    "type\":\"enum\",\"options\":[\"Layer 1\",\"Layer 2\"],\"short_options\":[\"L1\",\"L2\"],\"default\":0,\"short_name\":\"LAYER\"},{"
+    "\"key\":\"voice_assign\",\"label\":\"Voice\",\"short_name\":\"VOICE\",\"type\":\"enum\",\"options\":[\"Mono\",\"Poly\",\"Unison\"]"
+    ",\"short_options\":[\"MONO\",\"POLY\",\"UNIS\"],\"default\":1},{\"key\":\"portamento\",\"label\":\"Portamento\",\"type\":\"float\""
+    ",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"timbre_balance\",\"label\":\"Layer Bal\",\"type\":\"float\",\"m"
+    "in\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01,\"short_name\":\"BAL\"}],\"knobs\":[\"category\",\"patch\",\"arp_on\",\"voice_m"
+    "ode\",\"timbre_edit\",\"voice_assign\",\"portamento\",\"timbre_balance\"]},\"osc\":{\"name\":\"Osc [L1]\",\"label\":\"Osc\",\"para"
+    "ms\":[{\"key\":\"wave1\",\"label\":\"Wave 1\",\"type\":\"enum\",\"options\":[\"Saw\",\"Square\",\"Triangle\",\"Sine\",\"Vox\",\"DW"
+    "GS\",\"Noise\"],\"short_options\":[\"SAW\",\"SQR\",\"TRI\",\"SIN\",\"VOX\",\"DWG\",\"NZ\"],\"default\":0},{\"key\":\"osc1_ctrl1\","
+    "\"label\":\"Control 1\",\"short_name\":\"CTL1\",\"type\":\"int\",\"min\":0,\"max\":127,\"default\":0},{\"key\":\"dwgs_wave\",\"lab"
+    "el\":\"DWGS Wave\",\"short_name\":\"DWGS\",\"type\":\"enum\",\"options\":[\"1 SynSine1\",\"2 SynSine2\",\"3 SynSine3\",\"4 SynSine"
+    "4\",\"5 SynSine5\",\"6 SynSine6\",\"7 SynSine7\",\"8 SynBass1\",\"9 SynBass2\",\"10 SynBass3\",\"11 SynBass4\",\"12 SynBass5\",\"1"
+    "3 SynBass6\",\"14 SynBass7\",\"15 SynWave1\",\"16 SynWave2\",\"17 SynWave3\",\"18 SynWave4\",\"19 SynWave5\",\"20 SynWave6\",\"21 "
+    "SynWave7\",\"22 SynWave8\",\"23 SynWave9\",\"24 5thWave1\",\"25 5thWave2\",\"26 5thWave3\",\"27 Digi1\",\"28 Digi2\",\"29 Digi3\","
+    "\"30 Digi4\",\"31 Digi5\",\"32 Digi6\",\"33 Digi7\",\"34 Digi8\",\"35 Endless\",\"36 E.Piano1\",\"37 E.Piano2\",\"38 E.Piano3\",\""
+    "39 E.Piano4\",\"40 Organ1\",\"41 Organ2\",\"42 Organ3\",\"43 Organ4\",\"44 Organ5\",\"45 Organ6\",\"46 Organ7\",\"47 Clav1\",\"48 "
+    "Clav2\",\"49 Guitar1\",\"50 Guitar2\",\"51 Guitar3\",\"52 Bass1\",\"53 Bass2\",\"54 Bass3\",\"55 Bass4\",\"56 Bass5\",\"57 Bell1\""
+    ",\"58 Bell2\",\"59 Bell3\",\"60 Bell4\",\"61 Voice1\",\"62 Voice2\",\"63 Voice3\",\"64 Voice4\"],\"short_options\":[\"1\",\"2\",\""
+    "3\",\"4\",\"5\",\"6\",\"7\",\"8\",\"9\",\"10\",\"11\",\"12\",\"13\",\"14\",\"15\",\"16\",\"17\",\"18\",\"19\",\"20\",\"21\",\"22\""
+    ",\"23\",\"24\",\"25\",\"26\",\"27\",\"28\",\"29\",\"30\",\"31\",\"32\",\"33\",\"34\",\"35\",\"36\",\"37\",\"38\",\"39\",\"40\",\"4"
+    "1\",\"42\",\"43\",\"44\",\"45\",\"46\",\"47\",\"48\",\"49\",\"50\",\"51\",\"52\",\"53\",\"54\",\"55\",\"56\",\"57\",\"58\",\"59\","
+    "\"60\",\"61\",\"62\",\"63\",\"64\"],\"default\":0},{\"key\":\"osc1_ctrl2\",\"label\":\"Control 2\",\"short_name\":\"CTL2\",\"type"
+    "\":\"int\",\"min\":0,\"max\":127,\"default\":0},{\"key\":\"wave2\",\"label\":\"Wave 2\",\"type\":\"enum\",\"options\":[\"Saw\",\"S"
+    "quare\",\"Triangle\"],\"short_options\":[\"SAW\",\"SQR\",\"TRI\"],\"default\":0},{\"key\":\"sync_ring\",\"label\":\"Sync / Ring\","
+    "\"type\":\"enum\",\"options\":[\"Off\",\"Ring\",\"Sync\",\"Ring Sync\"],\"short_options\":[\"OFF\",\"RING\",\"SYNC\",\"R.SNC\"],\""
+    "default\":0},{\"key\":\"osc2_semi\",\"label\":\"Semi\",\"type\":\"int\",\"min\":-24,\"max\":24,\"default\":0,\"unit\":\"st\"},{\"k"
+    "ey\":\"osc2_tune\",\"label\":\"Tune\",\"type\":\"int\",\"min\":-50,\"max\":50,\"default\":0,\"unit\":\"ct\"},{\"key\":\"osc_mix\","
+    "\"label\":\"Osc Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01}],\"knobs\":[\"wave1\",\"osc1_ctrl1"
+    "\",\"osc1_ctrl2\",\"wave2\",\"sync_ring\",\"osc2_semi\",\"osc2_tune\",\"osc_mix\"]},\"filter\":{\"name\":\"Filter [L1]\",\"label\""
+    ":\"Filter\",\"params\":[{\"key\":\"filter_type\",\"label\":\"Filter Type\",\"type\":\"enum\",\"options\":[\"LPF24\",\"LPF12\",\"BP"
+    "F12\",\"HPF12\"],\"short_options\":[\"LPF24\",\"LPF12\",\"BPF12\",\"HPF12\"],\"default\":0},{\"key\":\"cutoff\",\"label\":\"Cutoff"
+    "\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.7,\"step\":0.01,\"short_name\":\"CUT\"},{\"key\":\"resonance\",\"label"
+    "\":\"Resonance\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01,\"short_name\":\"RES\"},{\"key\":\"env_i"
+    "nt\",\"label\":\"EG Int\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"attack1\",\"label\""
+    ":\"Filter Atk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.01,\"step\":0.01},{\"key\":\"decay1\",\"label\":\"Filter "
+    "Dcy\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.4,\"step\":0.01},{\"key\":\"sustain1\",\"label\":\"Filter Sus\",\"t"
+    "ype\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"release1\",\"label\":\"Filter Rel\",\"type\":\"f"
+    "loat\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01}],\"knobs\":[\"filter_type\",\"cutoff\",\"resonance\",\"env_int\",\"a"
+    "ttack1\",\"decay1\",\"sustain1\",\"release1\"]},\"amp\":{\"name\":\"Amp [L1]\",\"label\":\"Amp\",\"params\":[{\"key\":\"noise_leve"
+    "l\",\"label\":\"Noise\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"level\",\"label\":\"L"
+    "evel\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.9,\"step\":0.01},{\"key\":\"drive\",\"label\":\"Distortion\",\"sho"
+    "rt_name\":\"DIST\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"short_options\":[\"OFF\",\"ON\"],\"default\":0},{\"key\":\"pan"
+    "\",\"label\":\"Pan\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"attack2\",\"label\":\"Am"
+    "p Attack\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.01,\"step\":0.01},{\"key\":\"decay2\",\"label\":\"Amp Dcy\",\""
+    "type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"sustain2\",\"label\":\"Amp Sus\",\"type\":\"flo"
+    "at\",\"min\":0.0,\"max\":1.0,\"default\":0.8,\"step\":0.01},{\"key\":\"release2\",\"label\":\"Amp Rel\",\"type\":\"float\",\"min\""
+    ":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01,\"short_name\":\"REL\"}],\"knobs\":[\"noise_level\",\"level\",\"drive\",\"pan\",\"a"
+    "ttack2\",\"decay2\",\"sustain2\",\"release2\"]},\"mod\":{\"name\":\"Mod\",\"label\":\"Mod\",\"params\":[{\"key\":\"lfo1_rate\",\"l"
+    "abel\":\"LFO1 Rate\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01,\"short_name\":\"LFO1\"},{\"key\":\""
+    "lfo2_rate\",\"label\":\"LFO2 Rate\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01,\"short_name\":\"LFO2"
+    "\"},{\"key\":\"mod_wheel\",\"label\":\"Mod Wheel\",\"short_name\":\"MOD\",\"type\":\"int\",\"min\":0,\"max\":127,\"default\":0},{"
+    "\"key\":\"keytrack\",\"label\":\"Filter Key Trk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01}],\"kno"
+    "bs\":[\"lfo1_rate\",\"lfo2_rate\",\"mod_wheel\",\"keytrack\"]},\"fx\":{\"name\":\"Effects\",\"label\":\"Effects\",\"params\":[{\"k"
+    "ey\":\"modfx_type\",\"label\":\"Mod FX Type\",\"short_name\":\"FX\",\"type\":\"enum\",\"options\":[\"Chorus/Flanger\",\"Ensemble\""
+    ",\"Phaser\"],\"short_options\":[\"CHO\",\"ENS\",\"PHS\"],\"default\":0},{\"key\":\"modfx_speed\",\"label\":\"Mod FX Speed\",\"shor"
+    "t_name\":\"SPEED\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01},{\"key\":\"chorus_mix\",\"label\":\"M"
+    "od FX Depth\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"delay_type\",\"label\":\"Delay "
+    "Type\",\"short_name\":\"D.TYP\",\"type\":\"enum\",\"options\":[\"Stereo\",\"Cross\",\"L/R\"],\"short_options\":[\"ST\",\"CRS\",\"L"
+    "/R\"],\"default\":0},{\"key\":\"delay_time\",\"label\":\"Delay Time\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,"
+    "\"step\":0.01},{\"key\":\"delay_feedback\",\"label\":\"Delay Fdbk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"s"
+    "tep\":0.01},{\"key\":\"delay_mix\",\"label\":\"Delay Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.0"
+    "1},{\"key\":\"master_vol\",\"label\":\"Master Vol\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.8,\"step\":0.01,\"sho"
+    "rt_name\":\"VOL\"}],\"knobs\":[\"modfx_type\",\"modfx_speed\",\"chorus_mix\",\"delay_type\",\"delay_time\",\"delay_feedback\",\"de"
+    "lay_mix\",\"master_vol\"]},\"arpset\":{\"name\":\"Arp Settings\",\"label\":\"Arp Settings\",\"params\":[{\"key\":\"arp_type\",\"la"
+    "bel\":\"Type\",\"short_name\":\"TYPE\",\"type\":\"enum\",\"options\":[\"UP\",\"DOWN\",\"ALT1\",\"ALT2\",\"RANDOM\",\"TRIGGER\"],\""
+    "short_options\":[\"UP\",\"DOWN\",\"ALT1\",\"ALT2\",\"RND\",\"TRIG\"],\"default\":0},{\"key\":\"arp_range\",\"label\":\"Range\",\"s"
+    "hort_name\":\"RANGE\",\"type\":\"enum\",\"options\":[\"1 Oct\",\"2 Oct\",\"3 Oct\",\"4 Oct\"],\"short_options\":[\"1OCT\",\"2OCT\""
+    ",\"3OCT\",\"4OCT\"],\"default\":0},{\"key\":\"arp_resolution\",\"label\":\"Resolution\",\"short_name\":\"RESO\",\"type\":\"enum\","
+    "\"options\":[\"1/24\",\"1/16\",\"1/12\",\"1/8\",\"1/6\",\"1/4\"],\"short_options\":[\"1/24\",\"1/16\",\"1/12\",\"1/8\",\"1/6\",\"1"
+    "/4\"],\"default\":1},{\"key\":\"arp_gate\",\"label\":\"Gate\",\"short_name\":\"GATE\",\"type\":\"int\",\"min\":0,\"max\":100,\"def"
+    "ault\":80,\"unit\":\"%\"},{\"key\":\"arp_swing\",\"label\":\"Swing\",\"short_name\":\"SWING\",\"type\":\"int\",\"min\":-100,\"max"
+    "\":100,\"default\":0,\"unit\":\"%\"},{\"key\":\"arp_latch\",\"label\":\"Latch\",\"short_name\":\"LATCH\",\"type\":\"enum\",\"optio"
+    "ns\":[\"Off\",\"On\"],\"short_options\":[\"OFF\",\"ON\"],\"default\":0},{\"key\":\"arp_key_sync\",\"label\":\"Key Sync\",\"short_n"
+    "ame\":\"KSYNC\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"short_options\":[\"OFF\",\"ON\"],\"default\":0},{\"key\":\"arp_ta"
+    "rget\",\"label\":\"Target\",\"short_name\":\"TARGT\",\"type\":\"enum\",\"options\":[\"Both\",\"Layer 1\",\"Layer 2\"],\"short_opti"
+    "ons\":[\"BOTH\",\"L1\",\"L2\"],\"default\":0}],\"knobs\":[\"arp_type\",\"arp_range\",\"arp_resolution\",\"arp_gate\",\"arp_swing\""
+    ",\"arp_latch\",\"arp_key_sync\",\"arp_target\"]},\"steps\":{\"name\":\"Arp Steps\",\"label\":\"Arp Steps\",\"params\":[{\"key\":\""
+    "arp_step1\",\"label\":\"Step 1\",\"short_name\":\"ST1\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"RES"
+    "T\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step2\",\"l"
+    "abel\":\"Step 2\",\"short_name\":\"ST2\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],"
+    "\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step3\",\"label\":\"Step "
+    "3\",\"short_name\":\"ST3\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,"
+    "\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step4\",\"label\":\"Step 4\",\"short_na"
+    "me\":\"ST4\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind"
+    "\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step5\",\"label\":\"Step 5\",\"short_name\":\"ST5\",\""
+    "type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tin"
+    "yk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step6\",\"label\":\"Step 6\",\"short_name\":\"ST6\",\"type\":\"enum\""
+    ",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"ext"
+    "ra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step7\",\"label\":\"Step 7\",\"short_name\":\"ST7\",\"type\":\"enum\",\"options\":["
+    "\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"a"
+    "rp_playhead\"]}},{\"key\":\"arp_step8\",\"label\":\"Step 8\",\"short_name\":\"ST8\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play"
+    "\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}"
+    "}],\"knobs\":[\"arp_step1\",\"arp_step2\",\"arp_step3\",\"arp_step4\",\"arp_step5\",\"arp_step6\",\"arp_step7\",\"arp_step8\"]},\""
+    "bank\":{\"name\":\"Bank\",\"label\":\"Bank\",\"params\":[{\"key\":\"bank_file\",\"label\":\"Bank\",\"type\":\"enum\",\"options\":["
+    "\"Built-in\"],\"default\":0},{\"level\":\"bank_list\",\"label\":\"Browse banks\"}],\"knobs\":[\"bank_file\"]},\"bank_list\":{\"nam"
+    "e\":\"Banks\",\"label\":\"Select Bank\",\"items_param\":\"bank_list\",\"select_param\":\"bank_file\",\"navigate_to\":\"root\"}}}";
 
 static int v2_get_param(void *instance, const char *key, char *buf, int buf_len) {
     tinyk_instance_t *inst = (tinyk_instance_t*)instance;
@@ -3713,6 +4496,17 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
         int n = snprintf(buf, buf_len, "%s", MK_UI_HIERARCHY);
         if (edit_timbre(synth) == 1 && n < buf_len) {
             for (char *p = strstr(buf, "[L1]"); p; p = strstr(p + 4, "[L1]")) p[2] = '2';
+        }
+        /* Osc, second knob: Control 1, or the DWGS selector while Wave 1 is DWGS (Control 1 does nothing on a
+         * DWGS wave, as on the hardware). The manifest lists both entries; one of the two is cut from what is
+         * served, so the page never shows both. There is no separate list page: the knob shows number and
+         * name (the dwgs_pick / dwgs_list params remain for hosts and tools).
+         * The host maps the knob afresh when it re-reads the hierarchy (is_loading, see label_context). */
+        if (n < buf_len) {
+            int dw = dwgs_knob_shown(synth);
+            if (dw) json_swap(buf, "\"knobs\":[\"wave1\",\"osc1_ctrl1\"", "\"knobs\":[\"wave1\",\"dwgs_wave\"");
+            json_cut_object(buf, dw ? "{\"key\":\"osc1_ctrl1\"" : "{\"key\":\"dwgs_wave\"");
+            n = (int)strlen(buf);
         }
         return n;
     }
@@ -3890,6 +4684,24 @@ static int v2_get_param(void *instance, const char *key, char *buf, int buf_len)
 
     if (strcmp(key, "level") == 0 || strcmp(key, "noise_level") == 0) {
         return snprintf(buf, buf_len, "%.4f", synth_get_param(synth, key));
+    }
+
+    if (strcmp(key, "dwgs_wave") == 0 || strcmp(key, "dwgs_pick") == 0) {
+        return snprintf(buf, buf_len, "%d", (int)synth_get_param(synth, key));
+    }
+
+    if (strcmp(key, "delay_type") == 0) return snprintf(buf, buf_len, "%d", synth->delay_type);
+    if (strcmp(key, "modfx_type") == 0) return snprintf(buf, buf_len, "%d", synth->modfx_type);
+    if (strcmp(key, "osc1_ctrl1") == 0 || strcmp(key, "osc1_ctrl2") == 0) {
+        return snprintf(buf, buf_len, "%d", (int)synth_get_param(synth, key));
+    }
+    if (strncmp(key, "eq_", 3) == 0 && (strcmp(key + 3, "low_freq") == 0 || strcmp(key + 3, "low_gain") == 0 ||
+                                        strcmp(key + 3, "hi_freq") == 0 || strcmp(key + 3, "hi_gain") == 0)) {
+        return snprintf(buf, buf_len, "%d", (int)synth_get_param(synth, key));
+    }
+
+    if (strcmp(key, "dwgs_list") == 0) { /* items for the DWGS Waves page: [{"index":0,"label":"1 SynSine1"},...] */
+        return snprintf(buf, buf_len, "%s", build_dwgs_list_json(inst->json, sizeof inst->json));
     }
 
     /* Check parameter values */

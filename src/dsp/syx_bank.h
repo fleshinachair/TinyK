@@ -60,6 +60,7 @@ static const struct TimbreParams SYX_VOCODER_CARRIER = {
     .patch1_int = 0.5f, .patch2_int = 0.5f, .patch3_int = 0.5f, .patch4_int = 0.5f,
     .osc1_ctrl1 = 0.0f, .osc1_ctrl2 = 0.0f,
     .assign = 0.5f, .unison_detune = 0.0f, .pan = 0.5f, .trigger_multi = 0.0f,
+    .osc1_level = 1.0f, .osc2_level = 1.0f / 128.0f, .amp_level = 1.0f,
 };
 
 /* Korg 7-to-8 decode: each 8-byte group is [MSB bits][7 data bytes]. Returns bytes written. */
@@ -83,7 +84,9 @@ static void syx_parse_timbre(const uint8_t *p, int t, struct TimbreParams *o) {
     if (osc2_wave > 2) osc2_wave = 2;
     int mod_select = MODSEL_TO_ENGINE[(p[t + 12] >> 4) & 0x03];
     double osc2_semis = (p[t + 13] - 64) + (p[t + 14] - 64) / 63.0 * 0.5;
-    double transpose_semis = (p[t + 5] - 64) + (p[t + 3] - 64) / 100.0;
+    /* transpose + tune, and the program's keyboard octave (byte 37, signed -3..+3) folded in */
+    int kbd_octave = p[37] >= 128 ? (int)p[37] - 256 : (int)p[37];
+    double transpose_semis = (p[t + 5] - 64) + (p[t + 3] - 64) / 100.0 + 12.0 * (kbd_octave < -3 ? -3 : (kbd_octave > 3 ? 3 : kbd_octave));
 
     double osc1_lvl = p[t + 16] / 127.0, osc2_lvl = p[t + 17] / 127.0;
     double loudest = osc1_lvl > osc2_lvl ? osc1_lvl : osc2_lvl;
@@ -117,6 +120,10 @@ static void syx_parse_timbre(const uint8_t *p, int t, struct TimbreParams *o) {
     o->keytrack = (float)syx_bipolar(p[t + 24]);
     o->env_int = (float)syx_bipolar(p[t + 22]);
     o->drive = (p[t + 27] & 1) ? 0.5f : 0.0f;
+    /* the three level knobs themselves, (raw + 1) / 128 (0 = not recorded): see tools/extracts_presets.py */
+    o->osc1_level = (float)(((p[t + 16] > 127 ? 127 : p[t + 16]) + 1) / 128.0);
+    o->osc2_level = (float)(((p[t + 17] > 127 ? 127 : p[t + 17]) + 1) / 128.0);
+    o->amp_level = (float)(((p[t + 25] > 127 ? 127 : p[t + 25]) + 1) / 128.0);
     o->attack1 = (float)syx_unit(p[t + 30]);
     o->decay1 = (float)syx_unit(p[t + 31]);
     o->sustain1 = (float)syx_unit(p[t + 32]);
@@ -184,6 +191,13 @@ static void syx_parse_program(const uint8_t *p, int idx, struct Preset *out, cha
     /* Mod FX: 23 LFO speed, 24 depth (chorus_mix), 25 type (0 Chorus/Flanger, 1 Ensemble, 2 Phaser) */
     out->modfx_speed = (float)syx_unit(p[23]);
     out->modfx_type = (float)((p[25] > 2 ? 2 : p[25]) / 2.0);
+    out->delay_type = (float)((p[22] > 2 ? 2 : p[22]) / 2.0); /* 0 Stereo, 1 Cross, 2 L/R */
+    /* EQ: 26 Hi frequency (0..29), 27 Hi gain (64 +- 12 dB), 28 Low frequency (0..29), 29 Low gain */
+    int hi_gain = (int)p[27] - 64, low_gain = (int)p[29] - 64;
+    out->eq.hi_freq = (float)((p[26] > 29 ? 29 : p[26]) / 29.0);
+    out->eq.hi_gain = (float)(0.5 + (hi_gain < -12 ? -12 : (hi_gain > 12 ? 12 : hi_gain)) / 24.0);
+    out->eq.low_freq = (float)((p[28] > 29 ? 29 : p[28]) / 29.0);
+    out->eq.low_gain = (float)(0.5 + (low_gain < -12 ? -12 : (low_gain > 12 ? 12 : low_gain)) / 24.0);
     /* arpeggiator: 14 length - 1, 15 pattern (bit set = rest), 32 on / latch / target / key sync, 33 type / range,
      * 34 gate, 35 resolution, 36 swing (signed); normalized as extracts_presets.ARP_FIELDS */
     int target = (p[32] >> 4) & 0x03, type = p[33] & 0x0F, range = p[33] >> 4, swing = p[36] >= 128 ? p[36] - 256 : p[36];
