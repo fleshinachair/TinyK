@@ -12,6 +12,7 @@ Program layout (offsets into the 254-byte unpacked program):
     15        arpeggiator trigger pattern: bit n = step n + 1, SET = rest (most factory arps store 0: all steps)
     16        bits 4-5: voice mode (0 = Single, 2 = Layer, 3 = Vocoder)
     19..25    delay (19 sync / time base, 20 time, 21 depth) / mod-FX (23 LFO speed, 24 depth, 25 type)
+    26..29    EQ: Hi frequency (0..29 = 1..18 kHz), Hi gain (64 +- 12 dB), Low frequency (0..29 = 40..1000 Hz), Low gain
     30..31    arpeggiator tempo (MSB, LSB; the engine follows the session tempo instead)
     32        arpeggiator: bit 7 on, bit 6 latch, bits 4-5 target (both, timbre 1, timbre 2), bit 0 key sync
     33        arpeggiator: bits 0-3 type (up, down, alt1, alt2, random, trigger), bits 4-7 range - 1 octaves
@@ -74,6 +75,7 @@ TIMBRE_FIELDS = [
     "patch3_src", "patch3_dst", "patch3_int", "patch4_src", "patch4_dst", "patch4_int",
     "osc1_ctrl1", "osc1_ctrl2",
     "assign", "unison_detune", "pan", "trigger_multi",
+    "osc1_level", "osc2_level", "amp_level",
 ]
 # LFO / virtual patch encoding (all [0, 1]):
 #   lfoN_wave      wave index / 3     (LFO1: saw, square, triangle, S&H; LFO2: saw, square, sine, S&H)
@@ -87,6 +89,10 @@ TIMBRE_FIELDS = [
 #   unison_detune  byte +2 (cents) / 127; pan byte +26, bipolar (0.5 = centre); trigger_multi byte +1 bit 3
 # delay_sync: 0 = free (delay_time is a time), else (time base index + 1) / 15 of the tempo-sync note table
 FX_FIELDS = ["chorus_mix", "delay_time", "delay_feedback", "delay_mix", "delay_sync", "modfx_speed", "modfx_type"]
+# EQ (program bytes 26-29): frequency index / 29 (Hi 1..18 kHz, Low 40..1000 Hz, tables in dsp.c), gain +-12 dB
+# as 0.5 + dB / 24 (0.5 = flat)
+EQ_FIELDS = ["hi_freq", "hi_gain", "low_freq", "low_gain"]
+EQ_FLAT = {"hi_freq": 0.0, "hi_gain": 0.5, "low_freq": 0.0, "low_gain": 0.5}
 # Arpeggiator (struct ArpParams), all [0, 1]: on / latch / key_sync 0 or 1; target index / 2 (both, timbre 1,
 # timbre 2); type index / 5; range (octaves - 1) / 3; gate percent / 100; resolution index / 5; swing 0.5 + %/200;
 # length (steps - 1) / 7; pattern the raw byte / 255 (bit n set = step n + 1 rests).
@@ -115,6 +121,7 @@ VOCODER_CARRIER = {
     **{f"patch{n}_{k}": (0.5 if k == "int" else 0.0) for n in range(1, 5) for k in ("src", "dst", "int")},
     "osc1_ctrl1": 0.0, "osc1_ctrl2": 0.0,
     "assign": 0.5, "unison_detune": 0.0, "pan": 0.5, "trigger_multi": 0.0,
+    "osc1_level": 1.0, "osc2_level": 1.0 / 128.0, "amp_level": 1.0,
 }
 
 
@@ -176,7 +183,9 @@ def parse_timbre(prog, t):
     # Osc2 pitch relative to osc1 in semitones: semitone (+-24) plus tune (+-50 cents).
     osc2_semis = (prog[t + 13] - 64) + (prog[t + 14] - 64) / 63.0 * 0.5
     # Timbre pitch: transpose (+-24) plus tune (+-50 cents).
-    transpose_semis = (prog[t + 5] - 64) + (prog[t + 3] - 64) / 100.0
+    # transpose + tune, and the program's keyboard octave (byte 37, signed -3..+3) folded in
+    kbd_octave = prog[37] - 256 if prog[37] >= 128 else prog[37]
+    transpose_semis = (prog[t + 5] - 64) + (prog[t + 3] - 64) / 100.0 + 12.0 * max(-3, min(3, kbd_octave))
 
     # Mixer: the hardware sums osc1 and osc2 at their own levels. The engine models that as a
     # balance knob (0 = osc1 only, 0.5 = both full, 1 = osc2 only) plus an overall level, which
@@ -230,6 +239,11 @@ def parse_timbre(prog, t):
         "keytrack": bipolar(prog[t + 24]),
         "env_int": bipolar(prog[t + 22]),
         "drive": 0.5 if prog[t + 27] & 1 else 0.0,
+        # the three level knobs themselves ((raw + 1) / 128, so 0 can mean "not recorded"): osc_mix and level
+        # above fold them together, which loses how hard the mixer drives the filter and the distortion
+        "osc1_level": (min(prog[t + 16], 127) + 1) / 128.0,
+        "osc2_level": (min(prog[t + 17], 127) + 1) / 128.0,
+        "amp_level": (min(prog[t + 25], 127) + 1) / 128.0,
         "attack1": unit(prog[t + 30]), "decay1": unit(prog[t + 31]),
         "sustain1": unit(prog[t + 32]), "release1": unit(prog[t + 33]),
         "attack2": unit(prog[t + 34]), "decay2": unit(prog[t + 35]),
@@ -260,6 +274,13 @@ def parse_program(idx, prog):
         # Mod FX: byte 23 LFO speed, 24 depth (chorus_mix above), 25 type (0 Chorus/Flanger, 1 Ensemble, 2 Phaser)
         "modfx_speed": unit(prog[23]),
         "modfx_type": min(prog[25], 2) / 2.0,
+    }
+
+    eq = {
+        "hi_freq": min(prog[26], 29) / 29.0,
+        "hi_gain": 0.5 + max(-12, min(12, prog[27] - 64)) / 24.0,
+        "low_freq": min(prog[28], 29) / 29.0,
+        "low_gain": 0.5 + max(-12, min(12, prog[29] - 64)) / 24.0,
     }
 
     swing = prog[36] - 256 if prog[36] >= 128 else prog[36]
@@ -294,6 +315,8 @@ def parse_program(idx, prog):
         "t2": t2,
         "fx": fx,
         "arp": arp,
+        "eq": eq,
+        "delay_type": min(prog[22], 2) / 2.0,  # byte 22: 0 Stereo, 1 Cross, 2 L/R
     }
 
 
@@ -316,10 +339,15 @@ def render_header(presets):
     out.append("    float patch3_src, patch3_dst, patch3_int, patch4_src, patch4_dst, patch4_int;\n")
     out.append("    float osc1_ctrl1, osc1_ctrl2; /* Osc 1 Control 1 / 2 (raw / 127): for Sine, cross-mod depth / LFO1 mod of it */\n")
     out.append("    float assign, unison_detune, pan, trigger_multi; /* voice assign / 2 (mono, poly, unison), cents / 127, bipolar, bit */\n")
+    out.append("    float osc1_level, osc2_level, amp_level; /* the mixer and amp level knobs, (0..127 + 1) / 128; 0 = not recorded */\n")
     out.append("};\n\n")
     out.append("/* Arpeggiator, normalized as ARP_FIELDS in tools/extracts_presets.py */\n")
     out.append("struct ArpParams {\n")
     out.append("    float on, latch, key_sync, target, type, range, gate, resolution, swing, length, pattern;\n")
+    out.append("};\n\n")
+    out.append("/* EQ: frequency index / 29, gain 0.5 + dB / 24 (EQ_FIELDS in tools/extracts_presets.py) */\n")
+    out.append("struct EqParams {\n")
+    out.append("    float hi_freq, hi_gain, low_freq, low_gain;\n")
     out.append("};\n\n")
     out.append("struct Preset {\n")
     out.append("    const char *label;\n")
@@ -327,6 +355,8 @@ def render_header(presets):
     out.append("    struct TimbreParams t1, t2;\n")
     out.append("    float chorus_mix, delay_time, delay_feedback, delay_mix, delay_sync, modfx_speed, modfx_type;\n")
     out.append("    struct ArpParams arp;\n")
+    out.append("    struct EqParams eq;\n")
+    out.append("    float delay_type; /* 0, 0.5, 1 = Stereo, Cross, L/R */\n")
     out.append("};\n\n")
     out.append(f"static const struct Preset FACTORY_PRESETS[{len(presets)}] = {{\n")
 
@@ -337,6 +367,7 @@ def render_header(presets):
             timbres.append("{ " + vals + " }")
         fx = ", ".join(c_float(p["fx"][f]) for f in FX_FIELDS)
         fx += ",\n      { " + ", ".join(c_float(p["arp"][f]) for f in ARP_FIELDS) + " }"
+        fx += ",\n      { " + ", ".join(c_float(p["eq"][f]) for f in EQ_FIELDS) + " }, " + c_float(p.get("delay_type", 0.0))
         label = p["label"].replace("\\", "\\\\").replace('"', '\\"')
         comma = "," if i < len(presets) - 1 else ""
         out.append(f"    /* [{i:3d}] {p['label']} */\n")
@@ -363,6 +394,9 @@ def render_json(presets):
             e[f] = round(p["fx"][f], 6)
         for f in ARP_FIELDS:
             e[f] = round(p["arp"][f], 6)
+        for f in EQ_FIELDS:
+            e["eq_" + f] = round(p["eq"][f], 6)
+        e["delay_type"] = round(p.get("delay_type", 0.0), 6)
         e["timbre2"] = {f: round(p["t2"][f], 6) for f in TIMBRE_FIELDS}
         entries.append(e)
     return json.dumps({"presets": entries}, indent=2, ensure_ascii=True)
