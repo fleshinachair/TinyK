@@ -6,7 +6,7 @@
       "lines": [
         "microKORG-style",
         "virtual analog synth.",
-        "4 voices, or two",
+        "8 voices, or two",
         "layers (L1 / L2).",
         "",
         "112 built-in programs",
@@ -29,63 +29,87 @@
             "Enc 3 ARP: on / off",
             "Enc 4 MODE: Single /",
             "  Layer",
-            "Enc 5 CUT: cutoff",
-            "Enc 6 RES: resonance",
-            "Enc 7 REL: amp release",
-            "Enc 8 LAYER: L1 / L2",
-            "  (N/A in Single)"
+            "Enc 5 LAYER: L1 / L2",
+            "  (N/A in Single)",
+            "Enc 6 VOICE: Mono /",
+            "  Poly / Unison",
+            "Enc 7 PORTA: glide",
+            "Enc 8 BAL: layer",
+            "  balance"
           ]
         },
         {
           "title": "2: Osc",
           "lines": [
-            "Wave 1, Wave 2,",
-            "Pulse Width, Semi,",
-            "Tune, Voice (Mono /",
-            "Poly / Unison),",
-            "Layer Bal, Mod Wheel.",
+            "Wave 1, Control 1,",
+            "Control 2, Wave 2,",
+            "Sync / Ring, Semi,",
+            "Tune, Osc Mix.",
             "Header shows [L1] or",
-            "[L2]."
+            "[L2].",
+            "",
+            "Control 1 / 2 depend",
+            "on Wave 1: pulse",
+            "width, Vox formant,",
+            "Noise cutoff / res,",
+            "sine cross-mod.",
+            "",
+            "Wave 1 = DWGS: knob 2",
+            "picks one of the 64",
+            "DWGS waves, shown by",
+            "number and name."
           ]
         },
         {
-          "title": "3: Envelopes",
+          "title": "3: Filter",
           "lines": [
+            "Type (LPF24, LPF12,",
+            "BPF12, HPF12),",
+            "Cutoff, Resonance,",
+            "EG Int.",
             "Filter EG: Attack,",
             "Decay, Sustain,",
             "Release.",
-            "Amp EG: Decay,",
-            "Sustain.",
-            "Key Track, EG Int.",
             "Header shows [L1] or",
             "[L2]."
           ]
         },
         {
-          "title": "4: Mix/Filter",
+          "title": "4: Amp",
           "lines": [
-            "Osc Mix, Noise,",
-            "Sync / Ring,",
-            "Filter Type (LPF24,",
-            "LPF12, BPF12, HPF12),",
-            "Drive, Level,",
-            "Portamento, Amp Atk.",
+            "Noise, Level,",
+            "Distortion (on /",
+            "off), Pan.",
+            "Amp EG: Attack,",
+            "Decay, Sustain,",
+            "Release.",
             "Header shows [L1] or",
             "[L2]."
           ]
         },
         {
-          "title": "5: Effects",
+          "title": "5: Mod",
           "lines": [
-            "Chorus mix,",
-            "Delay Time, Feedback,",
-            "Delay mix,",
-            "Master Vol, Pan,",
-            "LFO 1 & 2 rates."
+            "LFO 1 & 2 rates,",
+            "Mod Wheel,",
+            "Filter Key Track."
           ]
         },
         {
-          "title": "6: Arp Settings",
+          "title": "6: Effects",
+          "lines": [
+            "Mod FX: Type (Chorus",
+            "/ Flanger, Ensemble,",
+            "Phaser), Speed,",
+            "Depth.",
+            "Delay: Type (Stereo,",
+            "Cross, L/R), Time,",
+            "Feedback, Mix.",
+            "Master Vol."
+          ]
+        },
+        {
+          "title": "7: Arp Settings",
           "lines": [
             "Type: UP, DOWN, ALT1,",
             "ALT2, RANDOM, TRIGGER",
@@ -97,7 +121,7 @@
           ]
         },
         {
-          "title": "7: Arp Steps",
+          "title": "8: Arp Steps",
           "lines": [
             "8 knobs = 8 steps:",
             "top row 1-4,",
@@ -110,7 +134,7 @@
           ]
         },
         {
-          "title": "8: Bank",
+          "title": "9: Bank",
           "lines": [
             "Built-in bank or a",
             ".syx file in banks/.",
@@ -140,12 +164,12 @@
         "Mode (Perf) picks",
         "Single (one layer, 4",
         "voices) or Layer (two",
-        "layers, 2 voices each).",
+        "layers, 4 voices each).",
         "Layer (Perf) picks the",
         "layer the per-layer",
         "knobs edit: L1 or L2",
         "in the header of Osc,",
-        "Envelopes, Mix/Filter;",
+        "Filter and Amp;",
         "labels L1.CUT/L2.CUT.",
         "In Single mode Layer",
         "reads N/A.",

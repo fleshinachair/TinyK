@@ -284,7 +284,7 @@ def selftest(note, eg_cutoff):
         eng.set_tuning({"cutoff_ceil_hz": 20000.0})  # let the top steps open fully, like an analog filter
         t = dict(VOCODER_CARRIER, wave1=0.0, osc_mix=0.0, noise_level=0.0, detune=0.5, resonance=0.0,
                  filter_type=0.0, keytrack=0.5, env_int=0.5, drive=0.0, attack1=0.0, sustain1=1.0,
-                 attack2=0.0, sustain2=1.0, portamento=0.0, level=0.25)  # low level: keep the filter's tanh input linear
+                 attack2=0.0, sustain2=1.0, portamento=0.0, level=0.25, amp_level=33.0 / 128.0)  # low level: keep the filter's tanh input linear
         fx = {"chorus_mix": 0.0, "delay_time": 0.0, "delay_feedback": 0.0, "delay_mix": 0.0}
 
         def write(name, **over):

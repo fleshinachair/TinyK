@@ -57,7 +57,7 @@ from scipy import optimize
 from scipy.io import wavfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from extracts_presets import FX_FIELDS, PROGRAM_SIZE, TIMBRE_FIELDS, TIMBRE_OFFSETS, parse_program, unpack_7to8  # noqa: E402
+from extracts_presets import EQ_FIELDS, EQ_FLAT, FX_FIELDS, PROGRAM_SIZE, TIMBRE_FIELDS, TIMBRE_OFFSETS, parse_program, unpack_7to8  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -242,6 +242,8 @@ class Engine:
         self.lib.tinyk_render_patch.argtypes = [ctypes.c_int, ctypes.c_int, fptr, fptr, fptr, ctypes.c_int,
                                                 ctypes.c_double, ctypes.c_double, fptr, ctypes.c_int]
         self.lib.tinyk_render_patch.restype = ctypes.c_int
+        self.lib.tinyk_set_patch_eq.argtypes = [fptr]
+        self.lib.tinyk_set_patch_eq.restype = None
         n = self.lib.tinyk_timbre_floats()
         if n != len(TIMBRE_FIELDS):
             sys.exit(f"struct TimbreParams has {n} floats, extracts_presets.TIMBRE_FIELDS has {len(TIMBRE_FIELDS)}")
@@ -260,18 +262,22 @@ class Engine:
             raise RuntimeError("render failed")
         return buf.reshape(-1, 2).astype(np.float64).mean(axis=1)
 
-    def render_patch(self, slot, patch, note, gate_s, total_s):
-        """Render a parse_program() patch dict played from bank slot `slot`."""
+    def render_patch(self, slot, patch, note, gate_s, total_s, stereo=False):
+        """Render a parse_program() patch dict played from bank slot `slot` (mono mix, or frames x 2 with stereo)."""
         frames = int(total_s * SR)
         buf = np.zeros(frames * 2, dtype=np.float32)
         arrays = [np.array([patch[t][f] for f in TIMBRE_FIELDS], dtype=np.float32) for t in ("t1", "t2")]
         arrays.append(np.array([patch["fx"][f] for f in FX_FIELDS], dtype=np.float32))
+        # the patch's EQ (flat for a hand-built patch without one); it stays set in the library, so always send it
+        arrays.append(np.array([patch.get("eq", EQ_FLAT)[f] for f in EQ_FIELDS] + [patch.get("delay_type", 0.0)], dtype=np.float32))
         fp = [a.ctypes.data_as(ctypes.POINTER(ctypes.c_float)) for a in arrays]
+        self.lib.tinyk_set_patch_eq(fp[3])
         n = self.lib.tinyk_render_patch(slot, int(patch["voice_mode"] >= 0.5), fp[0], fp[1], fp[2], note,
                                         gate_s, total_s, buf.ctypes.data_as(ctypes.POINTER(ctypes.c_float)), frames)
         if n < 0:
             raise RuntimeError("render failed (library built without -DTINYK_TUNING?)")
-        return buf.reshape(-1, 2).astype(np.float64).mean(axis=1)
+        lr = buf.reshape(-1, 2).astype(np.float64)
+        return lr if stereo else lr.mean(axis=1)
 
 
 # --------------------------------------------------------------------------------------------
