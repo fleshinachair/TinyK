@@ -26,9 +26,11 @@ from scipy.io import wavfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 NOTE, HOLD_S, TOTAL_S = 60, 1.5, 2.0
-# The engine ships with TINYK_OUTPUT_HEADROOM 0.45 (-6.9 dB, src/dsp/dsp.c): the level thresholds below are
-# stated at unity and moved by the same amount, so they keep meaning what they did.
-HEADROOM_DB = -10.0   # TINYK_MIX_GAIN 0.35 x TINYK_OUTPUT_HEADROOM 0.9
+# The level thresholds below were set when a single voice ran at full scale. The engine now takes its voice mix
+# down before the soft clip and gives part of it back after the limiter (TINYK_MIX_GAIN, TINYK_OUTPUT_MAKEUP) and
+# ships with TINYK_OUTPUT_HEADROOM 0.68 (src/dsp/dsp.c): about 12.4 dB under that in all, so the thresholds move
+# by as much and keep meaning what they did.
+HEADROOM_DB = -12.4
 SILENT_DB, QUIET_DB = -45.0 + HEADROOM_DB, -20.0 + HEADROOM_DB
 CLICK_MS = 15.0
 DC_LIMIT = 0.05
