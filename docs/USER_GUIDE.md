@@ -165,7 +165,7 @@ Level, distortion and the amp envelope. Noise is here too: it is the mixer's thi
 
 ## 5. Mod
 
-The modulation sources you can reach from the Move. What the LFOs and the mod wheel modulate is set by the program's virtual patches.
+The modulation sources you can reach from the Move. What the LFOs and the mod wheel modulate is set by the program's virtual patches; the mod wheel also brings in the program's vibrato.
 
 ```
 +-----------------------------------------------+
@@ -181,7 +181,7 @@ The modulation sources you can reach from the Move. What the LFOs and the mod wh
 |-----|-------|----------|----------------|-----|
 | 1 | LFO1 | LFO 1 rate | About 0.05 Hz to 30 Hz. | Has no effect when the program's LFO is tempo-synced. |
 | 2 | LFO2 | LFO 2 rate | About 0.05 Hz to 30 Hz. | What the LFOs modulate is set by the program's virtual patches. |
-| 3 | MOD | Mod wheel | 0-127. Stands in for the wheel the Move lacks and drives the same patch source as MIDI CC1; whichever moved last wins. | Only patches that route the Mod Wheel respond. |
+| 3 | MOD | Mod wheel | 0-127. Stands in for the wheel the Move lacks and drives the same patch source as MIDI CC1; whichever moved last wins. | It brings in the program's vibrato (LFO2 on the pitch, as deep as the program's Vibrato Int says: about a semitone each way at full on most) and whatever the program's patches route it to. |
 | 4 | KEYTR | Filter key tracking | -100 % to +100 %; 0 % is off (the centre of the knob). | Positive values open the filter as you play higher. |
 
 - Only four encoders are used on this page.

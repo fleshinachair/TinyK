@@ -168,6 +168,8 @@ typedef struct {
     int pan_fresh;          /* 1 until the first sample: pan_pos then starts on the target */
     float osc2_phase;
     float sub_phase;
+    float osc_lp[2];        /* each oscillator's top-octave low-pass (osc_rolloff) */
+    int osc_lp_on;          /* 1 while those filters run: they start on the signal as it is */
 
     /* Dual-Timbre Layer Properties */
     int timbre_index;       /* 0 = Timbre 1, 1 = Timbre 2 */
@@ -191,7 +193,10 @@ typedef struct {
      * vel_gain is the velocity as heard, gliding to velocity so a steal or retrigger never steps the level; kill is
      * an all-notes-off fade (a fast release) instead of a cut */
     int declick_pos;
-    float flt_kick;         /* the note-on kick still to give the filter (signed, about 1), 0 once given */
+    float reset_from;       /* EG reset on a sounding voice: the amp level it fades out from (0 = none) */
+    float amp_heard;        /* the amp contour as last heard (EG squared, with the fades) */
+    float flt_kick;         /* the note-on kick still to give the filter (about 1), 0 once given */
+    float flt_kick_phase;   /* ... and where in its ring the filter starts, radians */
     float vel_gain;
     bool kill;
 } voice_t;
@@ -209,6 +214,9 @@ typedef struct {
     float unison_cents;     /* unison detune: the spread of the stacked voices, cents */
     float pan;              /* timbre pan, -1 left .. +1 right */
     int multi_trigger;      /* mono / unison: 1 = every key restarts the EGs, 0 = legato keys do not */
+    int eg_reset[2];        /* EG1 (filter), EG2 (amp): 1 = a note-on restarts the EG from zero, 0 = from its level */
+    float bend_semi;        /* pitch bend range, semitones at full bend (-12..12) */
+    float vibrato_int;      /* Vibrato Int, -63..63: LFO2 -> pitch, scaled by the mod wheel */
 
     /* Per-timbre LFOs (index 0 = LFO1, 1 = LFO2) and the 4-slot virtual patch matrix */
     int lfo_wave[2];        /* LFO1: saw, square, triangle, S&H; LFO2: saw, square, sine, S&H */
@@ -327,7 +335,6 @@ typedef struct {
 
     /* Octave Transpose & Pitch Bend */
     int octave_transpose;
-    float pitch_bend_semi;
 
     /* Patch-matrix LFOs, one pair per timbre ([timbre][0 = LFO1, 1 = LFO2]), and the controller patch
      * sources: pitch bend (-1..+1, centre 0) and the mod wheel (CC1, 0..+1) */
@@ -478,8 +485,8 @@ typedef struct {
     float patch_pitch_scale;  /* virtual patch -> pitch / osc2 pitch at intensity 63, in semitones (VST: 24.1 measured) */
     float lfo_tempo_bpm;      /* tempo when the host gives none (renders, tests, hosts without get_bpm) */
     float patch_int_curve;    /* patch depth = full scale * (|int|/63)^curve (VST: 2.4 measured at +20 / +63) */
-    float tilt_db;            /* high-shelf gain on the voice mix, dB (VST open saw vs ideal: 26.7) */
-    float tilt_hz;            /* high-shelf corner, Hz (20000): ~+2 dB at 3 kHz, +7 at 8 kHz, +18 at 17 kHz */
+    float tilt_db;            /* high-shelf gain on the voice mix, dB (the plug-in's saw against an ideal one: 12.43) */
+    float tilt_hz;            /* high-shelf corner, Hz (12726): +1.7 dB at 3 kHz, +6 at 8 kHz, +11 at 16 kHz */
     float patch_pan_curve;    /* patch -> pan depth = (|int|/63)^curve; 0.6 (not measured, chosen): LFO -> pan
                                * swings +-3.4 dB at +6, +-7.6 dB at +20, +-14 dB at +40, hard L/R at +63 */
     float bpf_cutoff_octaves; /* BPF12 centre = base * 2^(knob * bpf_cutoff_octaves + bpf_cutoff_offset) */
