@@ -140,6 +140,36 @@
               "short_name": "MODE"
             },
             {
+              "key": "cutoff",
+              "label": "Cutoff",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.7,
+              "step": 0.01,
+              "short_name": "CUT"
+            },
+            {
+              "key": "resonance",
+              "label": "Resonance",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.2,
+              "step": 0.01,
+              "short_name": "RES"
+            },
+            {
+              "key": "release2",
+              "label": "Amp Rel",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.2,
+              "step": 0.01,
+              "short_name": "REL"
+            },
+            {
               "key": "timbre_edit",
               "label": "Layer",
               "type": "enum",
@@ -153,42 +183,6 @@
               ],
               "default": 0,
               "short_name": "LAYER"
-            },
-            {
-              "key": "voice_assign",
-              "label": "Voice",
-              "short_name": "VOICE",
-              "type": "enum",
-              "options": [
-                "Mono",
-                "Poly",
-                "Unison"
-              ],
-              "short_options": [
-                "MONO",
-                "POLY",
-                "UNIS"
-              ],
-              "default": 1
-            },
-            {
-              "key": "portamento",
-              "label": "Portamento",
-              "type": "float",
-              "min": 0.0,
-              "max": 1.0,
-              "default": 0.0,
-              "step": 0.01
-            },
-            {
-              "key": "timbre_balance",
-              "label": "Layer Bal",
-              "type": "float",
-              "min": 0.0,
-              "max": 1.0,
-              "default": 0.5,
-              "step": 0.01,
-              "short_name": "BAL"
             }
           ],
           "knobs": [
@@ -196,10 +190,10 @@
             "patch",
             "arp_on",
             "voice_mode",
-            "timbre_edit",
-            "voice_assign",
-            "portamento",
-            "timbre_balance"
+            "cutoff",
+            "resonance",
+            "release2",
+            "timbre_edit"
           ]
         },
         "osc": {
@@ -695,13 +689,52 @@
               "max": 1.0,
               "default": 0.5,
               "step": 0.01
+            },
+            {
+              "key": "voice_assign",
+              "label": "Voice",
+              "short_name": "VOICE",
+              "type": "enum",
+              "options": [
+                "Mono",
+                "Poly",
+                "Unison"
+              ],
+              "short_options": [
+                "MONO",
+                "POLY",
+                "UNIS"
+              ],
+              "default": 1
+            },
+            {
+              "key": "portamento",
+              "label": "Portamento",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.0,
+              "step": 0.01
+            },
+            {
+              "key": "timbre_balance",
+              "label": "Layer Bal",
+              "type": "float",
+              "min": 0.0,
+              "max": 1.0,
+              "default": 0.5,
+              "step": 0.01,
+              "short_name": "BAL"
             }
           ],
           "knobs": [
             "lfo1_rate",
             "lfo2_rate",
             "mod_wheel",
-            "keytrack"
+            "keytrack",
+            "voice_assign",
+            "portamento",
+            "timbre_balance"
           ]
         },
         "fx": {

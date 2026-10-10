@@ -326,12 +326,11 @@ def host_api():
         # One page per section of the instrument (Perf, Osc, Filter, Amp, Mod, Effects), then the arpeggiator, then
         # Bank. Filter and Amp each carry their own envelope; the Osc page's second knob is Control 1, or the DWGS
         # selector while Wave 1 is DWGS (the manifest lists both entries, the engine serves one: checked below).
-        pages = {"perf": ("Perf", ["category", "patch", "arp_on", "voice_mode", "timbre_edit", "voice_assign", "portamento",
-                                   "timbre_balance"]),
+        pages = {"perf": ("Perf", ["category", "patch", "arp_on", "voice_mode", "cutoff", "resonance", "release2", "timbre_edit"]),
                  "osc": ("Osc [L1]", ["wave1", "osc1_ctrl1", "osc1_ctrl2", "wave2", "sync_ring", "osc2_semi", "osc2_tune", "osc_mix"]),
                  "filter": ("Filter [L1]", ["filter_type", "cutoff", "resonance", "env_int", "attack1", "decay1", "sustain1", "release1"]),
                  "amp": ("Amp [L1]", ["noise_level", "level", "drive", "pan", "attack2", "decay2", "sustain2", "release2"]),
-                 "mod": ("Mod", ["lfo1_rate", "lfo2_rate", "mod_wheel", "keytrack"]),
+                 "mod": ("Mod", ["lfo1_rate", "lfo2_rate", "mod_wheel", "keytrack", "voice_assign", "portamento", "timbre_balance"]),
                  "fx": ("Effects", ["modfx_type", "modfx_speed", "chorus_mix", "delay_type", "delay_time", "delay_feedback",
                                     "delay_mix", "master_vol"]),
                  "arpset": ("Arp Settings", ["arp_type", "arp_range", "arp_resolution", "arp_gate", "arp_swing", "arp_latch",
@@ -346,9 +345,14 @@ def host_api():
         help_pages = [c["title"] for c in next(c for c in help_doc["children"] if c["title"] == "Pages")["children"]]
         check(help_pages == [f"{i}: {levels[p['level']]['label']}" for i, p in enumerate(levels["root"]["params"], 1)],
               f"help.json lists the pages in the same order: {help_pages}")
+        # Perf repeats Cutoff, Resonance and Amp Rel as live macros: the Filter and Amp pages stay complete
+        macro_keys = {"cutoff", "resonance", "release2"}
         every = [k for _, knobs in pages.values() for k in knobs]
-        check(len(every) == len(set(every)) and not {"bank_side", "program", "bank_file", "detune", "sub_level"} & set(every),
-              "each control on one page; no A/B, Bank, Detune or Sub Level knob")
+        once = [k for k in every if k not in macro_keys]
+        check(len(once) == len(set(once)) and all(every.count(k) == 2 for k in macro_keys)
+              and all(k in pages["perf"][1] for k in macro_keys)
+              and not {"bank_side", "program", "bank_file", "detune", "sub_level"} & set(every),
+              "each control on one page (Perf's Cutoff / Resonance / Amp Rel macros repeat Filter / Amp's); no A/B, Bank, Detune or Sub Level knob")
         check(meta["wave1"].get("options") == ["Saw", "Square", "Triangle", "Sine", "Vox", "DWGS", "Noise"]
               and meta["wave1"].get("short_options") == ["SAW", "SQR", "TRI", "SIN", "VOX", "DWG", "NZ"]
               and meta["wave2"].get("short_options") == ["SAW", "SQR", "TRI"]
@@ -379,6 +383,50 @@ def host_api():
               and meta["mod_wheel"].get("short_name") == "MOD",
               f"Mod Wheel knob (MOD, 0..127): starts {mw0}, set 100 -> {get('mod_wheel')}")
         put("mod_wheel", "0")
+
+        # Control 1 is the pulse's width: its served label follows Wave 1 (Pulse Width / PW on the Pulse wave, Control 1
+        # otherwise, with the layer's prefix in Layer mode) and the change is announced so the host re-reads it
+        def ctrl1():
+            e = {x["key"]: x for x in json.loads(get("chain_params"))}["osc1_ctrl1"]
+            return e.get("label"), e.get("short_name")
+
+        def settle():
+            return [get("is_loading"), get("is_loading")]
+
+        v0, e0 = get("voice_mode"), get("timbre_edit")
+        put("voice_mode", "0")
+        put("timbre_edit", "0")
+        settle()
+        w_t1 = get("wave1")
+        put("wave1", "Saw")
+        settle()
+        saw_label = ctrl1()
+        put("wave1", "Square")
+        to_pulse = settle()
+        pulse_label = ctrl1()
+        put("voice_mode", "1")
+        settle()
+        pulse_l1 = ctrl1()
+        put("timbre_edit", "1")
+        settle()
+        w_t2 = get("wave1")
+        put("wave1", "Saw")
+        settle()
+        saw_l2 = ctrl1()
+        put("wave1", "Square")
+        settle()
+        pulse_l2 = ctrl1()
+        put("wave1", w_t2)
+        put("timbre_edit", "0")
+        put("wave1", w_t1)
+        put("voice_mode", v0)
+        put("timbre_edit", e0)
+        settle()
+        check(saw_label == ("Control 1", "CTL1") and pulse_label == ("Pulse Width", "PW") and to_pulse == ["1", "0"]
+              and pulse_l1 == ("L1 Pulse Width", "L1.PW") and saw_l2 == ("L2 Control 1", "L2.CT1")
+              and pulse_l2 == ("L2 Pulse Width", "L2.PW"),
+              f"Control 1 reads Pulse Width on the Pulse wave: Saw {saw_label}, Pulse {pulse_label} (announced {to_pulse}), "
+              f"Layer 1 {pulse_l1}, Layer 2 {saw_l2} -> {pulse_l2}")
 
         # Layer 2 in Layer mode: the per-layer page names and labels say L2, global ones stay plain
         check(get("is_loading") == "0", "no label change pending")

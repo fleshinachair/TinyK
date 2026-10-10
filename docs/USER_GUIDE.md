@@ -18,11 +18,11 @@ The Move's display shows a header (page name and the current patch) above a 2 x 
 
 | # | Page | Encoders |
 |---|------|----------|
-| 1 | [Perf](#1-perf) | Cat, Prog, Arp, Mode, Layer, Voice, Porta, Layer Bal |
+| 1 | [Perf](#1-perf) | Cat, Prog, Arp, Mode, Cut, Res, Rel, Layer |
 | 2 | [Osc](#2-osc) | Wave 1, Control 1 / DWGS wave, Control 2, Wave 2, Sync/Ring, Semi, Tune, Osc Mix |
 | 3 | [Filter](#3-filter) | Type, Cutoff, Res, EG Int, Filter A/D/S/R |
 | 4 | [Amp](#4-amp) | Noise, Level, Distortion, Pan, Amp A/D/S/R |
-| 5 | [Mod](#5-mod) | LFO1 rate, LFO2 rate, Mod Wheel, Filter Key Track |
+| 5 | [Mod](#5-mod) | LFO1 rate, LFO2 rate, Mod Wheel, Filter Key Track, Voice, Porta, Layer Bal |
 | 6 | [Effects](#6-effects) | Mod FX Type/Speed/Depth, Delay Type/Time/Fdbk/Mix, Master Vol |
 | 7 | [Arp Settings](#7-arp-settings) | Type, Range, Resolution, Gate, Swing, Latch, Key Sync, Target |
 | 8 | [Arp Steps](#8-arp-steps) | Steps 1-8 (Rest / Play) |
@@ -32,7 +32,7 @@ The Move's display shows a header (page name and the current patch) above a 2 x 
 
 ## 1. Perf
 
-Everything about the program as a whole: pick a sound, switch the arpeggiator and layer mode, choose the layer you are editing, and set how it plays (polyphony, glide, layer balance). The jog wheel also steps through all the programs of the bank.
+Everything about the program as a whole: pick a sound, switch the arpeggiator and layer mode, choose the layer you are editing, and shape the sound with three live macros (cutoff, resonance, amp release). Voice, Portamento and Layer Balance are on the Mod page. The jog wheel also steps through all the programs of the bank.
 
 ```
 +-----------------------------------------------+
@@ -42,8 +42,8 @@ Everything about the program as a whole: pick a sound, switch the arpeggiator an
 | Trance    | A1        | Off       | Single    |
 |    (1)    |    (2)    |    (3)    |    (4)    |
 +-----------+-----------+-----------+-----------+
-| Layer     | Voice     | Porta     | Bal       |
-| N/A       | Poly      | 0%        | 50:50     |
+| Cut       | Res       | Rel       | Layer     |
+| 2.4kHz    | 20%       | 20%       | N/A       |
 |    (5)    |    (6)    |    (7)    |    (8)    |
 +-----------+-----------+-----------+-----------+
 ```
@@ -53,11 +53,11 @@ Everything about the program as a whole: pick a sound, switch the arpeggiator an
 | 1 | CAT | Category | 7 choices: Trance, Techno, Electr, DnB, Hiphop, Retro, SE/Hit. Each is one row of the program matrix (up to 16 programs). Vocoder programs are not offered, so a category may hold fewer than 16, and a bank without vocoders in the last row gets an eighth category, `Other`. | Changing it keeps the Program position, so A1 in Trance becomes A1 in Techno. |
 | 2 | PROG | Program | The category's programs, A1-A8 then B1-B8, each with its own matrix code (a skipped vocoder leaves a gap in the codes). Touching or turning shows the full patch code and name, e.g. `B.12 ARPEJMATR`. | Category and Program together address every program of the bank; the jog wheel steps through them in order. |
 | 3 | ARP | Arpeggiator on / off | Off / On. Each program stores its own arpeggio; this overrides it until you pick another program. | Shape the pattern on the Arp Settings and Arp Steps pages. |
-| 4 | MODE | Single / Layer | Single: one layer plays all 4 voices. Layer: two layers (L1, L2) play 2 voices each, blended by Layer Bal on this page. | Switching mode cuts any sounding notes (a short fade, no click). Programs set their own mode when loaded. |
-| 5 | LAYER | Which layer the per-layer knobs edit | Layer mode: `L1` or `L2`. Single mode: reads `N/A` (there is only one layer). | The choice is remembered while you flip between Single and Layer. |
-| 6 | VOICE | Voice assign (polyphony) | Mono (one note at a time), Poly (each key its own voice), Unison (all of the layer's voices stacked on one note, detuned). Per layer. | The unison detune amount comes from the program. "Voice" always means polyphony, never layers. |
-| 7 | PORTA | Portamento | 0-100 %: glide time between notes. | Most useful with Voice set to Mono. |
-| 8 | BAL | Layer balance | Shown as L1:L2, from 100:0 to 0:100. | Only matters in Layer mode. |
+| 4 | MODE | Single / Layer | Single: one layer plays all 4 voices. Layer: two layers (L1, L2) play 2 voices each, blended by Layer Bal on the Mod page. | Switching mode cuts any sounding notes (a short fade, no click). Programs set their own mode when loaded. |
+| 5 | CUT | Filter cutoff (macro) | 0-100 %, shown in Hz / kHz. The same control as Cutoff on the Filter page. | In Layer mode the label reads `L1.CUT` or `L2.CUT` and it edits the layer chosen by LAYER. |
+| 6 | RES | Filter resonance (macro) | 0-100 %. The same control as Res on the Filter page. | Labelled `L1.RES` / `L2.RES` in Layer mode. |
+| 7 | REL | Amp release (macro) | 0-100 %. The same control as AREL on the Amp page. | Labelled `L1.REL` / `L2.REL` in Layer mode. |
+| 8 | LAYER | Which layer the per-layer knobs edit | Layer mode: `L1` or `L2`. Single mode: reads `N/A` (there is only one layer). | The choice is remembered while you flip between Single and Layer. |
 
 - In Layer mode, set LAYER to L2 and every per-layer knob on the Osc, Filter and Amp pages edits Layer 2; L1 keeps its own values.
 
@@ -84,7 +84,7 @@ The two oscillators and how they are combined. Control 1 and Control 2 are Oscil
 | Enc | Label | Controls | Range / values | Tip |
 |-----|-------|----------|----------------|-----|
 | 1 | WAV1 | Oscillator 1 wave | Saw, Square, Triangle, Sine, Vox, DWGS, Noise (the display draws the wave). | Vox is the microKORG's formant wave: Control 1 moves its formant. DWGS plays one of 64 digital waveforms, chosen with encoder 3. |
-| 2 | CTL1 | Osc 1 Control 1, or the DWGS waveform while Wave 1 is DWGS | 0-127. Saw: adds a second, phase-shifted saw. Square: pulse width. Triangle: folds the wave into brighter shapes. Sine: cross-modulation by Osc 2. Vox: formant, from about 300 Hz up to 4.5 kHz. Noise: the noise's own low-pass cutoff. With DWGS the knob reads `DWGS` and picks one of the 64 waves, shown by number and name. | On Vox and Noise this is the main tone control. |
+| 2 | CTL1 | Osc 1 Control 1, or the DWGS waveform while Wave 1 is DWGS | 0-127. Saw: adds a second, phase-shifted saw. Square: pulse width (the encoder then reads `PW`, "Pulse Width"). Triangle: folds the wave into brighter shapes. Sine: cross-modulation by Osc 2. Vox: formant, from about 300 Hz up to 4.5 kHz. Noise: the noise's own low-pass cutoff. With DWGS the knob reads `DWGS` and picks one of the 64 waves, shown by number and name. | On Vox and Noise this is the main tone control. |
 | 3 | CTL2 | Osc 1 Control 2 | 0-127. Saw, Square, Triangle, Vox, Sine: how much LFO 1 moves Control 1. Noise: the resonance of the noise's low-pass. | Pulse-width modulation is Square + Control 2. |
 | 4 | WAV2 | Oscillator 2 wave | Saw, Square, Triangle. | Pair with Semi / Tune, and with Sync / Ring next to it. |
 | 5 | SYNCR | Sync / Ring | Off, Ring, Sync, R.SNC (ring + sync). | Sync with a detuned Osc 2 gives the tearing lead sound; sweep Semi. |
@@ -151,7 +151,7 @@ Level, distortion and the amp envelope. Noise is here too: it is the mixer's thi
 | Enc | Label | Controls | Range / values | Tip |
 |-----|-------|----------|----------------|-----|
 | 1 | NOISE | Noise level | 0-100 %. | A little for breathy leads, a lot for hats and effects. |
-| 2 | LEVEL | Layer level | 0-100 %. | Balance L1 against L2 with this as well as Layer Bal on Perf. |
+| 2 | LEVEL | Layer level | 0-100 %. | Balance L1 against L2 with this as well as Layer Bal on Mod. |
 | 3 | DIST | Distortion | Off / On (the microKORG's distortion is a switch). A hard clipper after the amp. | Level and the amp envelope are its drive: turn Level down for a cleaner, quieter sound, up for a squarer one. The low-pass and band-pass types hit it harder than the high-pass. |
 | 4 | PAN | Master pan | L100 ... C ... R100. The whole instrument, not one layer: the layers' own pans from the program are kept. | The layers' own pans from the program are kept. |
 | 5 | AATK | Amp EG attack | 0-100 %. | Short for plucks, long for pads. |
@@ -175,6 +175,10 @@ The modulation sources you can reach from the Move. What the LFOs and the mod wh
 | 1.2Hz     | 1.2Hz     | 0         | 0%        |
 |    (1)    |    (2)    |    (3)    |    (4)    |
 +-----------+-----------+-----------+-----------+
+| Voice     | Porta     | Bal       |           |
+| Poly      | 0%        | 50:50     |           |
+|    (5)    |    (6)    |    (7)    |           |
++-----------+-----------+-----------+-----------+
 ```
 
 | Enc | Label | Controls | Range / values | Tip |
@@ -183,8 +187,11 @@ The modulation sources you can reach from the Move. What the LFOs and the mod wh
 | 2 | LFO2 | LFO 2 rate | About 0.05 Hz to 30 Hz. | What the LFOs modulate is set by the program's virtual patches. |
 | 3 | MOD | Mod wheel | 0-127. Stands in for the wheel the Move lacks and drives the same patch source as MIDI CC1; whichever moved last wins. | It brings in the program's vibrato (LFO2 on the pitch, as deep as the program's Vibrato Int says: about a semitone each way at full on most) and whatever the program's patches route it to. |
 | 4 | KEYTR | Filter key tracking | -100 % to +100 %; 0 % is off (the centre of the knob). | Positive values open the filter as you play higher. |
+| 5 | VOICE | Voice assign (polyphony) | Mono (one note at a time), Poly (each key its own voice), Unison (all of the layer's voices stacked on one note, detuned). Per layer. | The unison detune amount comes from the program. "Voice" always means polyphony, never layers. Labelled `L1.VOIC` / `L2.VOIC` in Layer mode. |
+| 6 | PORTA | Portamento | 0-100 %: glide time between notes. | Most useful with Voice set to Mono. |
+| 7 | BAL | Layer balance | Shown as L1:L2, from 100:0 to 0:100. | Only matters in Layer mode. |
 
-- Only four encoders are used on this page.
+- Seven encoders are used on this page; encoder 8 is free.
 
 ---
 

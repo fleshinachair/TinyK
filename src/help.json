@@ -29,13 +29,13 @@
             "Enc 3 ARP: on / off",
             "Enc 4 MODE: Single /",
             "  Layer",
-            "Enc 5 LAYER: L1 / L2",
+            "Enc 5 CUT: cutoff",
+            "Enc 6 RES: resonance",
+            "Enc 7 REL: amp release",
+            "Enc 8 LAYER: L1 / L2",
             "  (N/A in Single)",
-            "Enc 6 VOICE: Mono /",
-            "  Poly / Unison",
-            "Enc 7 PORTA: glide",
-            "Enc 8 BAL: layer",
-            "  balance"
+            "Voice, Portamento and",
+            "Layer Bal are on Mod."
           ]
         },
         {
@@ -50,7 +50,9 @@
             "",
             "Control 1 / 2 depend",
             "on Wave 1: pulse",
-            "width, Vox formant,",
+            "width (knob 2 reads",
+            "Pulse Width then),",
+            "Vox formant,",
             "Noise cutoff / res,",
             "sine cross-mod.",
             "",
@@ -92,7 +94,10 @@
           "lines": [
             "LFO 1 & 2 rates,",
             "Mod Wheel,",
-            "Filter Key Track."
+            "Filter Key Track,",
+            "Voice (Mono / Poly /",
+            "Unison), Portamento,",
+            "Layer Bal."
           ]
         },
         {
