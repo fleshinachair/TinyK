@@ -3,6 +3,9 @@
 #
 # Compiles the 4-voice VA synth DSP engine and packages the module.
 # Supports Docker cross-compilation or local cross-compilation toolchain.
+#
+# Extra compiler flags: TINYK_CFLAGS, e.g. TINYK_CFLAGS=-DNUM_VOICES=8 ./scripts/build.sh for an 8-voice build
+# (the default is 4: see NUM_VOICES in src/dsp/dsp.h).
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -24,6 +27,7 @@ if command -v docker &>/dev/null && [ -z "$CROSS_PREFIX" ] && [ ! -f "/.dockeren
     docker run --rm \
         -v "$REPO_ROOT:/build" \
         -u "$(id -u):$(id -g)" \
+        -e TINYK_CFLAGS \
         -w /build \
         "$IMAGE_NAME" \
         ./scripts/build.sh
@@ -47,6 +51,7 @@ if command -v cmake &>/dev/null && [ -n "$CROSS_PREFIX" ]; then
     cmake -B build \
         -DCMAKE_TOOLCHAIN_FILE=cmake/aarch64-toolchain.cmake \
         -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_C_FLAGS="$TINYK_CFLAGS" \
         2>&1
     cmake --build build --target mk-va-plugin -j$(nproc 2>/dev/null || echo 4) 2>&1
     BUILD_SUCCESS=1
@@ -57,7 +62,7 @@ if [ $BUILD_SUCCESS -eq 0 ] && command -v aarch64-linux-gnu-gcc &>/dev/null; the
     echo "Compiling with aarch64-linux-gnu-gcc..."
     aarch64-linux-gnu-gcc -O3 -fPIC -shared \
         -march=armv8-a -mtune=cortex-a72 \
-        -Wall -Wextra \
+        -Wall -Wextra $TINYK_CFLAGS \
         -Isrc -Isrc/dsp \
         src/dsp/dsp.c -lm \
         -Wl,--exclude-libs,ALL \
@@ -78,7 +83,7 @@ if [ $BUILD_SUCCESS -eq 0 ]; then
         echo "Compiling with Zig cross-compiler ($ZIG_BIN)..."
         "$ZIG_BIN" cc -target aarch64-linux-gnu.2.35 -mcpu=cortex_a72 \
             -O3 -fPIC -shared \
-            -Wall -Wextra \
+            -Wall -Wextra $TINYK_CFLAGS \
             -Isrc -Isrc/dsp \
             src/dsp/dsp.c -lm \
             -o build/dsp.so

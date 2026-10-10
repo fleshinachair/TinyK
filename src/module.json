@@ -3,7 +3,7 @@
   "name": "TinyK",
   "abbrev": "TINYK",
   "version": "0.9.0",
-  "description": "8-voice polyphonic virtual analog synth inspired by 2000s dual-oscillator VA engine",
+  "description": "4-voice polyphonic virtual analog synth inspired by 2000s dual-oscillator VA engine",
   "author": "Mathew Taylor",
   "license": "MIT",
   "dsp": "dsp.so",
