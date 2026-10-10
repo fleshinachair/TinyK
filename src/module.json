@@ -227,7 +227,6 @@
             {
               "key": "osc1_ctrl1",
               "label": "Control 1",
-              "short_name": "CTL1",
               "type": "int",
               "min": 0,
               "max": 127,

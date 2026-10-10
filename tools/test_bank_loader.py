@@ -422,6 +422,10 @@ def host_api():
         put("voice_mode", v0)
         put("timbre_edit", e0)
         settle()
+        # The host draws a cell from the page's own inline short_name before the live one, so the Osc page must not
+        # declare one for Control 1: it would pin the cell to CTL1 while the overlay reads Pulse Width
+        inline = next(p for p in manifest["capabilities"]["ui_hierarchy"]["levels"]["osc"]["params"] if p.get("key") == "osc1_ctrl1")
+        check("short_name" not in inline, "the Osc page declares no inline short_name for Control 1 (the live one must reach the cell)")
         check(saw_label == ("Control 1", "CTL1") and pulse_label == ("Pulse Width", "PW") and to_pulse == ["1", "0"]
               and pulse_l1 == ("L1 Pulse Width", "L1.PW") and saw_l2 == ("L2 Control 1", "L2.CT1")
               and pulse_l2 == ("L2 Pulse Width", "L2.PW"),
