@@ -20,6 +20,7 @@ import calibrate_dsp as cal
 from extracts_presets import EQ_FIELDS, VOCODER_CARRIER, load_programs, parse_program
 
 SR = cal.SR
+DEFAULT_BANK = os.path.join(cal.ROOT, "banks", "TinyK_Default.syx")
 LOW_HZ = [40, 50, 60, 80, 100, 120, 140, 160, 180, 200, 220, 240, 260, 280, 300,
           320, 340, 360, 380, 400, 420, 440, 460, 480, 500, 600, 700, 800, 900, 1000]
 HI_HZ = [1000, 1250, 1500, 1750, 2000, 2250, 2500, 2750, 3000, 3250, 3500, 3750, 4000, 4250, 4500,
@@ -90,12 +91,12 @@ def test_decoders(eng, tmp):
     ref = [parse_program(i, p) for i, p in enumerate(load_programs(path))]
     lib = eng.lib
     lib.tinyk_bank_scan.argtypes = [ctypes.c_char_p]
-    lib.tinyk_dsp_bank_eq.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_float)]
+    lib.tinyk_bank_eq.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.POINTER(ctypes.c_float)]
     check(lib.tinyk_bank_scan(os.path.dirname(path).encode()) == 1, "the C loader accepts the bank")
     worst, seen = 0.0, set()
     for i in range(128):
         eq = np.zeros(5, np.float32)
-        lib.tinyk_dsp_bank_eq(1, i, eq.ctypes.data_as(ctypes.POINTER(ctypes.c_float)))
+        lib.tinyk_bank_eq(1, i, eq.ctypes.data_as(ctypes.POINTER(ctypes.c_float)))
         want = np.array([ref[i]["eq"][f] for f in EQ_FIELDS] + [ref[i]["delay_type"]])
         worst = max(worst, float(np.abs(eq - want).max()))
         seen.add(tuple(np.round(want, 4)))
@@ -104,11 +105,16 @@ def test_decoders(eng, tmp):
     check((lo, hi) == (0.0, 1.0) and all(0.0 <= r["eq"][f] <= 1.0 for r in ref for f in EQ_FIELDS) and len(seen) > 100,
           "values stay in 0..1, out-of-range bytes clamp, %d distinct settings" % len(seen))
     eq = np.zeros(5, np.float32)
-    flat = True
+    if not os.path.exists(DEFAULT_BANK):   # the built-in bank's source is not in the repository
+        print("  [SKIP] the built-in bank against its source bank: %s is not here" % os.path.relpath(DEFAULT_BANK, cal.ROOT))
+        return
+    built_in = [parse_program(i, p) for i, p in enumerate(load_programs(DEFAULT_BANK))]   # presets.h comes from this bank
+    worst = 0.0
     for i in range(128):
-        lib.tinyk_dsp_bank_eq(0, i, eq.ctypes.data_as(ctypes.POINTER(ctypes.c_float)))
-        flat = flat and eq[1] == 0.5 and eq[3] == 0.5
-    check(flat, "the built-in bank's EQ is flat (presets.h has no EQ data yet)")
+        lib.tinyk_bank_eq(0, i, eq.ctypes.data_as(ctypes.POINTER(ctypes.c_float)))
+        want = np.array([built_in[i]["eq"][f] for f in EQ_FIELDS] + [built_in[i]["delay_type"]])
+        worst = max(worst, float(np.abs(eq - want).max()))
+    check(worst < 1e-6, "the built-in bank's EQ and delay type match its source bank for all 128 programs (max diff %.1e)" % worst)
 
 
 def test_filter(eng):
@@ -151,23 +157,29 @@ def test_filter(eng):
 def test_host(lib_path, tmp):
     print("Host API (bank program, params, slot state)")
     lib = ctypes.CDLL(lib_path)
-    lib.tinyk_dsp_v2_create.argtypes = [ctypes.c_char_p]
-    lib.tinyk_dsp_v2_set.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
-    lib.tinyk_dsp_v2_get.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
-    if not lib.tinyk_dsp_v2_create(tmp.encode()):
+    lib.tinyk_v2_create.argtypes = [ctypes.c_char_p]
+    lib.tinyk_v2_set.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+    lib.tinyk_v2_get.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
+    if not lib.tinyk_v2_create(tmp.encode()):
         sys.exit("create_instance failed")
 
     def put(k, v):
-        lib.tinyk_dsp_v2_set(k.encode(), str(v).encode())
+        lib.tinyk_v2_set(k.encode(), str(v).encode())
 
     def get(k):
         buf = ctypes.create_string_buffer(65536)
-        return buf.value.decode() if lib.tinyk_dsp_v2_get(k.encode(), buf, len(buf)) >= 0 else None
+        return buf.value.decode() if lib.tinyk_v2_get(k.encode(), buf, len(buf)) >= 0 else None
 
     def eq():
         return [get(k) for k in ("eq_low_freq", "eq_low_gain", "eq_hi_freq", "eq_hi_gain")]
 
-    check(eq() == ["0", "0", "0", "0"], "a built-in program loads a flat EQ: %s" % eq())
+    if os.path.exists(DEFAULT_BANK):
+        e0 = parse_program(0, load_programs(DEFAULT_BANK)[0])["eq"]
+        want0 = [str(round(e0["low_freq"] * 29)), str(round((e0["low_gain"] - 0.5) * 24)),
+                 str(round(e0["hi_freq"] * 29)), str(round((e0["hi_gain"] - 0.5) * 24))]
+        check(eq() == want0, "a built-in program loads its source program's EQ: %s" % eq())
+    else:
+        print("  [SKIP] a built-in program's EQ against its source program: %s is not here" % os.path.relpath(DEFAULT_BANK, cal.ROOT))
     put("bank_file", "1")
     put("preset", "40")   # program 40 of the test bank: Hi 10 / +3 dB, Low (40 * 7) % 30 = 10 / (440 % 25) - 12 = +3 dB
     check(eq() == ["10", "3", "10", "3"], "a bank program loads its EQ: %s" % eq())

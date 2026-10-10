@@ -269,6 +269,8 @@ TK_EXPORT int tinyk_bank_preset(int b, int idx, float *t1, float *t2, float *fx,
 }
 int tinyk_dsp_bank_arp(int b, int idx, float *arp);
 TK_EXPORT int tinyk_bank_arp(int b, int idx, float *arp) { return tinyk_dsp_bank_arp(b, idx, arp); }
+int tinyk_dsp_bank_eq(int b, int idx, float *eq);
+TK_EXPORT int tinyk_bank_eq(int b, int idx, float *eq) { return tinyk_dsp_bank_eq(b, idx, eq); }
 /* Bank / program selection through the public parameter API, then the active preset's name */
 TK_EXPORT int tinyk_select(const char *key, const char *val, char *name, int name_len) {
     synth_set_param(&synth, key, (float)atof(val));

@@ -144,18 +144,18 @@ def test_spectra(eng, names, coefs, periods):
 class Host:
     def __init__(self, lib_path, module_dir):
         self.lib = ctypes.CDLL(lib_path)
-        self.lib.tinyk_dsp_v2_create.argtypes = [ctypes.c_char_p]
-        self.lib.tinyk_dsp_v2_set.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
-        self.lib.tinyk_dsp_v2_get.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
-        if not self.lib.tinyk_dsp_v2_create(module_dir.encode()):
+        self.lib.tinyk_v2_create.argtypes = [ctypes.c_char_p]
+        self.lib.tinyk_v2_set.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
+        self.lib.tinyk_v2_get.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
+        if not self.lib.tinyk_v2_create(module_dir.encode()):
             sys.exit("create_instance failed")
 
     def put(self, key, val):
-        self.lib.tinyk_dsp_v2_set(key.encode(), str(val).encode())
+        self.lib.tinyk_v2_set(key.encode(), str(val).encode())
 
     def get(self, key):
         buf = ctypes.create_string_buffer(65536)
-        n = self.lib.tinyk_dsp_v2_get(key.encode(), buf, len(buf))
+        n = self.lib.tinyk_v2_get(key.encode(), buf, len(buf))
         return None if n < 0 else buf.value.decode()
 
     def osc_knobs(self):
