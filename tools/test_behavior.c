@@ -946,8 +946,8 @@ static int cmp_double(const void *a, const void *b) {
 
 /* Output level and dynamics: a full-velocity 3-note chord on 26 programs. The voice mix is linear (TINYK_MIX_GAIN keeps
  * chords far below the soft clip: median crest ~15 dB) and the output headroom (TINYK_OUTPUT_HEADROOM) puts the loudest
- * program's peak just under -6 dBFS and the median chord near -13 dBFS peak (native Move tracks sit around
- * -12..-8 dBFS) */
+ * program's peak just under -3 dBFS and the median chord near -9 dBFS peak (native Move tracks sit around
+ * -12..-8 dBFS; the engine keeps about 15 dB of crest, so it needs the higher peaks to sound as loud) */
 static void test_headroom(void) {
     printf("\nOutput level and dynamics (chord 48/52/55, full velocity)\n");
     double worst = 0, rms_db[26], crest_db[26];
@@ -980,8 +980,8 @@ static void test_headroom(void) {
     double med_rms = rms_db[n / 2], med_crest = crest_db[n / 2], max_rms = rms_db[n - 1];
     printf("  %d sounding programs: median RMS %.1f dBFS, max RMS %.1f dBFS, median crest %.1f dB\n", n, med_rms, max_rms, med_crest);
     char msg[200];
-    snprintf(msg, sizeof msg, "loudest program peaks at %.1f dBFS (program %d), within -6..-12 dBFS", 20 * log10(worst), worst_i);
-    check(worst <= 0.501 && worst >= 0.25, msg);
+    snprintf(msg, sizeof msg, "loudest program peaks at %.2f dBFS (program %d), within -3..-9 dBFS", 20 * log10(worst), worst_i);
+    check(worst <= 0.708 && worst >= 0.354, msg);
     snprintf(msg, sizeof msg, "median chord RMS %.1f dBFS is at most -21 dBFS", med_rms);
     check(med_rms <= -21.0, msg);
     snprintf(msg, sizeof msg, "loudest program RMS %.1f dBFS is at most -11 dBFS", max_rms);
