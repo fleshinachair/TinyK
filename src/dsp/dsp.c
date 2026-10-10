@@ -2286,11 +2286,15 @@ void synth_all_notes_off(synth_engine_t *synth) {
 }
 
 /* Output headroom: the last gain stage, after the Mod FX, delay, DC blockers, master volume and the soft-knee limiter, so
- * every drive and saturation curve upstream is untouched. The synth peaks near 0 dBFS, native Move instruments are
- * staged around -12..-8 dBFS: -6.9 dB brings a TinyK track level with them. The calibration tools build the engine
- * with -DTINYK_OUTPUT_HEADROOM=1.0f to keep comparing against the VST takes at unity. */
+ * nothing before it changes. Native Move instruments are staged around -12..-8 dBFS peak, and a TinyK track should sit
+ * with them: no program's full-velocity chord may peak past -6 dBFS (test_headroom in tools/test_behavior.c). The voice
+ * mix is linear, as the plug-in's is (TINYK_MIX_GAIN: the soft clip and the limiter act on extremes only), so the
+ * programs keep their dynamics (median crest about 15 dB) and the peaks are real: 0.68 puts the loudest of them at
+ * -6.1 dBFS and a typical chord near -13 dBFS peak, -27 dBFS RMS. It is a plain gain: a louder build is
+ * TINYK_CFLAGS=-DTINYK_OUTPUT_HEADROOM=0.9f ./scripts/build.sh, with peaks to -1 dBFS. The calibration tools build
+ * the engine with -DTINYK_OUTPUT_HEADROOM=1.0f to keep comparing against the VST takes at unity. */
 #ifndef TINYK_OUTPUT_HEADROOM
-#define TINYK_OUTPUT_HEADROOM 0.9f
+#define TINYK_OUTPUT_HEADROOM 0.68f
 #endif
 
 /* Soft-knee saturation / tanh master limiter to guarantee no digital wrap-around clipping */
