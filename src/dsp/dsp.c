@@ -1302,10 +1302,17 @@ static int dwgs_knob_shown(const synth_engine_t *synth) {
     return (int)(p[PARAM_WAVE1] * (float)(OSC1_WAVE_COUNT - 1) + 0.5f) == OSC1_WAVE_DWGS;
 }
 
+/* The Osc page's Control 1 reads "Pulse Width" while the edited layer's Wave 1 is the Pulse (Square) wave */
+static int pulse_knob_shown(const synth_engine_t *synth) {
+    const float *p = synth->timbre_params[edit_timbre(synth)];
+    return (int)(p[PARAM_WAVE1] * (float)(OSC1_WAVE_COUNT - 1) + 0.5f) == OSC1_WAVE_SQUARE;
+}
+
 /* Everything the served labels depend on: the Program names (bank, category), the timbre badge and the
- * Osc page's third knob */
+ * Osc page's second knob (Control 1, its Pulse Width reading, or the DWGS selector) */
 static int label_context(const synth_engine_t *synth) {
-    return ((synth->bank_file * 8 + synth->genre_category) * 3 + timbre_badge(synth)) * 2 + dwgs_knob_shown(synth);
+    return (((synth->bank_file * 8 + synth->genre_category) * 3 + timbre_badge(synth)) * 2 + dwgs_knob_shown(synth)) * 2
+           + pulse_knob_shown(synth);
 }
 
 /* Selector params served to the host as enum knobs over a 0..1 engine value: options are the names the
@@ -2289,12 +2296,12 @@ void synth_all_notes_off(synth_engine_t *synth) {
  * nothing before it changes. Native Move instruments are staged around -12..-8 dBFS peak, and a TinyK track should sit
  * with them: no program's full-velocity chord may peak past -6 dBFS (test_headroom in tools/test_behavior.c). The voice
  * mix is linear, as the plug-in's is (TINYK_MIX_GAIN: the soft clip and the limiter act on extremes only), so the
- * programs keep their dynamics (median crest about 15 dB) and the peaks are real: 0.68 puts the loudest of them at
- * -6.1 dBFS and a typical chord near -13 dBFS peak, -27 dBFS RMS. It is a plain gain: a louder build is
+ * programs keep their dynamics (median crest about 15 dB) and the peaks are real: with the built-in bank 0.56 puts the
+ * loudest of them (its EQ boosts, program 70) at -6.1 dBFS and a typical chord at -27 dBFS RMS (0.68 left it at -4.4). It is a plain gain: a louder build is
  * TINYK_CFLAGS=-DTINYK_OUTPUT_HEADROOM=0.9f ./scripts/build.sh, with peaks to -1 dBFS. The calibration tools build
  * the engine with -DTINYK_OUTPUT_HEADROOM=1.0f to keep comparing against the VST takes at unity. */
 #ifndef TINYK_OUTPUT_HEADROOM
-#define TINYK_OUTPUT_HEADROOM 0.68f
+#define TINYK_OUTPUT_HEADROOM 0.56f
 #endif
 
 /* Soft-knee saturation / tanh master limiter to guarantee no digital wrap-around clipping */
@@ -4396,8 +4403,26 @@ static const char *build_chain_params_json(const synth_engine_t *synth, char *bu
         json_put(&o, num);
     }
     json_put(&o, "],\"default\":0},");
-    json_put_head(&o, "osc1_ctrl1", "Control 1", badge);
-    json_put(&o, ",\"type\":\"int\",\"min\":0,\"max\":127,\"default\":0},");
+    /* Control 1 is the pulse's width on the Pulse wave: label and cell text follow Wave 1 (the layer's prefix
+     * as for every per-layer control) */
+    {
+        const int pw = pulse_knob_shown(synth);
+        char label[32], cell[16];
+        if (badge) {
+            snprintf(label, sizeof label, "L%d %s", badge, pw ? "Pulse Width" : "Control 1");
+            snprintf(cell, sizeof cell, "L%d.%s", badge, pw ? "PW" : "CT1");
+        } else {
+            snprintf(label, sizeof label, "%s", pw ? "Pulse Width" : "Control 1");
+            snprintf(cell, sizeof cell, "%s", pw ? "PW" : "CTL1");
+        }
+        json_put(&o, "{\"key\":\"osc1_ctrl1\",\"name\":");
+        json_put_string(&o, pw ? "Pulse Width" : "Control 1");
+        json_put(&o, ",\"label\":");
+        json_put_string(&o, label);
+        json_put(&o, ",\"short_name\":");
+        json_put_string(&o, cell);
+        json_put(&o, ",\"type\":\"int\",\"min\":0,\"max\":127,\"default\":0},");
+    }
     json_put_head(&o, "osc1_ctrl2", "Control 2", badge);
     json_put(&o, ",\"type\":\"int\",\"min\":0,\"max\":127,\"default\":0},");
     json_put_enum(&o, "modfx_type", "Mod FX Type", MODFX_TYPES, MODFX_TYPES_SHORT, 3, 0);
@@ -4504,102 +4529,106 @@ static const char MK_UI_HIERARCHY[] =
     ",\"options\":[\"A1\",\"A2\",\"A3\",\"A4\",\"A5\",\"A6\",\"A7\",\"A8\",\"B1\",\"B2\",\"B3\",\"B4\",\"B5\",\"B6\",\"B7\",\"B8\"],\"d"
     "efault\":0},{\"key\":\"arp_on\",\"label\":\"Arp\",\"short_name\":\"ARP\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"short_op"
     "tions\":[\"OFF\",\"ON\"],\"default\":0},{\"key\":\"voice_mode\",\"label\":\"Mode\",\"type\":\"enum\",\"options\":[\"Single\",\"Lay"
-    "er\"],\"short_options\":[\"SNGL\",\"LAYR\"],\"default\":0,\"short_name\":\"MODE\"},{\"key\":\"timbre_edit\",\"label\":\"Layer\",\""
-    "type\":\"enum\",\"options\":[\"Layer 1\",\"Layer 2\"],\"short_options\":[\"L1\",\"L2\"],\"default\":0,\"short_name\":\"LAYER\"},{"
-    "\"key\":\"voice_assign\",\"label\":\"Voice\",\"short_name\":\"VOICE\",\"type\":\"enum\",\"options\":[\"Mono\",\"Poly\",\"Unison\"]"
-    ",\"short_options\":[\"MONO\",\"POLY\",\"UNIS\"],\"default\":1},{\"key\":\"portamento\",\"label\":\"Portamento\",\"type\":\"float\""
-    ",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"timbre_balance\",\"label\":\"Layer Bal\",\"type\":\"float\",\"m"
-    "in\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01,\"short_name\":\"BAL\"}],\"knobs\":[\"category\",\"patch\",\"arp_on\",\"voice_m"
-    "ode\",\"timbre_edit\",\"voice_assign\",\"portamento\",\"timbre_balance\"]},\"osc\":{\"name\":\"Osc [L1]\",\"label\":\"Osc\",\"para"
-    "ms\":[{\"key\":\"wave1\",\"label\":\"Wave 1\",\"type\":\"enum\",\"options\":[\"Saw\",\"Square\",\"Triangle\",\"Sine\",\"Vox\",\"DW"
-    "GS\",\"Noise\"],\"short_options\":[\"SAW\",\"SQR\",\"TRI\",\"SIN\",\"VOX\",\"DWG\",\"NZ\"],\"default\":0},{\"key\":\"osc1_ctrl1\","
-    "\"label\":\"Control 1\",\"short_name\":\"CTL1\",\"type\":\"int\",\"min\":0,\"max\":127,\"default\":0},{\"key\":\"dwgs_wave\",\"lab"
-    "el\":\"DWGS Wave\",\"short_name\":\"DWGS\",\"type\":\"enum\",\"options\":[\"1 SynSine1\",\"2 SynSine2\",\"3 SynSine3\",\"4 SynSine"
-    "4\",\"5 SynSine5\",\"6 SynSine6\",\"7 SynSine7\",\"8 SynBass1\",\"9 SynBass2\",\"10 SynBass3\",\"11 SynBass4\",\"12 SynBass5\",\"1"
-    "3 SynBass6\",\"14 SynBass7\",\"15 SynWave1\",\"16 SynWave2\",\"17 SynWave3\",\"18 SynWave4\",\"19 SynWave5\",\"20 SynWave6\",\"21 "
-    "SynWave7\",\"22 SynWave8\",\"23 SynWave9\",\"24 5thWave1\",\"25 5thWave2\",\"26 5thWave3\",\"27 Digi1\",\"28 Digi2\",\"29 Digi3\","
-    "\"30 Digi4\",\"31 Digi5\",\"32 Digi6\",\"33 Digi7\",\"34 Digi8\",\"35 Endless\",\"36 E.Piano1\",\"37 E.Piano2\",\"38 E.Piano3\",\""
-    "39 E.Piano4\",\"40 Organ1\",\"41 Organ2\",\"42 Organ3\",\"43 Organ4\",\"44 Organ5\",\"45 Organ6\",\"46 Organ7\",\"47 Clav1\",\"48 "
-    "Clav2\",\"49 Guitar1\",\"50 Guitar2\",\"51 Guitar3\",\"52 Bass1\",\"53 Bass2\",\"54 Bass3\",\"55 Bass4\",\"56 Bass5\",\"57 Bell1\""
-    ",\"58 Bell2\",\"59 Bell3\",\"60 Bell4\",\"61 Voice1\",\"62 Voice2\",\"63 Voice3\",\"64 Voice4\"],\"short_options\":[\"1\",\"2\",\""
-    "3\",\"4\",\"5\",\"6\",\"7\",\"8\",\"9\",\"10\",\"11\",\"12\",\"13\",\"14\",\"15\",\"16\",\"17\",\"18\",\"19\",\"20\",\"21\",\"22\""
-    ",\"23\",\"24\",\"25\",\"26\",\"27\",\"28\",\"29\",\"30\",\"31\",\"32\",\"33\",\"34\",\"35\",\"36\",\"37\",\"38\",\"39\",\"40\",\"4"
-    "1\",\"42\",\"43\",\"44\",\"45\",\"46\",\"47\",\"48\",\"49\",\"50\",\"51\",\"52\",\"53\",\"54\",\"55\",\"56\",\"57\",\"58\",\"59\","
-    "\"60\",\"61\",\"62\",\"63\",\"64\"],\"default\":0},{\"key\":\"osc1_ctrl2\",\"label\":\"Control 2\",\"short_name\":\"CTL2\",\"type"
-    "\":\"int\",\"min\":0,\"max\":127,\"default\":0},{\"key\":\"wave2\",\"label\":\"Wave 2\",\"type\":\"enum\",\"options\":[\"Saw\",\"S"
-    "quare\",\"Triangle\"],\"short_options\":[\"SAW\",\"SQR\",\"TRI\"],\"default\":0},{\"key\":\"sync_ring\",\"label\":\"Sync / Ring\","
-    "\"type\":\"enum\",\"options\":[\"Off\",\"Ring\",\"Sync\",\"Ring Sync\"],\"short_options\":[\"OFF\",\"RING\",\"SYNC\",\"R.SNC\"],\""
-    "default\":0},{\"key\":\"osc2_semi\",\"label\":\"Semi\",\"type\":\"int\",\"min\":-24,\"max\":24,\"default\":0,\"unit\":\"st\"},{\"k"
-    "ey\":\"osc2_tune\",\"label\":\"Tune\",\"type\":\"int\",\"min\":-50,\"max\":50,\"default\":0,\"unit\":\"ct\"},{\"key\":\"osc_mix\","
-    "\"label\":\"Osc Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01}],\"knobs\":[\"wave1\",\"osc1_ctrl1"
-    "\",\"osc1_ctrl2\",\"wave2\",\"sync_ring\",\"osc2_semi\",\"osc2_tune\",\"osc_mix\"]},\"filter\":{\"name\":\"Filter [L1]\",\"label\""
-    ":\"Filter\",\"params\":[{\"key\":\"filter_type\",\"label\":\"Filter Type\",\"type\":\"enum\",\"options\":[\"LPF24\",\"LPF12\",\"BP"
-    "F12\",\"HPF12\"],\"short_options\":[\"LPF24\",\"LPF12\",\"BPF12\",\"HPF12\"],\"default\":0},{\"key\":\"cutoff\",\"label\":\"Cutoff"
-    "\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.7,\"step\":0.01,\"short_name\":\"CUT\"},{\"key\":\"resonance\",\"label"
-    "\":\"Resonance\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01,\"short_name\":\"RES\"},{\"key\":\"env_i"
-    "nt\",\"label\":\"EG Int\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"attack1\",\"label\""
-    ":\"Filter Atk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.01,\"step\":0.01},{\"key\":\"decay1\",\"label\":\"Filter "
-    "Dcy\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.4,\"step\":0.01},{\"key\":\"sustain1\",\"label\":\"Filter Sus\",\"t"
-    "ype\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"release1\",\"label\":\"Filter Rel\",\"type\":\"f"
-    "loat\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01}],\"knobs\":[\"filter_type\",\"cutoff\",\"resonance\",\"env_int\",\"a"
-    "ttack1\",\"decay1\",\"sustain1\",\"release1\"]},\"amp\":{\"name\":\"Amp [L1]\",\"label\":\"Amp\",\"params\":[{\"key\":\"noise_leve"
-    "l\",\"label\":\"Noise\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"level\",\"label\":\"L"
-    "evel\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.9,\"step\":0.01},{\"key\":\"drive\",\"label\":\"Distortion\",\"sho"
-    "rt_name\":\"DIST\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"short_options\":[\"OFF\",\"ON\"],\"default\":0},{\"key\":\"pan"
-    "\",\"label\":\"Pan\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"attack2\",\"label\":\"Am"
-    "p Attack\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.01,\"step\":0.01},{\"key\":\"decay2\",\"label\":\"Amp Dcy\",\""
-    "type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"sustain2\",\"label\":\"Amp Sus\",\"type\":\"flo"
-    "at\",\"min\":0.0,\"max\":1.0,\"default\":0.8,\"step\":0.01},{\"key\":\"release2\",\"label\":\"Amp Rel\",\"type\":\"float\",\"min\""
-    ":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01,\"short_name\":\"REL\"}],\"knobs\":[\"noise_level\",\"level\",\"drive\",\"pan\",\"a"
-    "ttack2\",\"decay2\",\"sustain2\",\"release2\"]},\"mod\":{\"name\":\"Mod\",\"label\":\"Mod\",\"params\":[{\"key\":\"lfo1_rate\",\"l"
-    "abel\":\"LFO1 Rate\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01,\"short_name\":\"LFO1\"},{\"key\":\""
-    "lfo2_rate\",\"label\":\"LFO2 Rate\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01,\"short_name\":\"LFO2"
-    "\"},{\"key\":\"mod_wheel\",\"label\":\"Mod Wheel\",\"short_name\":\"MOD\",\"type\":\"int\",\"min\":0,\"max\":127,\"default\":0},{"
-    "\"key\":\"keytrack\",\"label\":\"Filter Key Trk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01}],\"kno"
-    "bs\":[\"lfo1_rate\",\"lfo2_rate\",\"mod_wheel\",\"keytrack\"]},\"fx\":{\"name\":\"Effects\",\"label\":\"Effects\",\"params\":[{\"k"
-    "ey\":\"modfx_type\",\"label\":\"Mod FX Type\",\"short_name\":\"FX\",\"type\":\"enum\",\"options\":[\"Chorus/Flanger\",\"Ensemble\""
-    ",\"Phaser\"],\"short_options\":[\"CHO\",\"ENS\",\"PHS\"],\"default\":0},{\"key\":\"modfx_speed\",\"label\":\"Mod FX Speed\",\"shor"
-    "t_name\":\"SPEED\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01},{\"key\":\"chorus_mix\",\"label\":\"M"
-    "od FX Depth\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"delay_type\",\"label\":\"Delay "
-    "Type\",\"short_name\":\"D.TYP\",\"type\":\"enum\",\"options\":[\"Stereo\",\"Cross\",\"L/R\"],\"short_options\":[\"ST\",\"CRS\",\"L"
-    "/R\"],\"default\":0},{\"key\":\"delay_time\",\"label\":\"Delay Time\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,"
-    "\"step\":0.01},{\"key\":\"delay_feedback\",\"label\":\"Delay Fdbk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"s"
-    "tep\":0.01},{\"key\":\"delay_mix\",\"label\":\"Delay Mix\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.0"
-    "1},{\"key\":\"master_vol\",\"label\":\"Master Vol\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.8,\"step\":0.01,\"sho"
-    "rt_name\":\"VOL\"}],\"knobs\":[\"modfx_type\",\"modfx_speed\",\"chorus_mix\",\"delay_type\",\"delay_time\",\"delay_feedback\",\"de"
-    "lay_mix\",\"master_vol\"]},\"arpset\":{\"name\":\"Arp Settings\",\"label\":\"Arp Settings\",\"params\":[{\"key\":\"arp_type\",\"la"
-    "bel\":\"Type\",\"short_name\":\"TYPE\",\"type\":\"enum\",\"options\":[\"UP\",\"DOWN\",\"ALT1\",\"ALT2\",\"RANDOM\",\"TRIGGER\"],\""
-    "short_options\":[\"UP\",\"DOWN\",\"ALT1\",\"ALT2\",\"RND\",\"TRIG\"],\"default\":0},{\"key\":\"arp_range\",\"label\":\"Range\",\"s"
-    "hort_name\":\"RANGE\",\"type\":\"enum\",\"options\":[\"1 Oct\",\"2 Oct\",\"3 Oct\",\"4 Oct\"],\"short_options\":[\"1OCT\",\"2OCT\""
-    ",\"3OCT\",\"4OCT\"],\"default\":0},{\"key\":\"arp_resolution\",\"label\":\"Resolution\",\"short_name\":\"RESO\",\"type\":\"enum\","
-    "\"options\":[\"1/24\",\"1/16\",\"1/12\",\"1/8\",\"1/6\",\"1/4\"],\"short_options\":[\"1/24\",\"1/16\",\"1/12\",\"1/8\",\"1/6\",\"1"
-    "/4\"],\"default\":1},{\"key\":\"arp_gate\",\"label\":\"Gate\",\"short_name\":\"GATE\",\"type\":\"int\",\"min\":0,\"max\":100,\"def"
-    "ault\":80,\"unit\":\"%\"},{\"key\":\"arp_swing\",\"label\":\"Swing\",\"short_name\":\"SWING\",\"type\":\"int\",\"min\":-100,\"max"
-    "\":100,\"default\":0,\"unit\":\"%\"},{\"key\":\"arp_latch\",\"label\":\"Latch\",\"short_name\":\"LATCH\",\"type\":\"enum\",\"optio"
-    "ns\":[\"Off\",\"On\"],\"short_options\":[\"OFF\",\"ON\"],\"default\":0},{\"key\":\"arp_key_sync\",\"label\":\"Key Sync\",\"short_n"
-    "ame\":\"KSYNC\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"short_options\":[\"OFF\",\"ON\"],\"default\":0},{\"key\":\"arp_ta"
-    "rget\",\"label\":\"Target\",\"short_name\":\"TARGT\",\"type\":\"enum\",\"options\":[\"Both\",\"Layer 1\",\"Layer 2\"],\"short_opti"
-    "ons\":[\"BOTH\",\"L1\",\"L2\"],\"default\":0}],\"knobs\":[\"arp_type\",\"arp_range\",\"arp_resolution\",\"arp_gate\",\"arp_swing\""
-    ",\"arp_latch\",\"arp_key_sync\",\"arp_target\"]},\"steps\":{\"name\":\"Arp Steps\",\"label\":\"Arp Steps\",\"params\":[{\"key\":\""
-    "arp_step1\",\"label\":\"Step 1\",\"short_name\":\"ST1\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"RES"
-    "T\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step2\",\"l"
-    "abel\":\"Step 2\",\"short_name\":\"ST2\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],"
-    "\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step3\",\"label\":\"Step "
-    "3\",\"short_name\":\"ST3\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,"
-    "\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step4\",\"label\":\"Step 4\",\"short_na"
-    "me\":\"ST4\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind"
-    "\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step5\",\"label\":\"Step 5\",\"short_name\":\"ST5\",\""
-    "type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tin"
-    "yk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step6\",\"label\":\"Step 6\",\"short_name\":\"ST6\",\"type\":\"enum\""
-    ",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"ext"
-    "ra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step7\",\"label\":\"Step 7\",\"short_name\":\"ST7\",\"type\":\"enum\",\"options\":["
-    "\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"a"
-    "rp_playhead\"]}},{\"key\":\"arp_step8\",\"label\":\"Step 8\",\"short_name\":\"ST8\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play"
-    "\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}"
-    "}],\"knobs\":[\"arp_step1\",\"arp_step2\",\"arp_step3\",\"arp_step4\",\"arp_step5\",\"arp_step6\",\"arp_step7\",\"arp_step8\"]},\""
-    "bank\":{\"name\":\"Bank\",\"label\":\"Bank\",\"params\":[{\"key\":\"bank_file\",\"label\":\"Bank\",\"type\":\"enum\",\"options\":["
-    "\"Built-in\"],\"default\":0},{\"level\":\"bank_list\",\"label\":\"Browse banks\"}],\"knobs\":[\"bank_file\"]},\"bank_list\":{\"nam"
-    "e\":\"Banks\",\"label\":\"Select Bank\",\"items_param\":\"bank_list\",\"select_param\":\"bank_file\",\"navigate_to\":\"root\"}}}";
+    "er\"],\"short_options\":[\"SNGL\",\"LAYR\"],\"default\":0,\"short_name\":\"MODE\"},{\"key\":\"cutoff\",\"label\":\"Cutoff\",\"type"
+    "\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.7,\"step\":0.01,\"short_name\":\"CUT\"},{\"key\":\"resonance\",\"label\":\"Reso"
+    "nance\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01,\"short_name\":\"RES\"},{\"key\":\"release2\",\"l"
+    "abel\":\"Amp Rel\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01,\"short_name\":\"REL\"},{\"key\":\"tim"
+    "bre_edit\",\"label\":\"Layer\",\"type\":\"enum\",\"options\":[\"Layer 1\",\"Layer 2\"],\"short_options\":[\"L1\",\"L2\"],\"default"
+    "\":0,\"short_name\":\"LAYER\"}],\"knobs\":[\"category\",\"patch\",\"arp_on\",\"voice_mode\",\"cutoff\",\"resonance\",\"release2\","
+    "\"timbre_edit\"]},\"osc\":{\"name\":\"Osc [L1]\",\"label\":\"Osc\",\"params\":[{\"key\":\"wave1\",\"label\":\"Wave 1\",\"type\":\""
+    "enum\",\"options\":[\"Saw\",\"Square\",\"Triangle\",\"Sine\",\"Vox\",\"DWGS\",\"Noise\"],\"short_options\":[\"SAW\",\"SQR\",\"TRI"
+    "\",\"SIN\",\"VOX\",\"DWG\",\"NZ\"],\"default\":0},{\"key\":\"osc1_ctrl1\",\"label\":\"Control 1\",\"short_name\":\"CTL1\",\"type\""
+    ":\"int\",\"min\":0,\"max\":127,\"default\":0},{\"key\":\"dwgs_wave\",\"label\":\"DWGS Wave\",\"short_name\":\"DWGS\",\"type\":\"en"
+    "um\",\"options\":[\"1 SynSine1\",\"2 SynSine2\",\"3 SynSine3\",\"4 SynSine4\",\"5 SynSine5\",\"6 SynSine6\",\"7 SynSine7\",\"8 Syn"
+    "Bass1\",\"9 SynBass2\",\"10 SynBass3\",\"11 SynBass4\",\"12 SynBass5\",\"13 SynBass6\",\"14 SynBass7\",\"15 SynWave1\",\"16 SynWav"
+    "e2\",\"17 SynWave3\",\"18 SynWave4\",\"19 SynWave5\",\"20 SynWave6\",\"21 SynWave7\",\"22 SynWave8\",\"23 SynWave9\",\"24 5thWave1"
+    "\",\"25 5thWave2\",\"26 5thWave3\",\"27 Digi1\",\"28 Digi2\",\"29 Digi3\",\"30 Digi4\",\"31 Digi5\",\"32 Digi6\",\"33 Digi7\",\"34"
+    " Digi8\",\"35 Endless\",\"36 E.Piano1\",\"37 E.Piano2\",\"38 E.Piano3\",\"39 E.Piano4\",\"40 Organ1\",\"41 Organ2\",\"42 Organ3\","
+    "\"43 Organ4\",\"44 Organ5\",\"45 Organ6\",\"46 Organ7\",\"47 Clav1\",\"48 Clav2\",\"49 Guitar1\",\"50 Guitar2\",\"51 Guitar3\",\"5"
+    "2 Bass1\",\"53 Bass2\",\"54 Bass3\",\"55 Bass4\",\"56 Bass5\",\"57 Bell1\",\"58 Bell2\",\"59 Bell3\",\"60 Bell4\",\"61 Voice1\",\""
+    "62 Voice2\",\"63 Voice3\",\"64 Voice4\"],\"short_options\":[\"1\",\"2\",\"3\",\"4\",\"5\",\"6\",\"7\",\"8\",\"9\",\"10\",\"11\",\""
+    "12\",\"13\",\"14\",\"15\",\"16\",\"17\",\"18\",\"19\",\"20\",\"21\",\"22\",\"23\",\"24\",\"25\",\"26\",\"27\",\"28\",\"29\",\"30\""
+    ",\"31\",\"32\",\"33\",\"34\",\"35\",\"36\",\"37\",\"38\",\"39\",\"40\",\"41\",\"42\",\"43\",\"44\",\"45\",\"46\",\"47\",\"48\",\"4"
+    "9\",\"50\",\"51\",\"52\",\"53\",\"54\",\"55\",\"56\",\"57\",\"58\",\"59\",\"60\",\"61\",\"62\",\"63\",\"64\"],\"default\":0},{\"ke"
+    "y\":\"osc1_ctrl2\",\"label\":\"Control 2\",\"short_name\":\"CTL2\",\"type\":\"int\",\"min\":0,\"max\":127,\"default\":0},{\"key\":"
+    "\"wave2\",\"label\":\"Wave 2\",\"type\":\"enum\",\"options\":[\"Saw\",\"Square\",\"Triangle\"],\"short_options\":[\"SAW\",\"SQR\","
+    "\"TRI\"],\"default\":0},{\"key\":\"sync_ring\",\"label\":\"Sync / Ring\",\"type\":\"enum\",\"options\":[\"Off\",\"Ring\",\"Sync\","
+    "\"Ring Sync\"],\"short_options\":[\"OFF\",\"RING\",\"SYNC\",\"R.SNC\"],\"default\":0},{\"key\":\"osc2_semi\",\"label\":\"Semi\",\""
+    "type\":\"int\",\"min\":-24,\"max\":24,\"default\":0,\"unit\":\"st\"},{\"key\":\"osc2_tune\",\"label\":\"Tune\",\"type\":\"int\",\""
+    "min\":-50,\"max\":50,\"default\":0,\"unit\":\"ct\"},{\"key\":\"osc_mix\",\"label\":\"Osc Mix\",\"type\":\"float\",\"min\":0.0,\"ma"
+    "x\":1.0,\"default\":0.5,\"step\":0.01}],\"knobs\":[\"wave1\",\"osc1_ctrl1\",\"osc1_ctrl2\",\"wave2\",\"sync_ring\",\"osc2_semi\","
+    "\"osc2_tune\",\"osc_mix\"]},\"filter\":{\"name\":\"Filter [L1]\",\"label\":\"Filter\",\"params\":[{\"key\":\"filter_type\",\"label"
+    "\":\"Filter Type\",\"type\":\"enum\",\"options\":[\"LPF24\",\"LPF12\",\"BPF12\",\"HPF12\"],\"short_options\":[\"LPF24\",\"LPF12\","
+    "\"BPF12\",\"HPF12\"],\"default\":0},{\"key\":\"cutoff\",\"label\":\"Cutoff\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default"
+    "\":0.7,\"step\":0.01,\"short_name\":\"CUT\"},{\"key\":\"resonance\",\"label\":\"Resonance\",\"type\":\"float\",\"min\":0.0,\"max\""
+    ":1.0,\"default\":0.2,\"step\":0.01,\"short_name\":\"RES\"},{\"key\":\"env_int\",\"label\":\"EG Int\",\"type\":\"float\",\"min\":0."
+    "0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"attack1\",\"label\":\"Filter Atk\",\"type\":\"float\",\"min\":0.0,\"max\":"
+    "1.0,\"default\":0.01,\"step\":0.01},{\"key\":\"decay1\",\"label\":\"Filter Dcy\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"defa"
+    "ult\":0.4,\"step\":0.01},{\"key\":\"sustain1\",\"label\":\"Filter Sus\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5"
+    ",\"step\":0.01},{\"key\":\"release1\",\"label\":\"Filter Rel\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\""
+    ":0.01}],\"knobs\":[\"filter_type\",\"cutoff\",\"resonance\",\"env_int\",\"attack1\",\"decay1\",\"sustain1\",\"release1\"]},\"amp\""
+    ":{\"name\":\"Amp [L1]\",\"label\":\"Amp\",\"params\":[{\"key\":\"noise_level\",\"label\":\"Noise\",\"type\":\"float\",\"min\":0.0,"
+    "\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"level\",\"label\":\"Level\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"def"
+    "ault\":0.9,\"step\":0.01},{\"key\":\"drive\",\"label\":\"Distortion\",\"short_name\":\"DIST\",\"type\":\"enum\",\"options\":[\"Off"
+    "\",\"On\"],\"short_options\":[\"OFF\",\"ON\"],\"default\":0},{\"key\":\"pan\",\"label\":\"Pan\",\"type\":\"float\",\"min\":0.0,\"m"
+    "ax\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"attack2\",\"label\":\"Amp Attack\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,"
+    "\"default\":0.01,\"step\":0.01},{\"key\":\"decay2\",\"label\":\"Amp Dcy\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0"
+    ".5,\"step\":0.01},{\"key\":\"sustain2\",\"label\":\"Amp Sus\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.8,\"step\":"
+    "0.01},{\"key\":\"release2\",\"label\":\"Amp Rel\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.2,\"step\":0.01,\"short"
+    "_name\":\"REL\"}],\"knobs\":[\"noise_level\",\"level\",\"drive\",\"pan\",\"attack2\",\"decay2\",\"sustain2\",\"release2\"]},\"mod"
+    "\":{\"name\":\"Mod\",\"label\":\"Mod\",\"params\":[{\"key\":\"lfo1_rate\",\"label\":\"LFO1 Rate\",\"type\":\"float\",\"min\":0.0,"
+    "\"max\":1.0,\"default\":0.3,\"step\":0.01,\"short_name\":\"LFO1\"},{\"key\":\"lfo2_rate\",\"label\":\"LFO2 Rate\",\"type\":\"float"
+    "\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01,\"short_name\":\"LFO2\"},{\"key\":\"mod_wheel\",\"label\":\"Mod Wheel\","
+    "\"short_name\":\"MOD\",\"type\":\"int\",\"min\":0,\"max\":127,\"default\":0},{\"key\":\"keytrack\",\"label\":\"Filter Key Trk\",\""
+    "type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01},{\"key\":\"voice_assign\",\"label\":\"Voice\",\"short_name"
+    "\":\"VOICE\",\"type\":\"enum\",\"options\":[\"Mono\",\"Poly\",\"Unison\"],\"short_options\":[\"MONO\",\"POLY\",\"UNIS\"],\"default"
+    "\":1},{\"key\":\"portamento\",\"label\":\"Portamento\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{"
+    "\"key\":\"timbre_balance\",\"label\":\"Layer Bal\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.5,\"step\":0.01,\"shor"
+    "t_name\":\"BAL\"}],\"knobs\":[\"lfo1_rate\",\"lfo2_rate\",\"mod_wheel\",\"keytrack\",\"voice_assign\",\"portamento\",\"timbre_bala"
+    "nce\"]},\"fx\":{\"name\":\"Effects\",\"label\":\"Effects\",\"params\":[{\"key\":\"modfx_type\",\"label\":\"Mod FX Type\",\"short_n"
+    "ame\":\"FX\",\"type\":\"enum\",\"options\":[\"Chorus/Flanger\",\"Ensemble\",\"Phaser\"],\"short_options\":[\"CHO\",\"ENS\",\"PHS\""
+    "],\"default\":0},{\"key\":\"modfx_speed\",\"label\":\"Mod FX Speed\",\"short_name\":\"SPEED\",\"type\":\"float\",\"min\":0.0,\"max"
+    "\":1.0,\"default\":0.3,\"step\":0.01},{\"key\":\"chorus_mix\",\"label\":\"Mod FX Depth\",\"type\":\"float\",\"min\":0.0,\"max\":1."
+    "0,\"default\":0.0,\"step\":0.01},{\"key\":\"delay_type\",\"label\":\"Delay Type\",\"short_name\":\"D.TYP\",\"type\":\"enum\",\"opt"
+    "ions\":[\"Stereo\",\"Cross\",\"L/R\"],\"short_options\":[\"ST\",\"CRS\",\"L/R\"],\"default\":0},{\"key\":\"delay_time\",\"label\":"
+    "\"Delay Time\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01},{\"key\":\"delay_feedback\",\"label\":\"D"
+    "elay Fdbk\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.3,\"step\":0.01},{\"key\":\"delay_mix\",\"label\":\"Delay Mix"
+    "\",\"type\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.0,\"step\":0.01},{\"key\":\"master_vol\",\"label\":\"Master Vol\",\"ty"
+    "pe\":\"float\",\"min\":0.0,\"max\":1.0,\"default\":0.8,\"step\":0.01,\"short_name\":\"VOL\"}],\"knobs\":[\"modfx_type\",\"modfx_sp"
+    "eed\",\"chorus_mix\",\"delay_type\",\"delay_time\",\"delay_feedback\",\"delay_mix\",\"master_vol\"]},\"arpset\":{\"name\":\"Arp Se"
+    "ttings\",\"label\":\"Arp Settings\",\"params\":[{\"key\":\"arp_type\",\"label\":\"Type\",\"short_name\":\"TYPE\",\"type\":\"enum\""
+    ",\"options\":[\"UP\",\"DOWN\",\"ALT1\",\"ALT2\",\"RANDOM\",\"TRIGGER\"],\"short_options\":[\"UP\",\"DOWN\",\"ALT1\",\"ALT2\",\"RND"
+    "\",\"TRIG\"],\"default\":0},{\"key\":\"arp_range\",\"label\":\"Range\",\"short_name\":\"RANGE\",\"type\":\"enum\",\"options\":[\"1"
+    " Oct\",\"2 Oct\",\"3 Oct\",\"4 Oct\"],\"short_options\":[\"1OCT\",\"2OCT\",\"3OCT\",\"4OCT\"],\"default\":0},{\"key\":\"arp_resolu"
+    "tion\",\"label\":\"Resolution\",\"short_name\":\"RESO\",\"type\":\"enum\",\"options\":[\"1/24\",\"1/16\",\"1/12\",\"1/8\",\"1/6\","
+    "\"1/4\"],\"short_options\":[\"1/24\",\"1/16\",\"1/12\",\"1/8\",\"1/6\",\"1/4\"],\"default\":1},{\"key\":\"arp_gate\",\"label\":\"G"
+    "ate\",\"short_name\":\"GATE\",\"type\":\"int\",\"min\":0,\"max\":100,\"default\":80,\"unit\":\"%\"},{\"key\":\"arp_swing\",\"label"
+    "\":\"Swing\",\"short_name\":\"SWING\",\"type\":\"int\",\"min\":-100,\"max\":100,\"default\":0,\"unit\":\"%\"},{\"key\":\"arp_latch"
+    "\",\"label\":\"Latch\",\"short_name\":\"LATCH\",\"type\":\"enum\",\"options\":[\"Off\",\"On\"],\"short_options\":[\"OFF\",\"ON\"],"
+    "\"default\":0},{\"key\":\"arp_key_sync\",\"label\":\"Key Sync\",\"short_name\":\"KSYNC\",\"type\":\"enum\",\"options\":[\"Off\",\""
+    "On\"],\"short_options\":[\"OFF\",\"ON\"],\"default\":0},{\"key\":\"arp_target\",\"label\":\"Target\",\"short_name\":\"TARGT\",\"ty"
+    "pe\":\"enum\",\"options\":[\"Both\",\"Layer 1\",\"Layer 2\"],\"short_options\":[\"BOTH\",\"L1\",\"L2\"],\"default\":0}],\"knobs\":"
+    "[\"arp_type\",\"arp_range\",\"arp_resolution\",\"arp_gate\",\"arp_swing\",\"arp_latch\",\"arp_key_sync\",\"arp_target\"]},\"steps"
+    "\":{\"name\":\"Arp Steps\",\"label\":\"Arp Steps\",\"params\":[{\"key\":\"arp_step1\",\"label\":\"Step 1\",\"short_name\":\"ST1\","
+    "\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:t"
+    "inyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step2\",\"label\":\"Step 2\",\"short_name\":\"ST2\",\"type\":\"enum"
+    "\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"e"
+    "xtra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step3\",\"label\":\"Step 3\",\"short_name\":\"ST3\",\"type\":\"enum\",\"options\":"
+    "[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\""
+    "arp_playhead\"]}},{\"key\":\"arp_step4\",\"label\":\"Step 4\",\"short_name\":\"ST4\",\"type\":\"enum\",\"options\":[\"Rest\",\"Pla"
+    "y\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]"
+    "}},{\"key\":\"arp_step5\",\"label\":\"Step 5\",\"short_name\":\"ST5\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_op"
+    "tions\":[\"REST\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"a"
+    "rp_step6\",\"label\":\"Step 6\",\"short_name\":\"ST6\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST"
+    "\",\"PLAY\"],\"default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step7\",\"la"
+    "bel\":\"Step 7\",\"short_name\":\"ST7\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\""
+    "default\":1,\"viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}},{\"key\":\"arp_step8\",\"label\":\"Step 8"
+    "\",\"short_name\":\"ST8\",\"type\":\"enum\",\"options\":[\"Rest\",\"Play\"],\"short_options\":[\"REST\",\"PLAY\"],\"default\":1,\""
+    "viz\":{\"kind\":\"custom:tinyk_step\",\"extra_keys\":[\"arp_playhead\"]}}],\"knobs\":[\"arp_step1\",\"arp_step2\",\"arp_step3\",\""
+    "arp_step4\",\"arp_step5\",\"arp_step6\",\"arp_step7\",\"arp_step8\"]},\"bank\":{\"name\":\"Bank\",\"label\":\"Bank\",\"params\":[{"
+    "\"key\":\"bank_file\",\"label\":\"Bank\",\"type\":\"enum\",\"options\":[\"Built-in\"],\"default\":0},{\"level\":\"bank_list\",\"la"
+    "bel\":\"Browse banks\"}],\"knobs\":[\"bank_file\"]},\"bank_list\":{\"name\":\"Banks\",\"label\":\"Select Bank\",\"items_param\":\""
+    "bank_list\",\"select_param\":\"bank_file\",\"navigate_to\":\"root\"}}}";
 
 static int v2_get_param(void *instance, const char *key, char *buf, int buf_len) {
     tinyk_instance_t *inst = (tinyk_instance_t*)instance;

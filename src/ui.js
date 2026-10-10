@@ -3,12 +3,11 @@
  *
  * Handles 128x64 OLED display rendering and 8 hardware encoders
  * across the parameter pages (the same pages as the module.json ui_hierarchy):
- *   PERF:         Category, Program, Arp, Mode (Single / Layer), Layer (L1 / L2), Voice (Mono / Poly / Unison),
- *                 Portamento, Layer Balance
+ *   PERF:         Category, Program, Arp, Mode (Single / Layer), Cutoff, Resonance, Amp Release, Layer (L1 / L2)
  *   OSC:          Wave1, Control 1 (or the DWGS wave while Wave1 is DWGS), Control 2, Wave2, Sync/Ring, Semi, Tune, Osc Mix
  *   FILTER:       Type, Cutoff, Res, EG Int, Filter Atk/Dcy/Sus/Rel
  *   AMP:          Noise, Level, Distortion, Pan, Amp Atk/Dcy/Sus/Rel
- *   MOD:          LFO1 / LFO2 Rate, Mod Wheel, Filter Key Track
+ *   MOD:          LFO1 / LFO2 Rate, Mod Wheel, Filter Key Track, Voice (Mono / Poly / Unison), Portamento, Layer Balance
  *   EFFECTS:      Mod FX Type/Speed/Depth, Delay Type/Time/Feedback/Mix, Master Vol
  *   ARP SETTINGS: Type, Range, Resolution, Gate, Swing, Latch, Key Sync, Target
  *   ARP STEPS:    Step 1..8 of the arpeggiator's pattern (Rest / Play), drawn as the microKORG's 2 x 4 step LEDs
@@ -70,14 +69,14 @@ export const PAGES = [
             { key: "patch",          label: "Program",  short: "Prog", index: true, values: ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"], presetName: true, patches: true },
             // the program's arpeggiator (stored on / off until changed here)
             { key: "arp_on",         label: "Arp",     short: "Arp",  values: ["Off", "On"] },
-            // Single (one layer, 8 voices) or Layer (two layers, 4 voices each)
+            // Single (one layer, 4 voices) or Layer (two layers, 2 voices each)
             { key: "voice_mode",     label: "Mode",    short: "Mode", values: ["Single", "Layer"] },
+            // the live macros: filter cutoff, resonance and amp release of the edited layer
+            { key: "cutoff",         label: "Cutoff",  short: "Cut",   l2: "L2.CUT",  format: cutoffHz },
+            { key: "resonance",      label: "Res",     short: "Res",   l2: "L2.RES",  format: pct },
+            { key: "release2",       label: "AmpRel",  short: "ARel",  l2: "L2.REL",  format: pct },
             // which layer the per-layer controls edit (Layer mode; "N/A" in Single)
-            { key: "timbre_edit",    label: "Layer",   short: "Layer", values: ["L1", "L2"] },
-            // the layer's polyphony (Mono / Poly / Unison), its glide, and the layers' balance
-            { key: "voice_assign",   label: "Voice",   short: "Voice", l2: "L2.VOIC", index: true, values: ["Mono", "Poly", "Unison"] },
-            { key: "portamento",     label: "Porta",   short: "Porta", l2: "L2.PORT", format: pct },
-            { key: "timbre_balance", label: "LayerBal", short: "Bal",  format: (v) => `${Math.round((1 - v) * 100)}:${Math.round(v * 100)}` }
+            { key: "timbre_edit",    label: "Layer",   short: "Layer", values: ["L1", "L2"] }
         ]
     },
     {
@@ -141,7 +140,11 @@ export const PAGES = [
             { key: "lfo2_rate",   label: "LFO2",   short: "LFO2",  format: lfoHz },
             // stands in for the mod wheel the Move lacks: virtual patch source 7, same as CC1
             { key: "mod_wheel",   label: "ModWhl", short: "MOD",   int: [0, 127], format: (v) => `${Math.round(v)}` },
-            { key: "keytrack",    label: "KeyTr",  short: "KeyTr", l2: "L2.KTRK", format: bipolar }
+            { key: "keytrack",    label: "KeyTr",  short: "KeyTr", l2: "L2.KTRK", format: bipolar },
+            // the layer's polyphony (Mono / Poly / Unison), its glide, and the layers' balance
+            { key: "voice_assign",   label: "Voice",   short: "Voice", l2: "L2.VOIC", index: true, values: ["Mono", "Poly", "Unison"] },
+            { key: "portamento",     label: "Porta",   short: "Porta", l2: "L2.PORT", format: pct },
+            { key: "timbre_balance", label: "LayerBal", short: "Bal",  format: (v) => `${Math.round((1 - v) * 100)}:${Math.round(v * 100)}` }
         ]
     },
     {
