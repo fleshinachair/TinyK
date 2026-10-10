@@ -262,6 +262,28 @@ class Engine:
             raise RuntimeError("render failed")
         return buf.reshape(-1, 2).astype(np.float64).mean(axis=1)
 
+    def render_midi(self, slot, patch, events, total_s, stereo=False):
+        """Render a parse_program() patch dict played by MIDI events: (time s, status, data 1, data 2) rows in
+        time order, e.g. (0.0, 0x90, 60, 100), (0.5, 0xB0, 1, 127), (1.0, 0xE0, 0, 96), (2.0, 0x80, 60, 0)."""
+        frames = int(total_s * SR)
+        buf = np.zeros(frames * 2, dtype=np.float32)
+        arrays = [np.array([patch[t][f] for f in TIMBRE_FIELDS], dtype=np.float32) for t in ("t1", "t2")]
+        arrays.append(np.array([patch["fx"][f] for f in FX_FIELDS], dtype=np.float32))
+        arrays.append(np.array([patch.get("eq", EQ_FLAT)[f] for f in EQ_FIELDS] + [patch.get("delay_type", 0.0)], dtype=np.float32))
+        fp = [a.ctypes.data_as(ctypes.POINTER(ctypes.c_float)) for a in arrays]
+        ev = np.array(sorted(events), dtype=np.float64).reshape(-1, 4)
+        self.lib.tinyk_set_patch_eq(fp[3])
+        self.lib.tinyk_render_patch_midi.restype = ctypes.c_int
+        self.lib.tinyk_render_patch_midi.argtypes = [ctypes.c_int, ctypes.c_int] + [ctypes.POINTER(ctypes.c_float)] * 3 + [
+            ctypes.POINTER(ctypes.c_double), ctypes.c_int, ctypes.c_double, ctypes.POINTER(ctypes.c_float), ctypes.c_int]
+        n = self.lib.tinyk_render_patch_midi(slot, int(patch["voice_mode"] >= 0.5), fp[0], fp[1], fp[2],
+                                               ev.ctypes.data_as(ctypes.POINTER(ctypes.c_double)), len(ev), total_s,
+                                               buf.ctypes.data_as(ctypes.POINTER(ctypes.c_float)), frames)
+        if n < 0:
+            raise RuntimeError("render failed (library built without -DTINYK_TUNING?)")
+        lr = buf.reshape(-1, 2).astype(np.float64)
+        return lr if stereo else lr.mean(axis=1)
+
     def render_patch(self, slot, patch, note, gate_s, total_s, stereo=False):
         """Render a parse_program() patch dict played from bank slot `slot` (mono mix, or frames x 2 with stereo)."""
         frames = int(total_s * SR)

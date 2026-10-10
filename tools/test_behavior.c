@@ -956,6 +956,256 @@ static void test_headroom(void) {
     check(worst <= 0.905 && worst > 0.1, msg);
 }
 
+
+/* --- Pitch controls, EG reset, the top octaves ------------------------------------------------------------------ */
+
+/* a plain sine through the open high-pass: its pitch is its zero crossings, its level the amp EG */
+static void sine_voice(void) {
+    open_voice();
+    synth_set_param(&S, "wave1", 0.5f);        /* Sine */
+    synth_set_param(&S, "filter_type", 1.0f);  /* 12HPF */
+    synth_set_param(&S, "cutoff", 0.0f);
+    synth_set_param(&S, "portamento", 0.0f);
+    S.timbre_extra[0].osc1_ctrl[0] = S.timbre_extra[0].osc1_ctrl[1] = 0.0f;
+    S.timbre_extra[0].noise_level = 0.0f;
+    for (int p = 0; p < 4; p++) S.timbre_extra[0].patch_int[p] = 0.0f;
+}
+
+/* highest and lowest pitch (semitones re `note`) over the render, from rising zero crossings after 0.2 s */
+static void pitch_range(const int16_t *b, int n, int note, double *lo, double *hi) {
+    double base = 440.0 * pow(2.0, (note - 69) / 12.0), last = -1.0;
+    *lo = 1e9; *hi = -1e9;
+    for (int i = (int)(0.2 * SR); i + 1 < n; i++) {
+        double x0 = b[2 * i] + b[2 * i + 1], x1 = b[2 * i + 2] + b[2 * i + 3];
+        if (x0 < 0.0 && x1 >= 0.0) {
+            double z = i + x0 / (x0 - x1);
+            if (last >= 0.0) {
+                double st = 12.0 * log2(SR / (z - last) / base);
+                if (st < *lo) *lo = st;
+                if (st > *hi) *hi = st;
+            }
+            last = z;
+        }
+    }
+}
+
+static void midi3(uint8_t a, uint8_t b, uint8_t c) {
+    uint8_t m[3] = { a, b, c };
+    move_plugin_on_midi(&S, m, 3, 0);
+}
+
+static void test_pitch_controls(void) {
+    printf("\nBend range and vibrato int (the plug-in: range x bend; LFO2 x wheel, 0.25 semitone per step):\n");
+    char what[200];
+    static const float ranges[4] = { 2.0f, 12.0f, -12.0f, 0.0f };
+    int ok = 1;
+    double got[4];
+    for (int r = 0; r < 4; r++) {
+        sine_voice();
+        S.timbre_extra[0].bend_semi = ranges[r];
+        midi3(0xE0, 0x7F, 0x7F);                /* full bend up */
+        synth_note_on(&S, 69, 100);
+        int n; double lo, hi;
+        int16_t *b = render(0.6, &n);
+        pitch_range(b, n, 69, &lo, &hi);
+        got[r] = 0.5 * (lo + hi);
+        if (fabs(got[r] - ranges[r]) > 0.03) ok = 0;
+        free(b);
+    }
+    snprintf(what, sizeof what, "full bend at range +2 / +12 / -12 / 0: %+.2f %+.2f %+.2f %+.2f semitones", got[0], got[1], got[2], got[3]);
+    check(ok, what);
+    fresh(0);
+    check(S.timbre_extra[0].bend_semi == 2.0f && S.timbre_extra[0].vibrato_int == 0.0f && S.timbre_extra[0].eg_reset[0] == 1 && S.timbre_extra[0].eg_reset[1] == 1,
+          "a bank without these values plays bend range 2, no vibrato, both EG resets on");
+
+    static const int wheel[3] = { 0, 127, 127 };
+    static const float vint[3] = { 25.0f, 5.0f, -50.0f };
+    static const double want[3] = { 0.0, 1.25, 13.6 };
+    double swing[3];
+    ok = 1;
+    for (int k = 0; k < 3; k++) {
+        sine_voice();
+        S.timbre_extra[0].vibrato_int = vint[k];
+        S.timbre_extra[0].lfo_wave[1] = 2;       /* LFO2 sine */
+        S.timbre_extra[0].lfo_rate[1] = 70.0f / 127.0f;
+        S.timbre_extra[0].lfo_sync_note[1] = -1;
+        midi3(0xB0, 1, (uint8_t)wheel[k]);
+        synth_note_on(&S, 69, 100);
+        int n; double lo, hi;
+        int16_t *b = render(1.5, &n);
+        pitch_range(b, n, 69, &lo, &hi);
+        swing[k] = 0.5 * (hi - lo);
+        if (fabs(swing[k] - want[k]) > 0.05 + 0.02 * want[k]) ok = 0;
+        free(b);
+    }
+    snprintf(what, sizeof what, "vibrato swing: wheel 0 / int +25 %.2f, wheel 127 / int +5 %.2f, wheel 127 / int -50 %.2f semitones (0, 1.25, 13.6)",
+             swing[0], swing[1], swing[2]);
+    check(ok, what);
+}
+
+/* the level over [t0, t1) of the render, rms of the mono mix */
+static double level_between(const int16_t *b, double t0, double t1) {
+    double e = 0.0;
+    int a = (int)(t0 * SR), z = (int)(t1 * SR);
+    for (int i = a; i < z; i++) { double v = (b[2 * i] + b[2 * i + 1]) / 65536.0; e += v * v; }
+    return sqrt(e / (z - a));
+}
+
+static void test_eg_reset(void) {
+    printf("\nEG reset (the plug-in: on = the level is gone within 4 ms of a retrigger and the attack starts over):\n");
+    char what[220];
+    double before[2], after[2], later[2], step[2];
+    for (int reset = 0; reset < 2; reset++) {
+        sine_voice();
+        synth_set_param(&S, "voice_assign", 0.0f);     /* Mono */
+        synth_set_param(&S, "attack2", 64.0f / 127.0f); /* 0.79 s */
+        synth_set_param(&S, "release2", 70.0f / 127.0f);
+        S.timbre_extra[0].eg_reset[1] = reset;
+        synth_note_on(&S, 81, 100);
+        int n1, n2, n3;
+        int16_t *a = render(1.0, &n1);
+        synth_note_off(&S, 81);
+        int16_t *r = render(0.3, &n2);
+        synth_note_on(&S, 81, 100);
+        int16_t *c = render(0.6, &n3);
+        before[reset] = level_between(r, 0.28, 0.30);
+        after[reset] = level_between(c, 0.010, 0.030);
+        later[reset] = level_between(c, 0.50, 0.52);
+        /* the hardest sample-to-sample step across the retrigger against the hardest while the note simply sounds */
+        double plain = 0.0, worst = 0.0;
+        for (int i = n2 - 2000; i + 1 < n2; i++) plain = fmax(plain, fabs((double)r[2 * i + 2] - r[2 * i]));
+        for (int i = 0; i < 600; i++) worst = fmax(worst, fabs((double)c[2 * i + 2] - c[2 * i]));
+        worst = fmax(worst, fabs((double)c[0] - r[2 * n2 - 2]));
+        step[reset] = worst / (plain + 1e-9);
+        free(a); free(r); free(c);
+    }
+    snprintf(what, sizeof what, "reset on: level 10-30 ms after the retrigger %.1f dB re just before it (silence), back at %.1f dB by 0.5 s",
+             20 * log10(after[1] / before[1] + 1e-9), 20 * log10(later[1] / before[1] + 1e-9));
+    check(after[1] < 0.05 * before[1] && later[1] > before[1], what);
+    snprintf(what, sizeof what, "reset off: the level carries on (%.1f dB re just before)", 20 * log10(after[0] / before[0] + 1e-9));
+    check(after[0] > 0.9 * before[0], what);
+    snprintf(what, sizeof what, "no click either way: hardest step %.2f / %.2f of the sounding note's own", step[1], step[0]);
+    check(step[1] < 1.5 && step[0] < 1.5, what);
+
+    /* the filter EG: its level at the retrigger */
+    float e1[2];
+    for (int reset = 0; reset < 2; reset++) {
+        sine_voice();
+        synth_set_param(&S, "voice_assign", 0.0f);
+        synth_set_param(&S, "attack1", 64.0f / 127.0f);
+        synth_set_param(&S, "sustain1", 1.0f);
+        synth_set_param(&S, "release1", 90.0f / 127.0f);
+        synth_set_param(&S, "release2", 90.0f / 127.0f);
+        S.timbre_extra[0].eg_reset[0] = reset;
+        synth_note_on(&S, 60, 100);
+        int n; int16_t *b = render(1.0, &n); free(b);
+        synth_note_off(&S, 60);
+        b = render(0.2, &n); free(b);
+        synth_note_on(&S, 60, 100);
+        b = render(0.003, &n); free(b);
+        e1[reset] = 0.0f;
+        for (int v = 0; v < NUM_VOICES; v++) if (S.voices[v].active) e1[reset] = S.voices[v].filter_env.value;
+    }
+    snprintf(what, sizeof what, "filter EG 3 ms after a retrigger: %.3f with reset on (from zero), %.3f with it off (from its level)", e1[1], e1[0]);
+    check(e1[1] < 0.02f && e1[0] > 0.3f, what);
+}
+
+/* power of x at hz (Goertzel over n samples of the mono mix from sample a) */
+static double tone_power(const int16_t *b, int a, int n, double hz) {
+    double w = 2.0 * M_PI * hz / SR, c = 2.0 * cos(w), s0 = 0.0, s1 = 0.0, s2 = 0.0;
+    for (int i = 0; i < n; i++) {
+        double win = 0.5 - 0.5 * cos(2.0 * M_PI * i / (n - 1));
+        s0 = win * (b[2 * (a + i)] + b[2 * (a + i) + 1]) / 65536.0 + c * s1 - s2;
+        s2 = s1; s1 = s0;
+    }
+    return s1 * s1 + s2 * s2 - c * s1 * s2;
+}
+
+static void test_top_octaves(void) {
+    printf("\nThe oscillators' top in the high octaves (the plug-in: a harmonic at f on a note at f0 is down (f f0 / 7.2e6)^1.7 dB):\n");
+    char what[220];
+    /* harmonic 5 against harmonic 1 of a saw, re the same ratio two octaves down at the same frequencies' tilt:
+     * C7's fifth harmonic (10.5 kHz) is about 7 dB down on the plug-in, C5's (2.6 kHz) not at all */
+    double ratio[2];
+    static const int notes[2] = { 72, 96 };
+    for (int k = 0; k < 2; k++) {
+        open_voice();
+        synth_set_param(&S, "wave1", 0.0f);
+        synth_set_param(&S, "filter_type", 1.0f);
+        synth_set_param(&S, "cutoff", 0.0f);
+        S.timbre_extra[0].osc1_ctrl[0] = S.timbre_extra[0].osc1_ctrl[1] = 0.0f;
+        for (int p = 0; p < 4; p++) S.timbre_extra[0].patch_int[p] = 0.0f;
+        synth_note_on(&S, (uint8_t)notes[k], 100);
+        int n;
+        int16_t *b = render(1.0, &n);
+        double f0 = 440.0 * pow(2.0, (notes[k] - 69) / 12.0);
+        ratio[k] = 10.0 * log10(tone_power(b, SR / 4, 16384, 5.0 * f0) / tone_power(b, SR / 4, 16384, f0));
+        free(b);
+    }
+    /* an ideal saw's fifth harmonic is 14 dB under its first; the brightness tilt lifts 2.6 kHz by 1.3 dB and
+     * 10.5 kHz by 8.3 dB over the fundamentals' own lift */
+    snprintf(what, sizeof what, "saw, harmonic 5 re harmonic 1: C5 %.1f dB, C7 %.1f dB (C7's would be about %.1f without the roll-off)",
+             ratio[0], ratio[1], ratio[0] + 7.0 - 1.0);
+    check(ratio[0] > -14.5 && ratio[0] < -11.0 && ratio[1] < ratio[0] + 2.0 && ratio[1] > ratio[0] - 4.0, what);
+    /* aliasing: a B6 saw's energy between its harmonics above 12 kHz, against the note (B6, not C7: C7's aliases
+     * fall 147 Hz from its own harmonics) */
+    {
+        open_voice();
+        synth_set_param(&S, "wave1", 0.0f);
+        synth_set_param(&S, "filter_type", 1.0f);
+        synth_set_param(&S, "cutoff", 0.0f);
+        S.timbre_extra[0].osc1_ctrl[0] = S.timbre_extra[0].osc1_ctrl[1] = 0.0f;
+        for (int p = 0; p < 4; p++) S.timbre_extra[0].patch_int[p] = 0.0f;
+        synth_note_on(&S, 95, 100);
+        int n;
+        int16_t *b = render(1.0, &n);
+        double f0 = 440.0 * pow(2.0, (95 - 69) / 12.0), tone = 0.0, junk = 0.0;
+        for (int h = 1; h * f0 < 20000.0; h++) tone += tone_power(b, SR / 4, 16384, h * f0);
+        for (double f = 12000.0; f < 20000.0; f += 37.0) {
+            double off = fmod(f, f0);
+            if (off > 150.0 && off < f0 - 150.0) junk += tone_power(b, SR / 4, 16384, f);
+        }
+        junk *= 37.0 / (1.5 * SR / 16384.0);   /* sampled every 37 Hz with a Hann window 1.5 bins wide */
+        snprintf(what, sizeof what, "B6 saw: energy between the harmonics above 12 kHz %.1f dB re the note (-24.6 without the roll-off)", 10.0 * log10(junk / tone));
+        check(10.0 * log10(junk / tone) < -30.0, what);
+        free(b);
+    }
+}
+
+/* the slot state carries EG reset, bend range and vibrato int; a state from before they existed keeps the program's */
+static void test_state_extras(void) {
+    printf("\nSlot state: EG reset, bend range, vibrato int:\n");
+    plugin_api_v2_t *api = move_plugin_init_v2(NULL);
+    void *inst = api->create_instance(".", NULL);
+    synth_engine_t *e = (synth_engine_t *)inst;
+    static char state[65536], old[65536];
+    timbre_extra_t *x = &e->timbre_extra[0];
+    x->eg_reset[0] = 0; x->eg_reset[1] = 0; x->bend_semi = -7.0f; x->vibrato_int = 31.0f;
+    int len = api->get_param(inst, "state", state, sizeof state);
+    x->eg_reset[0] = 1; x->eg_reset[1] = 1; x->bend_semi = 2.0f; x->vibrato_int = 0.0f;
+    api->set_param(inst, "state", state);
+    check(len > 0 && x->eg_reset[0] == 0 && x->eg_reset[1] == 0 && x->bend_semi == -7.0f && x->vibrato_int == 31.0f,
+          "a saved state restores all four");
+    /* an older state: the last four numbers of extra1 cut off */
+    const char *a = strstr(state, "\"extra1\"");
+    int ok = 0;
+    if (a) {
+        const char *end = strchr(a, ']');
+        const char *cut = end;
+        for (int k = 0; k < 4 && cut; k++) { cut--; while (cut > a && *cut != ',') cut--; }
+        if (end && cut > a) {
+            size_t head = (size_t)(cut - state);
+            memcpy(old, state, head);
+            strcpy(old + head, end);
+            x->eg_reset[0] = 1; x->eg_reset[1] = 1; x->bend_semi = 2.0f; x->vibrato_int = 5.0f;
+            api->set_param(inst, "state", old);
+            ok = x->eg_reset[0] == 1 && x->eg_reset[1] == 1 && x->bend_semi == 2.0f && x->vibrato_int == 0.0f;
+        }
+    }
+    check(ok, "a state saved before they existed keeps the program's own values");
+    api->destroy_instance(inst);
+}
+
 int main(void) {
     test_layer();
     test_edit_routing();
@@ -968,6 +1218,10 @@ int main(void) {
     test_arp();
     test_program_change_flush();
     test_headroom();
+    test_pitch_controls();
+    test_eg_reset();
+    test_top_octaves();
+    test_state_extras();
     printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "ALL PASSED", failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;
 }

@@ -132,7 +132,7 @@ static int format_preset_name(const synth_engine_t *synth, int idx, char *buf, i
 
 #include "arp.c" /* the arpeggiator: one translation unit with dsp.c (see arp.h) */
 
-#define TINYK_TUNING_DEFAULTS { 37.46f, 10.61f, 20.0f, 19000.0f, 2.13f, 8.88f, 1.92f, 0.7f, 2.0f, 1.0f, 1.0f, 1.0f, 0.7f, 0.4f, 10.61f, 24.0f, 120.0f, 2.4f, 26.7f, 20000.0f, 0.6f, 10.36f, 0.56f, 2.0f, 18.0f, 360.0f, -24.5f, 15000.0f, 0.7f, 1.0f, 0.05f, 600.0f, 5.0f, 3.7f, 1.0f }
+#define TINYK_TUNING_DEFAULTS { 37.46f, 10.61f, 20.0f, 19000.0f, 2.13f, 8.88f, 1.92f, 0.7f, 2.0f, 1.0f, 1.0f, 1.0f, 0.7f, 0.4f, 10.61f, 24.0f, 120.0f, 2.4f, 12.43f, 12726.0f, 0.6f, 10.36f, 0.56f, 2.0f, 18.0f, 360.0f, -24.5f, 15000.0f, 0.7f, 1.0f, 0.05f, 600.0f, 5.0f, 3.7f, 1.0f }
 #ifdef TINYK_TUNING
 tinyk_tuning_t tinyk_tuning = TINYK_TUNING_DEFAULTS;
 #else
@@ -357,6 +357,23 @@ static inline float poly_blep(float t, float dt) {
         return x * x + x + x + 1.0f;
     }
     return 0.0f;
+}
+
+/* The plug-in's oscillators lose their top as the note rises: measured on its saw and square, 26 notes from C4 to
+ * D8, each harmonic against the same frequency on a low note (tools/measure/rolloff.py). Below about 700 Hz
+ * nothing is missing; above, a harmonic at f on a note at f0 is down by about (f f0 / 7.2e6 Hz^2)^1.7 dB (C6:
+ * 1.5 dB at 10 kHz; C7: 2 dB at 6 kHz, 8 at 10; C8: 5 dB on the fundamental), which is also why its top octaves
+ * do not alias. One bilinear one-pole low-pass per oscillator with g = OSC_ROLLOFF_C / dt^2 follows that to
+ * 1.5 dB rms; dt is the oscillator's own phase increment. While both oscillators are under OSC_ROLLOFF_MIN_DT
+ * (660 Hz: the filter would take 0.1 dB at 10 kHz and 0.4 at 15) nothing is filtered, and a voice crossing the
+ * line starts its filters on the signal as it is (voice_t.osc_lp_on), so the crossing is seamless. */
+#define OSC_ROLLOFF_C 0.00127f
+#define OSC_ROLLOFF_MIN_DT 0.015f
+static inline float osc_rolloff(float *state, float x, float dt) {
+    float v = (x - *state) * (OSC_ROLLOFF_C / (OSC_ROLLOFF_C + dt * dt)); /* g / (1 + g) */
+    float y = v + *state;
+    *state = y + v;
+    return y;
 }
 
 /* MIDI Note to Frequency */
@@ -752,6 +769,12 @@ static void apply_timbre(float *dst, timbre_extra_t *extra, const struct TimbreP
     extra->unison_cents = clamp01f(t->unison_detune) * 127.0f;
     extra->pan = (clamp01f(t->pan) - 0.5f) * 2.0f;
     extra->multi_trigger = t->trigger_multi >= 0.5f;
+    /* stored as 0 when a bank does not record them (the built-in one): EG reset then plays as on, the bend
+     * range as 2 semitones and the vibrato as off */
+    extra->eg_reset[0] = !(t->eg1_reset > 0.25f && t->eg1_reset < 0.75f);
+    extra->eg_reset[1] = !(t->eg2_reset > 0.25f && t->eg2_reset < 0.75f);
+    extra->bend_semi = t->bend_range > 0.0f ? fmaxf(-12.0f, fminf(12.0f, roundf(t->bend_range * 25.0f) - 13.0f)) : 2.0f;
+    extra->vibrato_int = t->vibrato_int > 0.0f ? fmaxf(-63.0f, fminf(63.0f, roundf(t->vibrato_int * 127.0f) - 64.0f)) : 0.0f;
 
     const float lfo_wave[2] = { t->lfo1_wave, t->lfo2_wave };
     const float lfo_keysync[2] = { t->lfo1_keysync, t->lfo2_keysync };
@@ -824,6 +847,7 @@ static float level_curve(float knob01) {
 static inline float osc_wave_gain(int square, int triangle) {
     return square ? 0.667f : (triangle ? 1.333f : 1.0f);
 }
+#define VOX_MAX_PULSES 24      /* Vox: pulses summed per sample */
 #define XMOD_MAX_HZ 24000.0f   /* Osc 1 Sine cross modulation: the frequency deviation at full depth */
 #define PAN_SLEW_PER_S 1000.0f /* pan position, -1 .. +1, per second: left to right in 2 ms */
 
@@ -1688,6 +1712,8 @@ static void voice_fresh_state(synth_engine_t *synth, voice_t *v) {
     v->filter_svf[0].s1 = v->filter_svf[0].s2 = v->filter_svf[1].s1 = v->filter_svf[1].s2 = 0.0f;
     v->flt_shelf_x1 = v->flt_shelf_y1 = 0.0f;
     v->noise_svf.s1 = v->noise_svf.s2 = 0.0f;
+    v->osc_lp[0] = v->osc_lp[1] = 0.0f;
+    v->osc_lp_on = 0;
     v->osc1_phase = voice_rand_phase(synth);
     v->osc1_cycle = 0;
     v->pan_fresh = 1;
@@ -1696,9 +1722,29 @@ static void voice_fresh_state(synth_engine_t *synth, voice_t *v) {
     v->amp_env.value = 0.0f;
     v->filter_env.value = 0.0f;
     v->declick_pos = 0;
+    v->reset_from = v->amp_heard = 0.0f;
     v->vel_gain = 1.0f;
-    /* the note-on kick to the filter (FLT_KICK): 0.5 .. 2 times its typical size, either sign */
-    v->flt_kick = exp2f(2.0f * voice_rand_phase(synth) - 1.0f) * (voice_rand_phase(synth) < 0.5f ? -1.0f : 1.0f);
+    /* the note-on kick to the filter (FLT_KICK): 0.5 .. 2 times its typical size, at any phase of the ring */
+    v->flt_kick = exp2f(2.0f * voice_rand_phase(synth) - 1.0f);
+    v->flt_kick_phase = 2.0f * (float)M_PI * voice_rand_phase(synth);
+}
+
+/* Starts a voice's envelopes for a note-on. EG Reset (timbre byte +1, bits 4 and 5; on in every factory program),
+ * measured on the VST with a key pressed again 0.3 s into its release: with the amp EG's reset on, the sounding
+ * level is gone within 4 ms and the attack starts again from zero (with a slow attack the note dips to silence and
+ * swells; with an instant one nothing is heard of it); with it off the attack goes on from where the level was.
+ * The filter EG likewise drops to zero at once or carries on. Here a sounding voice fades its old level out over
+ * the note-on fade (DECLICK_SAMPLES, the plug-in's own onset reversed) while the new attack fades in. A voice
+ * that was silent starts from zero either way. */
+static void voice_gate_on(const timbre_extra_t *x, voice_t *v, bool was_active, float atk1_coef, float atk2_coef) {
+    if (was_active && x->eg_reset[0]) v->filter_env.value = 0.0f;
+    if (was_active && x->eg_reset[1]) {
+        v->reset_from = v->amp_heard;
+        v->declick_pos = 0;
+        v->amp_env.value = 0.0f;
+    }
+    adsr_gate_on(&v->filter_env, atk1_coef);
+    adsr_gate_on(&v->amp_env, atk2_coef);
 }
 
 /* A timbre's voices: in Layer mode every second one (t, t + 2, ...: half each), in Single mode all of them */
@@ -1744,10 +1790,7 @@ static void group_voice_start(synth_engine_t *synth, voice_t *v, int t, uint8_t 
     if (!was_active || synth->timbre_params[t][PARAM_PORTAMENTO] < 0.005f) v->current_pitch = target_pitch;
     v->target_pitch = target_pitch;
     if (!was_active) voice_fresh_state(synth, v);
-    if (retrigger || !was_gated) {
-        adsr_gate_on(&v->filter_env, atk1_coef);
-        adsr_gate_on(&v->amp_env, atk2_coef);
-    }
+    if (retrigger || !was_gated) voice_gate_on(x, v, was_active, atk1_coef, atk2_coef);
 }
 
 /* Mono / Unison note on: the key goes on top of the timbre's key stack; one voice (Mono) or all the timbre's voices
@@ -1843,11 +1886,10 @@ static void layer_voice_start(synth_engine_t *synth, int t, uint8_t note, float 
     v->kill = false;
     if (!was_active || synth->timbre_params[t][PARAM_PORTAMENTO] < 0.005f) v->current_pitch = target_pitch;
     v->target_pitch = target_pitch;
-    /* A sounding voice (retrigger, steal) keeps its filter state and EG levels: the EGs restart from where they are,
+    /* A sounding voice (retrigger, steal) keeps its filter state, and its EGs restart as EG Reset says (voice_gate_on),
      * so its sound never jumps (crushing the filter state to 5 % stepped an open filter's output) */
     if (!was_active) voice_fresh_state(synth, v);
-    adsr_gate_on(&v->filter_env, atk1_coef);
-    adsr_gate_on(&v->amp_env, atk2_coef);
+    voice_gate_on(&synth->timbre_extra[t], v, was_active, atk1_coef, atk2_coef);
 }
 
 /* Note on for the timbres in mask (bit 0 Timbre 1, bit 1 Timbre 2; Single mode plays Timbre 1 whatever the mask).
@@ -1978,11 +2020,10 @@ static void voice_note_on(synth_engine_t *synth, uint8_t note, uint8_t velocity,
         }
         v->target_pitch = target_pitch;
 
-        /* as in layer_voice_start: a sounding voice keeps its filter state and EG levels */
+        /* as in layer_voice_start: a sounding voice keeps its filter state */
         if (!was_active) voice_fresh_state(synth, v);
 
-        adsr_gate_on(&v->filter_env, t1_atk1_coef);
-        adsr_gate_on(&v->amp_env, t1_atk2_coef);
+        voice_gate_on(&synth->timbre_extra[0], v, was_active, t1_atk1_coef, t1_atk2_coef);
 
     }
 
@@ -2551,6 +2592,8 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
         float noise_level;
         float level;
         float pan;              /* timbre pan, -1..+1 */
+        float bend;             /* the pitch bend now, semitones: the wheel over the timbre's bend range */
+        float vibrato;          /* the mod wheel's vibrato now: semitones of LFO2 swing, signed */
         const float *wavetable;                 /* Vox */
         const float *const *dwgs;               /* the DWGS wave's tables, one per level */
         int dwgs_periods;                       /* periods of the note in one DWGS table; 1 for other waves */
@@ -2627,6 +2670,15 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
         t_cfg[t].noise_level = extra->noise_level;
         t_cfg[t].level = extra->level;
         t_cfg[t].pan = extra->pan;
+        t_cfg[t].bend = synth->bend_src * extra->bend_semi;
+        {
+            /* Vibrato Int, measured on the VST (LFO2 -> pitch at seven intensities and five wheel positions):
+             * the swing is the wheel (CC1 / 127) times the velocity / keyboard family's pitch curve, a quarter
+             * of a semitone per step to 12 at 48 and on to 24 at 63 (+5, the usual setting: 1.24 semitones
+             * each way at full wheel); a negative value turns the LFO over. */
+            float vi = fabsf(extra->vibrato_int);
+            t_cfg[t].vibrato = synth->modwheel_src * copysignf(vi <= 48.0f ? 0.25f * vi : 12.0f + (vi - 48.0f) * (12.0f / 15.0f), extra->vibrato_int);
+        }
 
         /* Vox wavetable: built on first use */
         t_cfg[t].wavetable = synth->wavetable[t];
@@ -2760,9 +2812,10 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
                 float note = LFO_SYNC_NOTES[extra->lfo_sync_note[l]];
                 hz = synth->tempo_bpm / (240.0f * note);
                 /* Free-running (no key sync) synced LFOs also lock their phase to the transport while it runs,
-                 * cycle start on beat 0; key-synced ones restart on each note, as on the hardware. An LFO2 whose
-                 * rate a patch modulates is left to run. */
-                if (beat >= 0.0 && extra->lfo_keysync[l] == 0 && !(l == 1 && lfo2_rate_modulated)) {
+                 * cycle start on beat 0; key-synced ones restart on each note, as on the hardware. A patch into
+                 * LFO2 FREQ does nothing to a synced LFO2 (measured on the VST: the same rate at every
+                 * intensity, four time bases), so it locks like any other. */
+                if (beat >= 0.0 && extra->lfo_keysync[l] == 0) {
                     double cycles = beat / (4.0 * (double)note);
                     synth->patch_lfo[t][l].phase = (float)(cycles - floor(cycles));
                 }
@@ -2860,7 +2913,7 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
          * (a constant source of 1 into LFO2 FREQ, the vibrato rate read off a sine, 17 settings from three knob
          * positions): the patch moves the rate KNOB by intensity x source, one knob step per unit, to 1 %. The
          * LFOs here are one per timbre, so a per-voice source (an EG, velocity, the keyboard) is taken from the
-         * timbre's newest voice. A tempo-synced LFO2 is left alone (not measured). */
+         * timbre's newest voice. A tempo-synced LFO2 keeps its synced rate whatever the patch says (measured). */
         float plfo[2][2] = { { 0.0f, 0.0f }, { 0.0f, 0.0f } };
         for (int t = 0; t < (is_layer_mode ? 2 : 1); t++) {
             const timbre_extra_t *ex = t_cfg[t].extra;
@@ -2970,8 +3023,9 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
             /* Portamento Pitch Glide */
             v->current_pitch += (v->target_pitch - v->current_pitch) * cfg->glide_coeff;
 
-            /* LFO1 pitch mod (vibrato) + Pitch Bend + patch -> pitch */
-            float pitch_mod = lfo1_val * (cfg->mod_int * 0.5f) + synth->pitch_bend_semi
+            /* Pitch bend over the timbre's own range (measured on the VST: straight, range x bend, a negative
+             * range bends the other way), the mod wheel's vibrato (LFO2, see vibrato above), patch -> pitch */
+            float pitch_mod = lfo1_val * (cfg->mod_int * 0.5f) + cfg->bend + cfg->vibrato * plfo[t_idx][1]
                             + pmod[PATCH_DST_PITCH] * tinyk_tuning.patch_pitch_scale + v->unison_cents * 0.01f;
 
             float final_note1 = v->current_pitch + cfg->transpose_semi + pitch_mod;
@@ -3105,12 +3159,25 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
                     float period = (float)VOX_PER_D / (fmaxf(freq1, 8.0f) * d);     /* in table samples */
                     const short *pa = VOX_PULSE[seg], *pb = VOX_PULSE[seg + 1];
                     float x = v->osc1_phase * period, sum = 0.0f;
-                    for (int k = 0; k < 24 && x < (float)(VOX_LEN - 1); k++, x += period) {
+                    /* At most VOX_MAX_PULSES sound at once. Where a long pulse on a high note would need more
+                     * (Control 1 under 32 from about E5 up), its tail is faded out over the last eight instead
+                     * of being cut: the cut put a step in every period, 15-20 dB of hash above 12 kHz. */
+                    int whole = period * (float)VOX_MAX_PULSES >= (float)(VOX_LEN - 1) ? VOX_MAX_PULSES : VOX_MAX_PULSES - 8;
+                    int k = 0;
+                    for (; k < whole && x < (float)(VOX_LEN - 1); k++, x += period) {
                         int i = (int)x;
                         float f = x - (float)i;
                         float a = (float)pa[i] + ((float)pa[i + 1] - (float)pa[i]) * f;
                         float b2 = (float)pb[i] + ((float)pb[i + 1] - (float)pb[i]) * f;
                         sum += a + (b2 - a) * w;
+                    }
+                    for (; k < VOX_MAX_PULSES && x < (float)(VOX_LEN - 1); k++, x += period) {
+                        int i = (int)x;
+                        float f = x - (float)i;
+                        float a = (float)pa[i] + ((float)pa[i + 1] - (float)pa[i]) * f;
+                        float b2 = (float)pb[i] + ((float)pb[i + 1] - (float)pb[i]) * f;
+                        float u = ((float)(VOX_MAX_PULSES - k) - v->osc1_phase) * 0.125f; /* 1 .. 0 over the last eight periods */
+                        sum += (a + (b2 - a) * w) * u * u * (3.0f - 2.0f * u);
                     }
                     osc1_out = sum * VOX_SCALE
                              - (VOX_AREA[seg] + (VOX_AREA[seg + 1] - VOX_AREA[seg]) * w) * (float)VOX_PER_D / period;
@@ -3156,6 +3223,22 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
                 case OSC2_WAVE_TRIANGLE:
                     osc2_out = 2.0f * fabsf(2.0f * fmod_pos(v->osc2_phase + 0.75f) - 1.0f) - 1.0f;
                     break;
+            }
+
+            /* the top-octave roll-off (osc_rolloff): every wave with harmonics; the sine keeps its level on the
+             * plug-in, and the Noise oscillator has no pitch */
+            if (dt1 >= OSC_ROLLOFF_MIN_DT || dt2 >= OSC_ROLLOFF_MIN_DT) {
+                if (!v->osc_lp_on) {
+                    v->osc_lp[0] = osc1_out;
+                    v->osc_lp[1] = osc2_out;
+                    v->osc_lp_on = 1;
+                }
+                if (cfg->osc1_wave != OSC1_WAVE_SINE && cfg->osc1_wave != OSC1_WAVE_NOISE) {
+                    osc1_out = osc_rolloff(&v->osc_lp[0], osc1_out, dt1);
+                }
+                osc2_out = osc_rolloff(&v->osc_lp[1], osc2_out, dt2);
+            } else if (v->osc_lp_on) {
+                v->osc_lp_on = 0;
             }
 
             /* Ring Modulation: Osc 1 x Osc 2 in Osc 2's place. Its level against the plain Osc 2 depends on
@@ -3232,14 +3315,26 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
              * note to note (+-6 dB), and falls with the corner as exp(-f / 477 Hz) (9 cutoffs at resonance 127:
              * within 3 dB). Inaudible on most sounds; at resonance 100+ and a low cutoff it is a pinged resonator
              * (A.78 reznotes is that ping and little else). The resonance gain sits before the core, as in
-             * the plug-in, so the kick is the same size at every resonance. */
+             * the plug-in, so the kick is the same size at every resonance.
+             * The ring starts at a random PHASE, not just either way up: the kick is shared between the band
+             * and the low state (in quadrature, equal in size at these low corners). With a sign alone, the
+             * rings of a unison stack were in step or exactly opposed, and through the distortion's clip
+             * (which evens out their sizes) two against two cancelled outright: A.78's notes came out at
+             * -8, -14 or -33 .. -48 dB by the draw, half of them the last. The plug-in's twelve takes spread
+             * -29 .. -16 dB, as four rings at unrelated phases do. */
             if (v->flt_kick != 0.0f) {
                 float hz = flt_f * fs * (1.0f / (2.0f * (float)M_PI));
                 float kick = v->flt_kick * FLT_KICK * fminf(1.0f / fmaxf(cfg->flt_k, 0.05f), 20.0f) * expf(-hz / FLT_KICK_HZ);
-                v->filter_svf[0].s1 += (double)kick;
+                float kc = kick * cosf(v->flt_kick_phase), ks = kick * sinf(v->flt_kick_phase);
+                v->filter_svf[0].s1 += (double)kc;
+                v->filter_svf[0].s2 += (double)ks;
                 /* the 24LPF rings as loud as the 12LPF (measured), so its second core takes the same kick, sized
                  * at the output: this engine's second stage carries its resonance gain after the core */
-                if (cfg->filter_type == FILTER_LP_24) v->filter_svf[1].s1 += (double)(kick * 2.5f / fmaxf(cfg->flt_gain2, 1e-4f));
+                if (cfg->filter_type == FILTER_LP_24) {
+                    float g2 = 2.5f / fmaxf(cfg->flt_gain2, 1e-4f);
+                    v->filter_svf[1].s1 += (double)(kc * g2);
+                    v->filter_svf[1].s2 += (double)(ks * g2);
+                }
                 v->flt_kick = 0.0f;
             }
             svf_core(&v->filter_svf[0], cfg->flt_gain * osc_sum, flt_f, cfg->flt_k, &hp, &bp, &lp);
@@ -3280,18 +3375,27 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
              * velocity) it acts only where a virtual patch routes it (PATCH_SRC_VELOCITY) */
             v->vel_gain += (1.0f - v->vel_gain) * vel_glide_k;
 
-            /* De-click: a fresh voice fades in (raised cosine, zero slope at the start) */
-            float declick = 1.0f;
+            /* De-click: a fresh voice fades in (raised cosine, zero slope at the start). A sounding voice whose
+             * amp EG was reset (voice_gate_on) fades its old level out by the same curve reversed while the new
+             * attack fades in, inside the amp section. */
+            float declick = 1.0f, amp_contour = a_env * a_env;
             if (v->declick_pos < DECLICK_SAMPLES) {
-                declick = 0.5f - 0.5f * cosf((float)M_PI * (float)v->declick_pos / (float)DECLICK_SAMPLES);
+                float c = cosf((float)M_PI * (float)v->declick_pos / (float)DECLICK_SAMPLES);
+                declick = 0.5f - 0.5f * c;
                 declick *= declick;
-                v->declick_pos++;
+                if (v->reset_from > 0.0f) {
+                    float out = 0.5f + 0.5f * c;
+                    amp_contour = amp_contour * declick + v->reset_from * out * out;
+                    declick = 1.0f;
+                }
+                if (++v->declick_pos >= DECLICK_SAMPLES) v->reset_from = 0.0f;
             }
+            v->amp_heard = amp_contour * declick;
 
             /* Amp Envelope & Velocity Scaling */
             /* the amp follows the square of its envelope (see the envelope notes) */
             /* The amp section: the level knob squared, the EG squared and the amp patches. */
-            float amp_section = a_env * a_env * cfg->gain_amp * amp_gain;
+            float amp_section = amp_contour * cfg->gain_amp * amp_gain;
             float voice_audio;
             if (cfg->drive > 0.0f) {
                 /* Distortion (timbre byte 27) clips the amp section's OUTPUT, so the amp level and the amp EG
@@ -3338,11 +3442,15 @@ static void render_segment(synth_engine_t *synth, int16_t *out_lr, int frames, d
             voice_sum_r += voice_audio * v_gain_r;
         }
 
-        /* Brightness tilt: the VST's oscillators are brighter than an ideal 1/n saw (measured on co_127, filter
-         * open: +2 dB at 3 kHz rising to +18 dB at 17 kHz). A first-order high shelf matches that within
-         * 1.3 dB rms. It sits after the filters, where it is linear and commutes with them, so it leaves the
-         * pre-filter drive stage (and its measured behaviour) untouched. Measured alternative: per voice before
-         * the filter scored worse (total 106.8 vs 104.1; the boosted edges clip in the drive stage). */
+        /* Brightness tilt: the VST's oscillators are brighter than an ideal 1/n saw. A first-order high shelf of
+         * tilt_db 12.43 with its corner at tilt_hz 12.7 kHz (+1.7 dB at 3 kHz, +6 at 8 kHz, +11 at 16 kHz) follows
+         * the plug-in's saw and square within 0.5 dB from 500 Hz to 19 kHz (tools/measure/tilt_fit.py: every
+         * harmonic of two low notes each, through the open high-pass). The first fit (26.7 dB at 20 kHz, on one
+         * take through the open low-pass) kept rising where the plug-in levels off: 2 dB too bright at 11 kHz,
+         * 4.5 at 15, 8 at 19, through every filter type. It sits after the filters, where it is linear and
+         * commutes with them, so it leaves the pre-filter drive stage (and its measured behaviour) untouched.
+         * Measured alternative: per voice before the filter scored worse (total 106.8 vs 104.1; the boosted
+         * edges clip in the drive stage). */
         {
             float yl = tilt_b0 * voice_sum_l + tilt_b1 * synth->tilt_x1[0] - tilt_a1 * synth->tilt_y1[0];
             float yr = tilt_b0 * voice_sum_r + tilt_b1 * synth->tilt_x1[1] - tilt_a1 * synth->tilt_y1[1];
@@ -3679,7 +3787,6 @@ static void parse_midi_buffer(synth_engine_t *synth, const uint8_t *msg, int len
                     int msb = msg[i + 1] & 0x7F;
                     int bend = (msb << 7) | lsb;
                     synth->bend_src = (float)(bend - 8192) / 8192.0f; /* virtual patch source Pitch Bend, -1..+1 */
-                    synth->pitch_bend_semi = synth->bend_src * 2.0f;
                     i += 2;
                 } else {
                     break;
@@ -3706,7 +3813,7 @@ static void v2_on_midi(void *instance, const uint8_t *msg, int len, int source) 
  * and everything a knob can have changed since it loaded: params, both timbres' parameter sets and extras, voice
  * mode, timbre edit / balance, octave and the delay time base. */
 #define STATE_VERSION 1
-#define STATE_EXTRA_COUNT 33     /* older states have the first 24 (before Osc 1 Ctrl 1 / 2), 26 (before assign / pan) or 30 (before the three level knobs) */
+#define STATE_EXTRA_COUNT 37     /* older states have the first 24 (before Osc 1 Ctrl 1 / 2), 26 (before assign / pan), 30 (before the three level knobs) or 33 (before EG reset, bend range, vibrato int) */
 #define STATE_EXTRA_MIN 24
 
 static void extra_to_floats(const timbre_extra_t *x, float *f) {
@@ -3722,6 +3829,7 @@ static void extra_to_floats(const timbre_extra_t *x, float *f) {
     f[n++] = x->osc1_ctrl[0]; f[n++] = x->osc1_ctrl[1];
     f[n++] = (float)x->assign; f[n++] = x->unison_cents; f[n++] = x->pan; f[n++] = (float)x->multi_trigger;
     f[n++] = x->lvl_osc1; f[n++] = x->lvl_osc2; f[n++] = x->lvl_amp;
+    f[n++] = (float)x->eg_reset[0]; f[n++] = (float)x->eg_reset[1]; f[n++] = x->bend_semi; f[n++] = x->vibrato_int;
 }
 
 
@@ -3748,6 +3856,10 @@ static void extra_from_floats(timbre_extra_t *x, const float *f, int count) {
     if (n < count) x->multi_trigger = f[n++] >= 0.5f;
     if (n + 2 < count) {
         x->lvl_osc1 = clamp01f(f[n++]); x->lvl_osc2 = clamp01f(f[n++]); x->lvl_amp = clamp01f(f[n++]);
+    }
+    if (n + 3 < count) {
+        x->eg_reset[0] = f[n++] >= 0.5f; x->eg_reset[1] = f[n++] >= 0.5f;
+        x->bend_semi = fmaxf(-12.0f, fminf(12.0f, f[n++])); x->vibrato_int = fmaxf(-63.0f, fminf(63.0f, f[n++]));
     }
     x->mix_seen = x->level_seen = NAN; /* the restored knobs are what these levels already stand for */
 }

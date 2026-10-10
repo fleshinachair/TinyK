@@ -61,6 +61,7 @@ static const struct TimbreParams SYX_VOCODER_CARRIER = {
     .osc1_ctrl1 = 0.0f, .osc1_ctrl2 = 0.0f,
     .assign = 0.5f, .unison_detune = 0.0f, .pan = 0.5f, .trigger_multi = 0.0f,
     .osc1_level = 1.0f, .osc2_level = 1.0f / 128.0f, .amp_level = 1.0f,
+    .eg1_reset = 1.0f, .eg2_reset = 1.0f, .bend_range = 15.0f / 25.0f, .vibrato_int = 64.0f / 127.0f,
 };
 
 /* Korg 7-to-8 decode: each 8-byte group is [MSB bits][7 data bytes]. Returns bytes written. */
@@ -124,6 +125,12 @@ static void syx_parse_timbre(const uint8_t *p, int t, struct TimbreParams *o) {
     o->osc1_level = (float)(((p[t + 16] > 127 ? 127 : p[t + 16]) + 1) / 128.0);
     o->osc2_level = (float)(((p[t + 17] > 127 ? 127 : p[t + 17]) + 1) / 128.0);
     o->amp_level = (float)(((p[t + 25] > 127 ? 127 : p[t + 25]) + 1) / 128.0);
+    /* EG reset (bit 4 filter EG, bit 5 amp EG), bend range and vibrato int: 0 would mean not recorded */
+    o->eg1_reset = (p[t + 1] & 0x10) ? 1.0f : 0.5f;
+    o->eg2_reset = (p[t + 1] & 0x20) ? 1.0f : 0.5f;
+    int bend = p[t + 4] - 64, vib = p[t + 6] - 64;
+    o->bend_range = (float)(((bend < -12 ? -12 : bend > 12 ? 12 : bend) + 13) / 25.0);
+    o->vibrato_int = (float)(((vib < -63 ? -63 : vib > 63 ? 63 : vib) + 64) / 127.0);
     o->attack1 = (float)syx_unit(p[t + 30]);
     o->decay1 = (float)syx_unit(p[t + 31]);
     o->sustain1 = (float)syx_unit(p[t + 32]);
