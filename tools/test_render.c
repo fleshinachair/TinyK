@@ -192,6 +192,53 @@ TK_EXPORT int tinyk_render_patch(int slot, int voice_mode, const float *t1, cons
 
 TK_EXPORT int tinyk_timbre_floats(void) { return (int)(sizeof(struct TimbreParams) / sizeof(float)); }
 
+/* As tinyk_render_patch, but plays a list of MIDI events instead of one note: events holds n rows of
+ * (time in seconds, status byte, data 1, data 2), in time order, sent through the engine's MIDI input on the
+ * sample (note on / off, CC 1, pitch bend ...). */
+TK_EXPORT int tinyk_render_patch_midi(int slot, int voice_mode, const float *t1, const float *t2, const float *fx,
+                                      const double *events, int n, double total_s, float *out_lr, int max_frames) {
+#ifdef TINYK_TUNING
+    int frames = (int)(total_s * MOVE_SAMPLE_RATE);
+    if (slot < 0 || slot > 127 || frames <= 0 || frames > max_frames) return -1;
+    struct Preset p;
+    memset(&p, 0, sizeof p);
+    p.label = "external";
+    p.voice_mode = voice_mode;
+    memcpy(&p.t1, t1, sizeof p.t1);
+    memcpy(&p.t2, t2, sizeof p.t2);
+    p.chorus_mix = fx[0]; p.delay_time = fx[1]; p.delay_feedback = fx[2]; p.delay_mix = fx[3];
+    p.delay_sync = fx[4]; p.modfx_speed = fx[5]; p.modfx_type = fx[6];
+    p.eq = patch_eq;
+    p.delay_type = patch_delay_type;
+    int16_t *tmp = calloc((size_t)frames * 2, sizeof(int16_t));
+    if (!tmp) return -1;
+    synth_init(&synth);
+    tinyk_load_patch(&synth, &p, slot);
+    int done = 0, e = 0;
+    while (done < frames) {
+        while (e < n && (int)(events[4 * e] * MOVE_SAMPLE_RATE) <= done) {
+            uint8_t msg[3] = { (uint8_t)events[4 * e + 1], (uint8_t)events[4 * e + 2], (uint8_t)events[4 * e + 3] };
+            move_plugin_on_midi(&synth, msg, 3, 0);
+            e++;
+        }
+        int next = e < n ? (int)(events[4 * e] * MOVE_SAMPLE_RATE) : frames;
+        int count = MOVE_FRAMES_PER_BLOCK;
+        if (done + count > next) count = next - done;
+        if (done + count > frames) count = frames - done;
+        if (count <= 0) count = 1;
+        synth_render(&synth, tmp + done * 2, count);
+        done += count;
+    }
+    for (int i = 0; i < frames * 2; i++) out_lr[i] = (float)tmp[i] / 32768.0f;
+    free(tmp);
+    return frames;
+#else
+    (void)slot; (void)voice_mode; (void)t1; (void)t2; (void)fx; (void)events; (void)n; (void)total_s;
+    (void)out_lr; (void)max_frames;
+    return -1;
+#endif
+}
+
 #ifdef TINYK_TUNING
 int tinyk_dsp_bank_scan(const char *dir);
 int tinyk_dsp_bank_count(void);

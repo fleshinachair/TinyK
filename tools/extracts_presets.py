@@ -76,6 +76,7 @@ TIMBRE_FIELDS = [
     "osc1_ctrl1", "osc1_ctrl2",
     "assign", "unison_detune", "pan", "trigger_multi",
     "osc1_level", "osc2_level", "amp_level",
+    "eg1_reset", "eg2_reset", "bend_range", "vibrato_int",
 ]
 # LFO / virtual patch encoding (all [0, 1]):
 #   lfoN_wave      wave index / 3     (LFO1: saw, square, triangle, S&H; LFO2: saw, square, sine, S&H)
@@ -87,6 +88,9 @@ TIMBRE_FIELDS = [
 #   osc1_ctrlN     Osc 1 Control 1 / 2, raw 0..127 / 127 (pulse_width repeats ctrl1 for the Pulse wave)
 #   assign         voice assign (byte +1 bits 6-7) / 2: 0 Mono, 0.5 Poly, 1 Unison
 #   unison_detune  byte +2 (cents) / 127; pan byte +26, bipolar (0.5 = centre); trigger_multi byte +1 bit 3
+#   egN_reset      byte +1 bit 4 (EG1, filter) / bit 5 (EG2, amp): 0.5 off, 1 on; 0 = not recorded (plays as on)
+#   bend_range     byte +4, (semitones -12..12 + 13) / 25; 0 = not recorded (plays as 2)
+#   vibrato_int    byte +6, (-63..63 + 64) / 127; 0 = not recorded (plays as 0)
 # delay_sync: 0 = free (delay_time is a time), else (time base index + 1) / 15 of the tempo-sync note table
 FX_FIELDS = ["chorus_mix", "delay_time", "delay_feedback", "delay_mix", "delay_sync", "modfx_speed", "modfx_type"]
 # EQ (program bytes 26-29): frequency index / 29 (Hi 1..18 kHz, Low 40..1000 Hz, tables in dsp.c), gain +-12 dB
@@ -122,6 +126,7 @@ VOCODER_CARRIER = {
     "osc1_ctrl1": 0.0, "osc1_ctrl2": 0.0,
     "assign": 0.5, "unison_detune": 0.0, "pan": 0.5, "trigger_multi": 0.0,
     "osc1_level": 1.0, "osc2_level": 1.0 / 128.0, "amp_level": 1.0,
+    "eg1_reset": 1.0, "eg2_reset": 1.0, "bend_range": 15.0 / 25.0, "vibrato_int": 64.0 / 127.0,
 }
 
 
@@ -244,6 +249,10 @@ def parse_timbre(prog, t):
         "osc1_level": (min(prog[t + 16], 127) + 1) / 128.0,
         "osc2_level": (min(prog[t + 17], 127) + 1) / 128.0,
         "amp_level": (min(prog[t + 25], 127) + 1) / 128.0,
+        "eg1_reset": 1.0 if prog[t + 1] & 0x10 else 0.5,
+        "eg2_reset": 1.0 if prog[t + 1] & 0x20 else 0.5,
+        "bend_range": (max(-12, min(12, prog[t + 4] - 64)) + 13) / 25.0,
+        "vibrato_int": (max(-63, min(63, prog[t + 6] - 64)) + 64) / 127.0,
         "attack1": unit(prog[t + 30]), "decay1": unit(prog[t + 31]),
         "sustain1": unit(prog[t + 32]), "release1": unit(prog[t + 33]),
         "attack2": unit(prog[t + 34]), "decay2": unit(prog[t + 35]),
@@ -340,6 +349,9 @@ def render_header(presets):
     out.append("    float osc1_ctrl1, osc1_ctrl2; /* Osc 1 Control 1 / 2 (raw / 127): for Sine, cross-mod depth / LFO1 mod of it */\n")
     out.append("    float assign, unison_detune, pan, trigger_multi; /* voice assign / 2 (mono, poly, unison), cents / 127, bipolar, bit */\n")
     out.append("    float osc1_level, osc2_level, amp_level; /* the mixer and amp level knobs, (0..127 + 1) / 128; 0 = not recorded */\n")
+    out.append("    /* 0 = not recorded in each: EG reset 0.5 off / 1 on (unrecorded = on); bend range (semitones + 13) / 25\n")
+    out.append("     * (unrecorded = 2); vibrato int (-63..63 + 64) / 127 (unrecorded = 0) */\n")
+    out.append("    float eg1_reset, eg2_reset, bend_range, vibrato_int;\n")
     out.append("};\n\n")
     out.append("/* Arpeggiator, normalized as ARP_FIELDS in tools/extracts_presets.py */\n")
     out.append("struct ArpParams {\n")
