@@ -1,9 +1,9 @@
 # TinyK User Guide
 
-TinyK is a microKORG-style virtual analog synth for the Ableton Move (Schwung). It has **8 voices** and two modes:
+TinyK is a microKORG-style virtual analog synth for the Ableton Move (Schwung). It has **4 voices** and two modes:
 
-- **Single**: one layer plays all 8 voices.
-- **Layer**: two layers, **L1** and **L2**, play 4 voices each. Per-layer controls edit whichever layer **LAYER** (Perf, encoder 8) points at.
+- **Single**: one layer plays all 4 voices.
+- **Layer**: two layers, **L1** and **L2**, play 2 voices each. Per-layer controls edit whichever layer **LAYER** (Perf, encoder 8) points at.
 
 **Voice** always means polyphony (Mono, Poly, Unison). A **layer** is one of the two sounds in Layer mode.
 
@@ -53,9 +53,9 @@ Everything about the program as a whole: pick a sound, switch the arpeggiator an
 | 1 | CAT | Category | 7 choices: Trance, Techno, Electr, DnB, Hiphop, Retro, SE/Hit. Each is one row of the program matrix (up to 16 programs). Vocoder programs are not offered, so a category may hold fewer than 16, and a bank without vocoders in the last row gets an eighth category, `Other`. | Changing it keeps the Program position, so A1 in Trance becomes A1 in Techno. |
 | 2 | PROG | Program | The category's programs, A1-A8 then B1-B8, each with its own matrix code (a skipped vocoder leaves a gap in the codes). Touching or turning shows the full patch code and name, e.g. `B.12 ARPEJMATR`. | Category and Program together address every program of the bank; the jog wheel steps through them in order. |
 | 3 | ARP | Arpeggiator on / off | Off / On. Each program stores its own arpeggio; this overrides it until you pick another program. | Shape the pattern on the Arp Settings and Arp Steps pages. |
-| 4 | MODE | Single / Layer | Single: one layer plays all 8 voices. Layer: two layers (L1, L2) play 4 voices each, blended by Layer Bal on this page. | Switching mode cuts any sounding notes (a short fade, no click). Programs set their own mode when loaded. |
+| 4 | MODE | Single / Layer | Single: one layer plays all 4 voices. Layer: two layers (L1, L2) play 2 voices each, blended by Layer Bal on this page. | Switching mode cuts any sounding notes (a short fade, no click). Programs set their own mode when loaded. |
 | 5 | LAYER | Which layer the per-layer knobs edit | Layer mode: `L1` or `L2`. Single mode: reads `N/A` (there is only one layer). | The choice is remembered while you flip between Single and Layer. |
-| 6 | VOICE | Voice assign (polyphony) | Mono (one note at a time), Poly (each key its own voice), Unison (four voices stacked on one note, detuned). Per layer. | The unison detune amount comes from the program. "Voice" always means polyphony, never layers. |
+| 6 | VOICE | Voice assign (polyphony) | Mono (one note at a time), Poly (each key its own voice), Unison (all of the layer's voices stacked on one note, detuned). Per layer. | The unison detune amount comes from the program. "Voice" always means polyphony, never layers. |
 | 7 | PORTA | Portamento | 0-100 %: glide time between notes. | Most useful with Voice set to Mono. |
 | 8 | BAL | Layer balance | Shown as L1:L2, from 100:0 to 0:100. | Only matters in Layer mode. |
 

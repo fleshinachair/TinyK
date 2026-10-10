@@ -6,7 +6,7 @@
       "lines": [
         "microKORG-style",
         "virtual analog synth.",
-        "8 voices, or two",
+        "4 voices, or two",
         "layers (L1 / L2).",
         "",
         "112 built-in programs",
@@ -164,7 +164,7 @@
         "Mode (Perf) picks",
         "Single (one layer, 4",
         "voices) or Layer (two",
-        "layers, 4 voices each).",
+        "layers, 2 voices each).",
         "Layer (Perf) picks the",
         "layer the per-layer",
         "knobs edit: L1 or L2",

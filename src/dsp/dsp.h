@@ -13,8 +13,12 @@ extern "C" {
 #define MOVE_PLUGIN_API_VERSION_2 2
 #define MOVE_SAMPLE_RATE          44100
 #define MOVE_FRAMES_PER_BLOCK     128
+/* Voices per instance. 4, as on the hardware (2 per timbre in Layer mode): the Move can run TinyK in all four track
+ * slots at once, and the engine has to fit four times. A build for one's own use can raise it
+ * (TINYK_CFLAGS=-DNUM_VOICES=8 ./scripts/build.sh: Single mode then plays 8 notes, Layer mode 4 per timbre, about
+ * half as much engine time again with every voice sounding); KORG's plug-in plays far more. */
 #ifndef NUM_VOICES
-#define NUM_VOICES                8   /* the hardware has 4 (2 per timbre in Layer mode); KORG's plug-in plays far more */
+#define NUM_VOICES                4
 #endif
 #define UNISON_STACK              4   /* voices a Unison note stacks (measured on the plug-in, in both modes) */
 #define NUM_PARAMS                35
