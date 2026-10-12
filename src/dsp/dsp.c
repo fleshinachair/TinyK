@@ -4316,11 +4316,12 @@ static void json_put_enum(json_out_t *o, const char *key, const char *name, cons
 /* Program: options are the current category's patch names ("B.12 ARPEJMATR"), which the host shows when
  * the knob is touched or turned; short_options are the codes its 3-character enum square has room for. */
 /* The Category names on offer (synth->play_ncat of them): the matrix row each stands for; row 8 holds ordinary
- * programs in a bank that does not keep vocoders there: "Other" */
+ * programs in a bank that does not keep vocoders there: "Other". In the built-in bank it holds the one Init
+ * program (A.81, tools/make_default_bank.py), so it is "Init" there. */
 static void category_names(const synth_engine_t *synth, const char *names[8]) {
     for (int c = 0; c < 8; c++) {
         int row = c < synth->play_ncat ? synth->cat_row[c] : 7;
-        names[c] = (row == 7) ? "Other" : CATEGORY_NAMES[row];
+        names[c] = (row == 7) ? (synth->bank_file == 0 ? "Init" : "Other") : CATEGORY_NAMES[row];
     }
 }
 

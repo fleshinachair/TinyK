@@ -32,6 +32,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import calibrate_dsp as cal  # noqa: E402
 from extracts_presets import ARP_FIELDS, FX_FIELDS, TIMBRE_FIELDS, load_programs, parse_program, unpack_7to8  # noqa: E402
+from make_default_bank import INIT_SLOT  # noqa: E402
 
 FACTORY = os.path.join(os.path.dirname(HERE), "banks", "TinyK_Default.syx")  # the source of presets.h (tools/make_default_bank.py)
 USER_BANKS = os.path.join(cal.ROOT, "banks")
@@ -129,9 +130,11 @@ def vocoder_banks():
         lib.tinyk_v2_get.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
         module_dir = os.path.join(tmp, "module")
         os.makedirs(os.path.join(module_dir, "banks"))
-        dump = open(FACTORY, "rb").read()
+        # TinyK_Default.syx holds the Init program in A.81 (a synth program in the vocoder row); the derived .syx
+        # banks below test the loader's vocoder filtering, so they start from the dump with A.81 flagged vocoder again
+        dump = with_modes(open(FACTORY, "rb").read(), {INIT_SLOT: 3})
         progs = load_programs(FACTORY)
-        voc = [i for i, p in enumerate(progs) if ((p[16] >> 4) & 3) == 3]
+        voc = sorted([i for i, p in enumerate(progs) if ((p[16] >> 4) & 3) == 3] + [INIT_SLOT])
         row8 = [r for r in range(128) if r % 64 >= 56]
         extra = 3  # A.14, a synth program, flagged as vocoder as well: no longer the factory layout
         banks = {
@@ -160,32 +163,39 @@ def vocoder_banks():
         check(lib.tinyk_v2_create(module_dir.encode()) == 1, "instance created")
         check(voc == row8 and len(voc) == 16, f"TinyK_Default.syx flags exactly the 16 row-8 programs as vocoder: {voc}")
 
-        # Built-in bank (presets.h): 112 programs, seven categories, the matrix without its vocoder row
+        # Built-in bank (presets.h): 113 programs, eight categories: the matrix without its vocoder row, plus the
+        # Init category (A.81 Init, the only playable program of row 8)
         m = meta()
-        names = [get(f"preset_name:{i}") for i in range(112)]
-        check(get("preset_count") == "112" and get("preset_name:112") is None and get("category_count") == "7",
-              f"Built-in: preset_count {get('preset_count')}, category_count {get('category_count')}, preset_name:112 -> {get('preset_name:112')}")
-        check(m["category"]["options"] == ["Trance", "Techno/House", "Electronica", "DnB/Breaks", "Hiphop/Vintage", "Retro", "SE/Hit"],
-              f"Category options without the Vocoder row: {m['category']['options']}")
-        check(names[0].startswith("A.11") and names[55].startswith("A.78") and names[56].startswith("B.11")
-              and names[111].startswith("B.78") and not any(n.startswith(("A.8", "B.8")) for n in names),
-              f"labels run A.11-A.78 then B.11-B.78: {names[0]!r} {names[55]!r} {names[56]!r} {names[111]!r}")
+        names = [get(f"preset_name:{i}") for i in range(113)]
+        check(get("preset_count") == "113" and get("preset_name:113") is None and get("category_count") == "8",
+              f"Built-in: preset_count {get('preset_count')}, category_count {get('category_count')}, preset_name:113 -> {get('preset_name:113')}")
+        check(m["category"]["options"] == ["Trance", "Techno/House", "Electronica", "DnB/Breaks", "Hiphop/Vintage", "Retro", "SE/Hit", "Init"],
+              f"Category options: {m['category']['options']}")
+        check(names[0].startswith("A.11") and names[55].startswith("A.78") and names[56] == "A.81 Init" and names[57].startswith("B.11")
+              and names[112].startswith("B.78") and not any(n.startswith(("A.8", "B.8")) for n in names if n != "A.81 Init"),
+              f"labels run A.11-A.78, A.81 Init, B.11-B.78: {names[0]!r} {names[55]!r} {names[56]!r} {names[57]!r} {names[112]!r}")
         seen, bad = set(), []
-        for i in range(112):
+        for i in range(113):
             put("preset", i)
             row = get("preset_name")
             seen.add(row)
-            if get("preset") != str(i) or get("preset_name") != names[i] or int(get("category")) > 6:
+            if get("preset") != str(i) or get("preset_name") != names[i] or int(get("category")) != (7 if i == 56 else int(get("category"))):
                 bad.append(i)
-        check(not bad and len(seen) == 112, f"every one of the 112 ordinals loads its own program ({len(bad)} wrong)")
+        check(not bad and len(seen) == 113, f"every one of the 113 ordinals loads its own program ({len(bad)} wrong)")
+        put("preset", 56)
+        check(get("category") == "7" and get("patch") == "0" and get("patch_count") == "1" and get("preset_name") == "A.81 Init",
+              f"Init: Category {get('category')}, Program {get('patch')} of {get('patch_count')}, {get('preset_name')!r}")
         put("preset", 500)
-        check(get("preset") == "111", f"jog past the end clamps to the last program: {get('preset')}")
-        put("category", 7)
+        check(get("preset") == "112", f"jog past the end clamps to the last program: {get('preset')}")
+        put("category", 6)
         put("patch", 15)
-        check(get("category") == "6" and get("preset_name").startswith("B.78"), f"Category 8 / B8 clamps to {get('preset_name')!r}")
+        check(get("category") == "6" and get("preset_name").startswith("B.78"), f"Category 7 / B8 clamps to {get('preset_name')!r}")
         put("program", "88")
         check(get("category") == "6" and get("patch") == "15", f"program 88 -> {get('preset_name')!r}")
-        put("preset", 111)
+        put("category", 7)
+        put("patch", 15)
+        check(get("category") == "7" and get("preset_name") == "A.81 Init", f"Category Init / B8 clamps to {get('preset_name')!r}")
+        put("preset", 112)
         put("bank_file", "A_default")
         check(get("bank_file_name") == "A_default" and get("preset_count") == "112" and get("preset") == "111",
               f"a factory-layout .syx bank: 112 programs, ordinal kept ({get('preset_count')}, {get('preset')})")
@@ -303,10 +313,10 @@ def host_api():
               f"Bank options are the file names (with JSON escaping): {meta.get('bank_file', {}).get('options')}")
         codes = [f"{s}{c}" for s in "AB" for c in range(1, 9)]
         prog = meta.get("patch", {})
-        check(meta.get("category", {}).get("options", [None])[0] == "Trance" and len(meta["category"]["options"]) == 7
+        check(meta.get("category", {}).get("options", [None])[0] == "Trance" and len(meta["category"]["options"]) == 8 and meta["category"]["options"][7] == "Init"
               and len(prog.get("options", [])) == 16 and prog.get("short_options") == codes,
-              "Category has 7 named options (the vocoder row is not offered), Program 16 (short_options A1..B8)")
-        check(prog.get("options") == [get(f"preset_name:{(i // 8) * 56 + i % 8}") for i in range(16)],
+              "Category has 8 named options (the vocoder row is not offered; Init is the 8th), Program 16 (short_options A1..B8)")
+        check(prog.get("options") == [get(f"preset_name:{(i // 8) * 57 + i % 8}") for i in range(16)],
               f"Program options are the category's patch names: {prog.get('options', [])[:2]} ... {prog.get('options', [])[-1:]}")
         items = json.loads(get("bank_list") or "[]")
         check([i["label"] for i in items] == ["Built-in", "MicroKorgFactory", "Odd 'Name' & Co"] and [i["index"] for i in items] == [0, 1, 2],
@@ -534,9 +544,9 @@ def host_api():
         vm_before = get("voice_mode")
         put("patch", "11")            # by index: B4
         relabel = get("is_loading")   # only the timbre labels can change (a program in the other voice mode)
-        check(get("preset") == str(56 + 5 * 8 + 3) and get("category") == "5" and get("patch") == "11"
+        check(get("preset") == str(57 + 5 * 8 + 3) and get("category") == "5" and get("patch") == "11"
               and relabel == ("0" if get("voice_mode") == vm_before else "1"),
-              f"Category Retro + Program B4 -> preset {get('preset')} (expected {56 + 5 * 8 + 3}, ordinal of slot 107); "
+              f"Category Retro + Program B4 -> preset {get('preset')} (expected {57 + 5 * 8 + 3}, ordinal of slot 107); "
               f"is_loading {relabel} (voice mode {vm_before} -> {get('voice_mode')})")
         check(get("preset_name") == "B.64 Name 107", f"name from the selected bank: {get('preset_name')!r}")
         put("patch", "A.62 Name 041")
@@ -546,8 +556,8 @@ def host_api():
         put("preset", "1")
         check(get("preset") == "1", f"preset browser index '1' -> preset {get('preset')} (was 127 before the fix)")
         put("preset", "127")
-        check(get("preset") == "111" and get("category") == "6" and get("patch") == "15",
-              "preset 127 clamps to the last of the 112 programs: Category SE/Hit, Program B8")
+        check(get("preset") == "112" and get("category") == "6" and get("patch") == "15",
+              "preset 127 clamps to the last of the 113 programs: Category SE/Hit, Program B8")
         put("bank_file", "MicroKorgFactory")
         check(get("bank_file") == "1" and get("bank_file_name") == "MicroKorgFactory", "bank by name")
 
