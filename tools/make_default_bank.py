@@ -9,7 +9,9 @@ B.11..B.88) and a small, repeatable jitter: one to three continuous values per a
 1 or 2 steps (filter cutoff, EG attack / decay / release, Osc 2 fine tune). Selectors (waves, filter
 type, sync / ring, voice mode, routings) are never touched, nor are values whose character depends on
 being exact: an EG time of 0 (instant) or at the top of its range, and Osc 2 tune at 0 (unison).
-Vocoder programs use another data layout and are only renamed.
+Vocoder programs use another data layout and are only renamed, except A.81, which TinyK replaces with
+"Init" (INIT_SLOT, init_program): a clean, neutral single-layer patch, the whole of the "Init" category (matrix
+row 8, which holds nothing else playable because TinyK has no vocoder).
 
 The output is an ALL PROGRAM DATA dump in the input's framing; feed it to tools/extracts_presets.py
 to regenerate the built-in bank (presets.h / presets.json).
@@ -26,6 +28,7 @@ from extracts_presets import unpack_7to8  # noqa: E402
 PROGRAM_SIZE, NAME_LEN = 254, 12
 TIMBRE_OFFSETS = (38, 146)
 SEED = 2026
+INIT_SLOT = 56  # A.81: first of matrix row 8, the vocoder row TinyK does not offer
 
 # Original names, bank order: side A rows 1-8 then side B rows 1-8, 8 per row (12 characters max)
 NAMES = [
@@ -43,8 +46,8 @@ NAMES = [
     "VoltArp", "Shoreline", "NeonBass", "RewindSync", "BrightPoly", "ClassicPoly", "WarmFourths", "OctaveSilk",
     # A.71-A.78 SE/Hit
     "SwarmFX", "DataStorm", "Glitchy", "ArcadeZap", "MetalChord", "MinorSweep", "StaticHit", "Minor7Stack",
-    # A.81-A.88 Vocoder
-    "BaritoneAh", "BaritoneEe", "FifthChoir", "RobotEnsmbl", "RobotChorus", "RobotFifth", "RobotBass", "VoiceMorph",
+    # A.81-A.88 Vocoder (A.81 is the Init program)
+    "Init", "BaritoneEe", "FifthChoir", "RobotEnsmbl", "RobotChorus", "RobotFifth", "RobotBass", "VoiceMorph",
     # B.11-B.18 Trance
     "CrystalPluck", "RingAcid", "MetalShimmer", "PhaseRider", "PizzStab", "Elation", "StrobePad", "RiverPad",
     # B.21-B.28 Techno/House
@@ -71,6 +74,33 @@ JITTER_FIELDS = {
     34: ("amp EG attack", 3, 124), 35: ("amp EG decay", 3, 124), 37: ("amp EG release", 3, 124),
     14: ("osc2 tune", 2, 126),
 }
+
+
+def init_program():
+    """The Init program (254 bytes, name left blank): the engine's neutral state. Single mode, Poly, one Saw at
+    full level through an open-ish LPF24 with no resonance and no modulation, flat envelopes, no distortion, no
+    Mod FX / delay / EQ, arpeggiator off. Timbre 2 repeats timbre 1 so a switch to Layer starts clean too."""
+    prog = bytearray(PROGRAM_SIZE)
+    prog[12:38] = bytes([0, 0, 7, 0,        # 12-15: -, -, arp trigger length - 1, trigger pattern
+                         0, 0, 60, 0,       # 16 voice mode Single (bits 4-5), 17, 18, 19 delay tempo sync off
+                         64, 0, 0,          # 20 delay time, 21 delay depth (0 = off), 22 delay type Stereo
+                         64, 0, 0,          # 23 Mod FX speed, 24 depth (0 = off), 25 type Chorus/Flanger
+                         20, 64, 15, 64,    # 26-29 EQ: Hi freq / gain, Low freq / gain (gain 64 = flat)
+                         0, 120, 0, 0,      # 30-31 arp tempo (ignored), 32 arp off, 33 type Up / range 1 oct
+                         100, 1, 0, 0])     # 34 gate, 35 resolution, 36 swing, 37 keyboard octave 0
+    timbre = bytearray(108)
+    timbre[0:7] = bytes([255, 0x70, 0, 64, 66, 64, 64])  # +1: Poly, EG1 / EG2 reset on; tune, bend +-2, transpose, vibrato 0
+    timbre[13:19] = bytes([64, 64, 0, 127, 0, 0])        # Osc 2 semitone / tune, portamento, levels Osc 1 / Osc 2 / Noise
+    timbre[19:30] = bytes([0, 89, 0, 64, 64, 64, 127, 64, 0, 64, 50])  # LPF24, cutoff 89, res 0, EG int 0, -, key track 0, level, pan C, dist off
+    timbre[30:38] = bytes([0, 64, 127, 0, 0, 64, 127, 10])  # EG1 (filter) A D S R, EG2 (amp) A D S R
+    timbre[38:44] = bytes([0, 64, 0, 0, 64, 0])          # LFO1 / LFO2: Saw, rate 64, free
+    for n in range(4):
+        timbre[44 + 2 * n:46 + 2 * n] = bytes([0, 64])   # patches: intensity 64 = no modulation
+    for lo, hi, v in ((56, 72, 64), (74, 90, 64), (92, 108, 64)):
+        timbre[lo:hi] = bytes([v] * (hi - lo))           # unused arrays, as in the factory programs
+    prog[38:146] = timbre
+    prog[146:254] = timbre
+    return prog
 
 
 def pack_7to8(raw):
@@ -125,6 +155,10 @@ def main():
     for idx in range(128):
         prog = memoryview(raw)[idx * PROGRAM_SIZE:(idx + 1) * PROGRAM_SIZE]
         prog[0:NAME_LEN] = NAMES[idx].ljust(NAME_LEN).encode("ascii")
+        if idx == INIT_SLOT:
+            prog[:] = init_program()
+            prog[0:NAME_LEN] = NAMES[idx].ljust(NAME_LEN).encode("ascii")
+            continue
         jitter_program(prog, idx, rng, log)
 
     out = header + pack_7to8(bytes(raw))[:len(packed)] + trailer
