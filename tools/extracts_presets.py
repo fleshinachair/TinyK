@@ -314,7 +314,7 @@ def parse_program(idx, prog):
         t1, t2 = dict(VOCODER_CARRIER), dict(VOCODER_CARRIER)
 
     return {
-        "label": f"{code} {name}",
+        "label": name,  # plain: the engine adds the A.11 .. B.88 position (format_preset_name)
         "name_from_syx": bool(raw_name),
         "mode": mode,
         "data_valid": data_valid,
@@ -335,7 +335,7 @@ def c_float(v):
 
 def render_header(presets):
     out = []
-    out.append("/* Auto-generated microKORG Factory Presets Header (tools/extracts_presets.py) */\n")
+    out.append("/* TinyK Default Bank */\n")
     out.append("#ifndef PRESETS_H\n#define PRESETS_H\n\n")
     out.append("/* All floats are normalized to [0.0, 1.0]. */\n")
     out.append("struct TimbreParams {\n")
