@@ -4,14 +4,15 @@ Build TinyK's default bank, banks/TinyK_Default.syx, from a microKORG factory ba
 
     python tools/make_default_bank.py [banks/MicroKorgFactory.syx] [banks/TinyK_Default.syx]
 
-Every program keeps its sound design but gets an original name (NAMES, in bank order A.11..A.88,
-B.11..B.88) and a small, repeatable jitter: one to three continuous values per active timbre move by
-1 or 2 steps (filter cutoff, EG attack / decay / release, Osc 2 fine tune). Selectors (waves, filter
-type, sync / ring, voice mode, routings) are never touched, nor are values whose character depends on
-being exact: an EG time of 0 (instant) or at the top of its range, and Osc 2 tune at 0 (unison).
-Vocoder programs use another data layout and are only renamed, except A.81, which TinyK replaces with
-"Init" (INIT_SLOT, init_program): a clean, neutral single-layer patch, the whole of the "Init" category (matrix
-row 8, which holds nothing else playable because TinyK has no vocoder).
+Every program keeps its sound design's structure (waves, routings, selectors, voice mode, arpeggiator) but gets
+a generic name (NAMES, in bank order A.11..A.88, B.11..B.88) and a seeded musical variation pass (vary_program):
+filter cutoff, resonance, filter EG depth, EG attack / decay / release, LFO rates, Osc 2 tune and the delay /
+Mod FX settings move by several steps each, so no program is the dump's values. Values whose character depends
+on being exact are never touched: an EG time of 0 (instant) or at the top of its range, a filter that is fully
+open or closed, Osc 2 tune at 0 (unison), sustain levels, tempo-synced times.
+Vocoder programs (TinyK has no vocoder, it never offers them) are replaced by a flagged copy of the Init
+program, so no vocoder data is carried; A.81 is the Init program itself (INIT_SLOT, init_program): a clean,
+neutral single-layer patch, the whole of the "Init" category (matrix row 8).
 
 The output is an ALL PROGRAM DATA dump in the input's framing; feed it to tools/extracts_presets.py
 to regenerate the built-in bank (presets.h / presets.json).
@@ -27,53 +28,64 @@ from extracts_presets import unpack_7to8  # noqa: E402
 
 PROGRAM_SIZE, NAME_LEN = 254, 12
 TIMBRE_OFFSETS = (38, 146)
-SEED = 2026
+SEED = 2030
 INIT_SLOT = 56  # A.81: first of matrix row 8, the vocoder row TinyK does not offer
 
 # Original names, bank order: side A rows 1-8 then side B rows 1-8, 8 per row (12 characters max)
 NAMES = [
     # A.11-A.18 Trance
-    "StarlitArp", "AcidRazor", "WideSawLead", "TwinFilterLd", "TearDrop", "GlidePad", "SunrisePad", "SilkStrings",
+    "Spark Arp", "Acid Lead", "Wide Saw", "Dual Filter", "Soft Lead", "Glide Pad", "Warm Pad", "Soft Strings",
     # A.21-A.28 Techno/House
-    "ClubPulse", "RaveFire", "CrossPerc", "DeepGroove", "GritBass", "SquareAcid", "SyncDrive", "HardLine",
+    "Club Pulse", "Rave Stab", "Cross Perc", "Deep Groove", "Gritty Bass", "Square Acid", "Sync Drive", "Hard Line",
     # A.31-A.38 Electronica
-    "PulseGrid", "Bleepscape", "ChopSync", "Wingbeat", "BackwardLd", "GlitchCloud", "FifthFlange", "VowelDrone",
+    "Pulse Grid", "Bleep Scape", "Chop Sync", "Wing Beat", "Reverse Lead", "Glitch Cloud", "Fifth Flange", "Vowel Drone",
     # A.41-A.48 DnB/Breaks
-    "GarageWobble", "SteelBass", "TubeThump", "OverdriveSub", "EdgeBass", "SyncSweeper", "LabLead", "ChopChord",
+    "Wobble Bass", "Steel Bass", "Tube Thump", "Drive Sub", "Edge Bass", "Sync Sweep", "Lab Lead", "Chop Chord",
     # A.51-A.58 Hiphop/Vintage
-    "DustyBass", "FatMono 1", "SilkLead", "PulseStrings", "ReedKeys", "SoulOrgan", "ClavFunk", "TapeVoices",
+    "Dusty Bass", "Fat Mono 1", "Silk Lead", "Pulse Strgs", "Reed Keys", "Soul Organ", "Funk Clav", "Tape Voices",
     # A.61-A.68 Retro
-    "VoltArp", "Shoreline", "NeonBass", "RewindSync", "BrightPoly", "ClassicPoly", "WarmFourths", "OctaveSilk",
+    "Volt Arp", "Shoreline", "Neon Bass", "Rewind Sync", "Bright Poly", "Classic Poly", "Warm Fourths", "Octave Silk",
     # A.71-A.78 SE/Hit
-    "SwarmFX", "DataStorm", "Glitchy", "ArcadeZap", "MetalChord", "MinorSweep", "StaticHit", "Minor7Stack",
-    # A.81-A.88 Vocoder (A.81 is the Init program)
-    "Init", "BaritoneEe", "FifthChoir", "RobotEnsmbl", "RobotChorus", "RobotFifth", "RobotBass", "VoiceMorph",
+    "Swarm FX", "Data Storm", "Glitchy", "Arcade Zap", "Metal Chord", "Minor Sweep", "Static Hit", "Minor7 Stack",
+    # A.81-A.88: A.81 is the Init program, the rest are unused (the vocoder row, never offered)
+    "Init", "Unused 1", "Unused 2", "Unused 3", "Unused 4", "Unused 5", "Unused 6", "Unused 7",
     # B.11-B.18 Trance
-    "CrystalPluck", "RingAcid", "MetalShimmer", "PhaseRider", "PizzStab", "Elation", "StrobePad", "RiverPad",
+    "Glass Pluck", "Ring Acid", "Metal Shine", "Phase Lead", "Pizz Stab", "Uplift", "Pulse Pad", "Flow Pad",
     # B.21-B.28 Techno/House
-    "RandomBeacon", "GrimeMotion", "MetalTick", "BasementOrg", "WideSquare", "DriftBass", "PunchBass", "VoltStab",
+    "Random Beep", "Grime Motion", "Metal Tick", "Basement Org", "Wide Square", "Drift Bass", "Punch Bass", "Volt Stab",
     # B.31-B.38 Electronica
-    "StaticBurst", "NeoPerc", "PulsingPad", "BreathOrgan", "SlowBend", "NarrowFourth", "HorizonPad", "DuskPad",
+    "Static Burst", "Neo Perc", "Pulsing Pad", "Breath Organ", "Slow Bend", "Narrow 4th", "Horizon Pad", "Dusk Pad",
     # B.41-B.48 DnB/Breaks
-    "CrossBass", "HollowBass", "SuckBass", "IronSync", "RisingBass", "DropZone", "WheelLead", "DirtStorm",
+    "Cross Bass", "Hollow Bass", "Suck Bass", "Iron Sync", "Rising Bass", "Drop Zone", "Wheel Lead", "Dirt Storm",
     # B.51-B.58 Hiphop/Vintage
-    "ShadowBass", "FatMono 2", "LowEnd", "DiscoLead", "DriveOrgan", "ClickOrgan", "SwirlClav", "StringBox",
+    "Shadow Bass", "Fat Mono 2", "Low End", "Disco Lead", "Drive Organ", "Click Organ", "Swirl Clav", "String Box",
     # B.61-B.68 Retro
-    "GlassBell", "StepPad", "SoftTriLead", "ChanceComp", "SawHit", "BoxComp", "WobbleComp", "VintageStr",
+    "Glass Bell", "Step Pad", "Soft Tri", "Chance Comp", "Saw Hit", "Box Comp", "Wobble Comp", "Vintage Str",
     # B.71-B.78 SE/Hit
-    "WarpZone", "Overlord", "StormCrack", "Siren", "ThinMin7", "MajorThird", "RaveHit", "ArtMaj7",
-    # B.81-B.88 Vocoder
-    "SopranoAh", "SmallVoice", "WowVoice", "RobotPulse", "RobotSquare", "RobotWah", "RobotVox", "RobotDigi",
+    "Warp Zone", "Overlord", "Storm Crack", "Siren", "Thin Minor 7", "Major Third", "Rave Hit", "Art Major 7",
+    # B.81-B.88: unused (the vocoder row)
+    "Unused 8", "Unused 9", "Unused 10", "Unused 11", "Unused 12", "Unused 13", "Unused 14", "Unused 15",
 ]
 
-# Continuous timbre values that may be nudged: timbre offset -> (name, lowest, highest value it may have
-# before jitter). Out-of-range values keep their exact meaning and are skipped.
-JITTER_FIELDS = {
-    20: ("cutoff", 2, 125),
-    30: ("filter EG attack", 3, 124), 31: ("filter EG decay", 3, 124), 33: ("filter EG release", 3, 124),
-    34: ("amp EG attack", 3, 124), 35: ("amp EG decay", 3, 124), 37: ("amp EG release", 3, 124),
-    14: ("osc2 tune", 2, 126),
+# Timbre values the variation pass may move: offset -> (name, lowest and highest value it may have before the
+# move, smallest and largest move in steps). Values outside the range keep their exact meaning and are skipped.
+VARY_FIELDS = {
+    20: ("cutoff", 6, 122, 4, 14),
+    21: ("resonance", 4, 100, 3, 9),
+    22: ("filter EG int", 0, 127, 3, 8),  # moves away from neutral (64) only, see vary_program
+    30: ("filter EG attack", 3, 124, 3, 9), 31: ("filter EG decay", 3, 124, 3, 9), 33: ("filter EG release", 3, 124, 3, 9),
+    34: ("amp EG attack", 3, 124, 3, 9), 35: ("amp EG decay", 3, 124, 3, 9), 37: ("amp EG release", 3, 124, 3, 9),
+    14: ("osc2 tune", 2, 126, 2, 5),
+    39: ("LFO1 rate", 4, 123, 3, 8), 42: ("LFO2 rate", 4, 123, 3, 8),
 }
+# Program-level effect values (offset, name, lowest, highest, smallest, largest move): only when their effect is on
+FX_VARY = ((20, "delay time", 6, 121, 4, 10), (23, "Mod FX speed", 6, 121, 4, 10))
+VARY_CHANCE = 0.65  # each eligible field moves with this probability
+MIN_MOVES = 3       # and every timbre moves at least this many
+
+
+def voice_mode_of(prog):
+    return (prog[16] >> 4) & 0x03
 
 
 def init_program():
@@ -122,18 +134,40 @@ def split_dump(data):
     return data[:start + 5], data[start + 5:end], data[end:]
 
 
-def jitter_program(prog, idx, rng, log):
+def vary_program(prog, idx, rng, log):
+    """The musical variation pass over one synth program (see the module docstring)."""
     voice_mode = (prog[16] >> 4) & 0x03
-    if voice_mode == 3:
-        return  # vocoder layout: renamed only
     for t in TIMBRE_OFFSETS[:2 if voice_mode == 2 else 1]:
-        fields = [off for off, (_, lo, hi) in JITTER_FIELDS.items()
-                  if lo <= prog[t + off] <= hi and not (off == 14 and prog[t + off] == 64)]
-        for off in rng.sample(fields, min(len(fields), rng.randint(1, 3))):
-            step = rng.choice((-2, -1, 1, 2))
+        fields = [off for off, (_, lo, hi, _, _) in VARY_FIELDS.items()
+                  if lo <= prog[t + off] <= hi and not (off == 14 and prog[t + off] == 64)
+                  and not (off == 22 and abs(prog[t + off] - 64) < 10)
+                  and not (off in (39, 42) and prog[t + off - 1 + 2] & 0x80)]  # tempo-synced LFO: rate unused
+        chosen = [off for off in fields if rng.random() < VARY_CHANCE]
+        if len(chosen) < MIN_MOVES:
+            chosen = rng.sample(fields, min(len(fields), MIN_MOVES))
+        for off in chosen:
+            name, lo, hi, small, large = VARY_FIELDS[off]
+            step = rng.randint(small, large) * rng.choice((-1, 1))
             old = prog[t + off]
-            prog[t + off] = max(0, min(127, old + step))
-            log.append((idx, t, JITTER_FIELDS[off][0], old, prog[t + off]))
+            new = old + step
+            if off == 22:  # the filter EG depth only eases toward neutral (a deeper sweep makes the peaks louder)
+                new = old - abs(step) if old > 64 else old + abs(step)
+            if off == 20:  # a nearly closed filter stays audible: low cutoffs only rise, none drops under 18
+                new = old + abs(step) if old < 30 else max(18, new)
+            prog[t + off] = max(0, min(127, new))
+            log.append((idx, t, name, old, prog[t + off]))
+    if prog[21] > 0 and not prog[19] & 0x80:  # delay on and free-running
+        _vary_fx(prog, idx, rng, log, FX_VARY[0])
+    if prog[24] > 0:  # Mod FX on
+        _vary_fx(prog, idx, rng, log, FX_VARY[1])
+
+
+def _vary_fx(prog, idx, rng, log, spec):
+    off, name, lo, hi, small, large = spec
+    if lo <= prog[off] <= hi:
+        old = prog[off]
+        prog[off] = max(0, min(127, old + rng.randint(small, large) * rng.choice((-1, 1))))
+        log.append((idx, 0, name, old, prog[off]))
 
 
 def main():
@@ -155,11 +189,14 @@ def main():
     for idx in range(128):
         prog = memoryview(raw)[idx * PROGRAM_SIZE:(idx + 1) * PROGRAM_SIZE]
         prog[0:NAME_LEN] = NAMES[idx].ljust(NAME_LEN).encode("ascii")
-        if idx == INIT_SLOT:
+        if idx == INIT_SLOT or voice_mode_of(prog) == 3:  # Init, and the vocoder slots TinyK never offers
             prog[:] = init_program()
+            if idx != INIT_SLOT:
+                prog[16] |= 0x30  # flagged vocoder: skipped by the program list, no vocoder data carried
             prog[0:NAME_LEN] = NAMES[idx].ljust(NAME_LEN).encode("ascii")
             continue
-        jitter_program(prog, idx, rng, log)
+        prog[0:NAME_LEN] = NAMES[idx].ljust(NAME_LEN).encode("ascii")
+        vary_program(prog, idx, rng, log)
 
     out = header + pack_7to8(bytes(raw))[:len(packed)] + trailer
     assert len(out) == len(data)
@@ -167,7 +204,7 @@ def main():
         f.write(out)
 
     code = lambda i: f"{'AB'[i // 64]}.{(i % 64) // 8 + 1}{i % 8 + 1}"
-    print(f"wrote {dst} ({len(out)} bytes): 128 programs renamed, {len(log)} values nudged by 1-2 steps")
+    print(f"wrote {dst} ({len(out)} bytes): 128 programs renamed, {len(log)} values varied")
     for idx, t, name, old, new in log[:12]:
         print(f"  {code(idx)} {NAMES[idx]:12} timbre {1 if t == 38 else 2} {name}: {old} -> {new}")
     if len(log) > 12:
